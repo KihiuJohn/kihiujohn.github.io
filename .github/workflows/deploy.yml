@@ -3,7 +3,8 @@ on:
   push:
     branches: [main]
 permissions:
-  contents: write  # Grant write access to repository contents
+  contents: write  # Needed for pushing artifacts
+  pages: write    # Needed for Pages deployment
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -13,10 +14,10 @@ jobs:
         with:
           node-version: '18'
       - run: npm ci
-      - run: npm run build
-      - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v3
+      - run: npm run build  # Generates static files in 'out/'
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out
-          publish_branch: gh-pages
+          path: ./out  # Path to your static files
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
