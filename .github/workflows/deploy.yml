@@ -1,26 +1,39 @@
 name: Deploy to GitHub Pages
+
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
+
 permissions:
-  contents: write    # For pushing artifacts
-  pages: write       # For deploying to Pages
-  id-token: write    # For OIDC authentication
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
-  build-and-deploy:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - run: npm ci
+      - run: npm run build
+
+      # Upload the built site (whatever folder you output)
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./out"
+
+  deploy:
+    # The important part: environment must be at the same level as runs-on
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages  # Required for actions/deploy-pages
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - run: npm ci
-      - run: npm run build
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./out
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
