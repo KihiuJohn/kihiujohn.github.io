@@ -11,7 +11,9 @@ const Contact = () => {
   });
   const [status, setStatus] = useState<string | null>(null);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
@@ -47,6 +49,7 @@ const Contact = () => {
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          {/* Contact Form */}
           <div className="bg-white dark:bg-gray-700 rounded-lg shadow-md p-6 md:p-8">
             <form className="space-y-6" onSubmit={handleSubmit}>
               <div>
@@ -125,6 +128,7 @@ const Contact = () => {
             </form>
           </div>
 
+          {/* Contact Information */}
           <div className="bg-white dark:bg-gray-700 rounded-lg shadow-md p-6 md:p-8">
             <h3 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">Contact Information</h3>
 
@@ -151,10 +155,39 @@ const Contact = () => {
                 </div>
                 <div className="ml-3">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">Social Profiles</p>
+                  <div className="flex space-x-3 mt-2">
+                    <a href="https://www.linkedin.com/in/john-kihiu-3481b8232/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" className="text-gray-600 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400">
+                      {/* LinkedIn SVG */}
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452z" />
+                      </svg>
+                    </a>
+                    <a href="https://www.instagram.com/_migett/" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="text-gray-600 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400">
+                      {/* Instagram SVG */}
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07..." />
+                      </svg>
+                    </a>
+                    <a href="https://wa.me/254799548461" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp 1" className="text-gray-600 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400">
+                      {/* WhatsApp SVG 1 */}
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867..." />
+                      </svg>
+                    </a>
+                    <a href="https://wa.me/254712345678" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp 2" className="text-gray-600 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400">
+                      {/* WhatsApp SVG 2 */}
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M2.25 6.75C2.25 15.0343 8.96573 21.75..." />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
               </div>
 
               <div className="border-t border-gray-200 dark:border-gray-600 pt-6 mt-6">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Alternatively, you can fill out the form and I'll get back to you as soon as possible.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Alternatively, you can fill out the form and I'll get back to you as soon as possible.
+                </p>
 
                 <div className="mt-4 bg-primary-50 dark:bg-primary-900/20 rounded-lg p-4">
                   <p className="text-sm text-primary-700 dark:text-primary-300 font-medium">
