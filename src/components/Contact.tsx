@@ -1,8 +1,40 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 
 const Contact = () => {
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    subject: '',
+    message: '',
+  });
+  const [status, setStatus] = useState<string | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatus(null);
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        setStatus('Message sent successfully.');
+        setForm({ name: '', email: '', subject: '', message: '' });
+      } else {
+        setStatus('Failed to send message.');
+      }
+    } catch (err) {
+      setStatus('Failed to send message.');
+    }
+  };
+
   return (
     <section id="contact" className="section-padding bg-gray-50 dark:bg-gray-800">
       <div className="container mx-auto px-4 md:px-6">
@@ -16,7 +48,7 @@ const Contact = () => {
 
         <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
           <div className="bg-white dark:bg-gray-700 rounded-lg shadow-md p-6 md:p-8">
-            <form className="space-y-6">
+            <form className="space-y-6" onSubmit={handleSubmit}>
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Your Name
@@ -25,6 +57,8 @@ const Contact = () => {
                   type="text"
                   id="name"
                   name="name"
+                  value={form.name}
+                  onChange={handleChange}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-600 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="John Doe"
                   required
@@ -39,6 +73,8 @@ const Contact = () => {
                   type="email"
                   id="email"
                   name="email"
+                  value={form.email}
+                  onChange={handleChange}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-600 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="john@example.com"
                   required
@@ -53,6 +89,8 @@ const Contact = () => {
                   type="text"
                   id="subject"
                   name="subject"
+                  value={form.subject}
+                  onChange={handleChange}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-600 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="Project Inquiry"
                   required
@@ -67,6 +105,8 @@ const Contact = () => {
                   id="message"
                   name="message"
                   rows={4}
+                  value={form.message}
+                  onChange={handleChange}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-600 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="Tell me about your project..."
                   required
@@ -79,6 +119,9 @@ const Contact = () => {
               >
                 Send Message
               </button>
+              {status && (
+                <p className="text-sm mt-2 text-center text-gray-600 dark:text-gray-300">{status}</p>
+              )}
             </form>
           </div>
 
