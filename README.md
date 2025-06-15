@@ -21,3 +21,5 @@ cp .env.example .env
 ```
 
 This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+
+The site features a simple technical blog section and a contact form that can email submissions. You can also reach me directly on WhatsApp via the link provided in the contact area.
