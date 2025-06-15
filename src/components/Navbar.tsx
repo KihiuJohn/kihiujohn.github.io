@@ -34,13 +34,19 @@ const Navbar = () => {
 
           {/* Desktop navigation */}
           <nav className="hidden md:flex items-center space-x-8">
-            {['About', 'Skills', 'Projects', 'Contact'].map((item) => (
+            {[
+              { label: 'About', href: '#about' },
+              { label: 'Skills', href: '#skills' },
+              { label: 'Projects', href: '#projects' },
+              { label: 'Contact', href: '#contact' },
+              { label: 'Blog', href: '/blog' },
+            ].map((item) => (
               <Link
-                key={item}
-                href={`#${item.toLowerCase()}`}
+                key={item.label}
+                href={item.href}
                 className="text-sm font-medium hover:text-primary-600 transition-colors"
               >
-                {item}
+                {item.label}
               </Link>
             ))}
           </nav>
@@ -72,14 +78,20 @@ const Navbar = () => {
         {isMenuOpen && (
           <div className="md:hidden mt-4 p-4 rounded-lg bg-white dark:bg-gray-800 shadow-lg animate-fade-in">
             <nav className="flex flex-col space-y-4">
-              {['About', 'Skills', 'Projects', 'Contact'].map((item) => (
+              {[
+                { label: 'About', href: '#about' },
+                { label: 'Skills', href: '#skills' },
+                { label: 'Projects', href: '#projects' },
+                { label: 'Contact', href: '#contact' },
+                { label: 'Blog', href: '/blog' },
+              ].map((item) => (
                 <Link
-                  key={item}
-                  href={`#${item.toLowerCase()}`}
+                  key={item.label}
+                  href={item.href}
                   className="text-sm font-medium hover:text-primary-600 transition-colors py-2"
                   onClick={() => setIsMenuOpen(false)}
                 >
-                  {item}
+                  {item.label}
                 </Link>
               ))}
             </nav>
