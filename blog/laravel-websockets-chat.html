@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Laravel WebSockets & Real-Time Chat | John Kihiu</title>
+    <meta name="title" content="Laravel WebSockets & Real-Time Chat | John Kihiu">
+    <meta name="description" content="Build real-time applications with Laravel WebSockets. Learn broadcasting, Pusher, WebSocket connections, and real-time chat implementation.">
+    <meta name="keywords" content="Laravel WebSockets, Real-Time, Laravel Broadcasting, Pusher, WebSocket Chat, Real-Time Laravel">
+    <meta name="robots" content="index, follow">
+    
+    <link rel="canonical" href="https://kihiujohn.github.io/Portfolio/blog/laravel-websockets-chat.html">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://kihiujohn.github.io/Portfolio/blog/laravel-websockets-chat.html">
+    <meta property="og:title" content="Laravel WebSockets & Real-Time Chat">
+    <meta property="og:description" content="Build real-time applications with Laravel WebSockets.">
+    
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://cdn.tailwindcss.com" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js" defer></script>
+    
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Laravel WebSockets & Real-Time Chat",
+        "description": "Build real-time applications with Laravel WebSockets.",
+        "author": {
+            "@type": "Person",
+            "name": "John Kihiu"
+        },
+        "datePublished": "2024-04-20",
+        "dateModified": "2024-04-20"
+    }
+    </script>
+    
+    <style>
+        .neobrutalist { border: 3px solid #000; box-shadow: 8px 8px 0 #000; }
+        .neobrutalist-btn { border: 3px solid #000; box-shadow: 4px 4px 0 #000; transition: all 0.2s; }
+        .neobrutalist-btn:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+        .mobile-menu { display: none; position: fixed; top: 80px; right: 20px; background: white; border: 3px solid black; box-shadow: 8px 8px 0 #000; z-index: 20; }
+        .mobile-menu.active { display: block; }
+        .glassmorphism { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 2px solid #000; }
+        .text-secondary { color: #4ade80; }
+        .bg-secondary { background-color: #4ade80; }
+        .hover\:bg-secondary:hover { background-color: #4ade80; }
+        .hover\:text-secondary:hover { color: #4ade80; }
+        .prose h2 { font-size: 1.5rem; font-weight: bold; margin-top: 2rem; margin-bottom: 1rem; }
+        .prose h3 { font-size: 1.25rem; font-weight: bold; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+        .prose p { margin-bottom: 1rem; line-height: 1.75; }
+        .prose ul, .prose ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+        .prose li { margin-bottom: 0.5rem; }
+        .prose pre { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 1.5rem 0; }
+        .prose code { background: #f3f4f6; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#FFFFFF', secondary: '#4ade80' },
+                    fontFamily: { sans: ['Courier New', 'monospace'] }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-white text-black font-sans">
+    <nav class="bg-white border-b-4 border-black fixed w-full z-10">
+        <div class="container mx-auto px-6 py-3">
+            <div class="flex items-center justify-between">
+                <a href="../index.html" class="text-2xl font-bold text-black hover:text-secondary transition">John<span class="text-secondary">Kihiu</span></a>
+                <div class="hidden md:flex space-x-8">
+                    <a href="../index.html#home" class="hover:text-secondary transition">Home</a>
+                    <a href="../index.html#about" class="hover:text-secondary transition">About</a>
+                    <a href="../index.html#skills" class="hover:text-secondary transition">Skills</a>
+                    <a href="../blogs.html" class="text-secondary">Blog</a>
+                    <a href="../index.html#contact" class="hover:text-secondary transition">Contact</a>
+                </div>
+                <button id="menuButton" class="md:hidden focus:outline-none"><i data-feather="menu"></i></button>
+                <div id="mobileMenu" class="mobile-menu p-4">
+                    <div class="flex flex-col space-y-4">
+                        <a href="../index.html#home" class="hover:text-secondary transition">Home</a>
+                        <a href="../index.html#about" class="hover:text-secondary transition">About</a>
+                        <a href="../index.html#skills" class="hover:text-secondary transition">Skills</a>
+                        <a href="../blogs.html" class="hover:text-secondary transition">Blog</a>
+                        <a href="../index.html#contact" class="hover:text-secondary transition">Contact</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 pt-24 pb-12 max-w-4xl">
+        <article class="glassmorphism p-8">
+            <header class="mb-8">
+                <span class="text-secondary font-bold text-sm">LARAVEL</span>
+                <h1 class="text-3xl font-bold mt-2 mb-4">Laravel WebSockets & Real-Time Chat</h1>
+                <div class="flex items-center text-gray-500 text-sm">
+                    <span>April 20, 2024</span>
+                    <span class="mx-2">•</span>
+                    <span>20 min read</span>
+                </div>
+            </header>
+            
+            <nav class="bg-gray-100 p-4 rounded-lg mb-8">
+                <h3 class="font-bold mb-2">Table of Contents</h3>
+                <ul class="text-sm space-y-1">
+                    <li><a href="#introduction" class="hover:text-secondary">Introduction</a></li>
+                    <li><a href="#broadcasting" class="hover:text-secondary">Broadcasting Setup</a></li>
+                    <li><a href="#events" class="hover:text-secondary">Broadcasting Events</a></li>
+                    <li><a href="#channels" class="hover:text-secondary">Channels</a></li>
+                    <li><a href="#chat" class="hover:text-secondary">Real-Time Chat</a></li>
+                    <li><a href="#pusher" class="hover:text-secondary">Pusher Integration</a></li>
+                    <li><a href="#summary" class="hover:text-secondary">Summary</a></li>
+                </ul>
+            </nav>
+            
+            <div class="prose">
+                <section id="introduction">
+                    <h2>Introduction</h2>
+                    <p>Laravel broadcasting enables real-time features using WebSockets. This guide covers implementing real-time applications, chat systems, and live updates in Laravel.</p>
+                </section>
+
+                <section id="broadcasting">
+                    <h2>Broadcasting Setup</h2>
+                    
+                    <h3>Installation</h3>
+                    <pre><code>composer require pusher/pusher-php-server
+
+# Configure .env
+PUSHER_APP_ID=your-app-id
+PUSHER_APP_KEY=your-app-key
+PUSHER_APP_SECRET=your-app-secret
+PUSHER_APP_CLUSTER=us2
+
+BROADCAST_DRIVER=pusher</code></pre>
+                    
+                    <h3>Configuration</h3>
+                    <pre><code>// config/broadcasting.php
+return [
+    'default' => env('BROADCAST_DRIVER', 'pusher'),
+    
+    'connections' => [
+        'pusher' => [
+            'driver' => 'pusher',
+            'key' => env('PUSHER_APP_KEY'),
+            'secret' => env('PUSHER_APP_SECRET'),
+            'app_id' => env('PUSHER_APP_ID'),
+            'options' => [
+                'cluster' => env('PUSHER_APP_CLUSTER'),
+                'useTLS' => true,
+            ],
+        ],
+    ],
+];</code></pre>
+                </section>
+
+                <section id="events">
+                    <h2>Broadcasting Events</h2>
+                    
+                    <h3>Create Event</h3>
+                    <pre><code>php artisan make:event OrderStatusUpdated
+
+// app/Events/OrderStatusUpdated.php
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+
+class OrderStatusUpdated implements ShouldBroadcast
+{
+    use InteractsWithSockets;
+
+    public $order;
+
+    public function __construct(Order $order)
+    {
+        $this->order = $order;
+    }
+
+    public function broadcastOn(): array
+    {
+        return [
+            new Channel('orders'),
+        ];
+    }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'order_id' => $this->order->id,
+            'status' => $this->order->status,
+        ];
+    }
+}</code></pre>
+                </section>
+
+                <section id="channels">
+                    <h2>Channels</h2>
+                    
+                    <h3>Public Channels</h3>
+                    <pre><code>// Public channel
+Route::get('/chat', function () {
+    return view('chat');
+});
+
+// Broadcast on public channel
+public function broadcastOn(): array
+{
+    return [new Channel('public-chat')];
+}</code></pre>
+                    
+                    <h3>Private Channels</h3>
+                    <pre><code>// Authorization
+Broadcast::channel('orders.{orderId}', function ($user, $orderId) {
+    return $user->id === $order->user_id;
+});
+
+// Private channel
+public function broadcastOn(): array
+{
+    return [new PrivateChannel('orders.'.$this->order->id)];
+}</code></pre>
+                    
+                    <h3>Presence Channels</h3>
+                    <pre><code>// Presence channel
+Broadcast::channel('chat.{roomId}', function ($user, $roomId) {
+    if ($user->canJoinRoom($roomId)) {
+        return ['id' => $user->id, 'name' => $user->name];
+    }
+});
+
+public function broadcastOn(): array
+{
+    return [new PresenceChannel('chat.'.$this->roomId)];
+}</code></pre>
+                </section>
+
+                <section id="chat">
+                    <h2>Real-Time Chat</h2>
+                    
+                    <h3>Frontend Setup</h3>
+                    <pre><code>// Install Echo
+npm install laravel-echo pusher-js
+
+// resources/js/bootstrap.js
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
+
+window.Pusher = Pusher;
+
+window.Echo = new Echo({
+    broadcaster: 'pusher',
+    key: 'your-pusher-key',
+    cluster: 'us2',
+    forceTLS: true
+});</code></pre>
+                    
+                    <h3>Listen for Events</h3>
+                    <pre><code>// Listen to public channel
+Echo.channel('public-chat')
+    .listen('MessageSent', (e) => {
+        console.log(e.message);
+    });
+
+// Listen to private channel
+Echo.private('orders.' + orderId)
+    .listen('OrderStatusUpdated', (e) => {
+        console.log('Order status:', e.status);
+    });
+
+// Presence channel
+Echo.join('chat.1')
+    .here((users) => {
+        console.log('Online users:', users);
+    })
+    .joining((user) => {
+        console.log(user.name + ' joined');
+    })
+    .leaving((user) => {
+        console.log(user.name + ' left');
+    });</code></pre>
+                </section>
+
+                <section id="pusher">
+                    <h2>Pusher Integration</h2>
+                    
+                    <h3>Trigger Events</h3>
+                    <pre><code>// Direct trigger
+$pusher = new Pusher\Pusher(
+    'key',
+    'secret',
+    'app-id'
+);
+
+$pusher->trigger('chat-room', 'message', [
+    'text' => 'Hello World'
+]);</code></pre>
+                    
+                    <h3>Client Events</h3>
+                    <pre><code>// Enable client events in Pusher dashboard
+// Then in JavaScript:
+Echo.channel('chat-room')
+    .whisper('typing', {
+        user: 'John'
+    });</code></pre>
+                </section>
+
+                <section id="summary">
+                    <h2>Summary</h2>
+                    <p>Laravel broadcasting provides powerful real-time capabilities. Using Pusher or other drivers, you can build interactive applications with real-time updates and chat functionality.</p>
+                    <p>For more Laravel tutorials, check out <a href="laravel-queues-jobs-processing.html" class="text-secondary hover:underline">Laravel Queues</a> and <a href="laravel-api-authentication.html" class="text-secondary hover:underline">Laravel API Authentication</a>.</p>
+                </section>
+            </div>
+            
+            <footer class="mt-12 pt-6 border-t-2 border-black">
+                <div class="flex items-center justify-between">
+                    <a href="../blogs.html" class="neobrutalist-btn bg-secondary hover:bg-green-500 text-black font-bold py-2 px-4">← Back to Blog</a>
+                    <div class="flex gap-2">
+                        <span class="px-3 py-1 bg-gray-200 text-sm">Laravel</span>
+                        <span class="px-3 py-1 bg-gray-200 text-sm">WebSockets</span>
+                        <span class="px-3 py-1 bg-gray-200 text-sm">Real-Time</span>
+                    </div>
+                </div>
+            </footer>
+        </article>
+    </div>
+
+    <footer class="bg-white border-t-4 border-black py-8 mt-12">
+        <div class="container mx-auto px-6 text-center">
+            <p>&copy; 2023 John Kihiu. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        feather.replace();
+        
+        const menuButton = document.getElementById('menuButton');
+        const mobileMenu = document.getElementById('mobileMenu');
+        menuButton.addEventListener('click', () => mobileMenu.classList.toggle('active'));
+        document.addEventListener('click', (e) => {
+            if (!menuButton.contains(e.target) && !mobileMenu.contains(e.target)) {
+                mobileMenu.classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>

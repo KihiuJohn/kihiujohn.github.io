@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Deploying Laravel to Azure | John Kihiu</title>
+    <meta name="title" content="Deploying Laravel to Azure | John Kihiu">
+    <meta name="description" content="Learn how to deploy Laravel applications to Microsoft Azure. Complete guide to Azure App Service, deployment configurations, and best practices.">
+    <meta name="keywords" content="Laravel Azure, Azure Deployment, Laravel App Service, PHP Azure, Cloud Deployment">
+    <meta name="robots" content="index, follow">
+    
+    <link rel="canonical" href="https://kihiujohn.github.io/Portfolio/blog/deploying-laravel-azure.html">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://kihiujohn.github.io/Portfolio/blog/deploying-laravel-azure.html">
+    <meta property="og:title" content="Deploying Laravel to Azure">
+    <meta property="og:description" content="Learn how to deploy Laravel applications to Microsoft Azure.">
+    
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://cdn.tailwindcss.com" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js" defer></script>
+    
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Deploying Laravel to Azure",
+        "description": "Learn how to deploy Laravel applications to Microsoft Azure.",
+        "author": {
+            "@type": "Person",
+            "name": "John Kihiu"
+        },
+        "datePublished": "2024-02-25",
+        "dateModified": "2024-02-25"
+    }
+    </script>
+    
+    <style>
+        .neobrutalist { border: 3px solid #000; box-shadow: 8px 8px 0 #000; }
+        .neobrutalist-btn { border: 3px solid #000; box-shadow: 4px 4px 0 #000; transition: all 0.2s; }
+        .neobrutalist-btn:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+        .mobile-menu { display: none; position: fixed; top: 80px; right: 20px; background: white; border: 3px solid black; box-shadow: 8px 8px 0 #000; z-index: 20; }
+        .mobile-menu.active { display: block; }
+        .glassmorphism { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 2px solid #000; }
+        .text-secondary { color: #4ade80; }
+        .bg-secondary { background-color: #4ade80; }
+        .hover\:bg-secondary:hover { background-color: #4ade80; }
+        .hover\:text-secondary:hover { color: #4ade80; }
+        .prose h2 { font-size: 1.5rem; font-weight: bold; margin-top: 2rem; margin-bottom: 1rem; }
+        .prose h3 { font-size: 1.25rem; font-weight: bold; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+        .prose p { margin-bottom: 1rem; line-height: 1.75; }
+        .prose ul, .prose ol { margin-left: 1.5rem; margin-bottom: 1rem; }
+        .prose li { margin-bottom: 0.5rem; }
+        .prose pre { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 1.5rem 0; }
+        .prose code { background: #f3f4f6; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#FFFFFF', secondary: '#4ade80' },
+                    fontFamily: { sans: ['Courier New', 'monospace'] }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-white text-black font-sans">
+    <nav class="bg-white border-b-4 border-black fixed w-full z-10">
+        <div class="container mx-auto px-6 py-3">
+            <div class="flex items-center justify-between">
+                <a href="../index.html" class="text-2xl font-bold text-black hover:text-secondary transition">John<span class="text-secondary">Kihiu</span></a>
+                <div class="hidden md:flex space-x-8">
+                    <a href="../index.html#home" class="hover:text-secondary transition">Home</a>
+                    <a href="../index.html#about" class="hover:text-secondary transition">About</a>
+                    <a href="../index.html#skills" class="hover:text-secondary transition">Skills</a>
+                    <a href="../blogs.html" class="text-secondary">Blog</a>
+                    <a href="../index.html#contact" class="hover:text-secondary transition">Contact</a>
+                </div>
+                <button id="menuButton" class="md:hidden focus:outline-none"><i data-feather="menu"></i></button>
+                <div id="mobileMenu" class="mobile-menu p-4">
+                    <div class="flex flex-col space-y-4">
+                        <a href="../index.html#home" class="hover:text-secondary transition">Home</a>
+                        <a href="../index.html#about" class="hover:text-secondary transition">About</a>
+                        <a href="../index.html#skills" class="hover:text-secondary transition">Skills</a>
+                        <a href="../blogs.html" class="hover:text-secondary transition">Blog</a>
+                        <a href="../index.html#contact" class="hover:text-secondary transition">Contact</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 pt-24 pb-12 max-w-4xl">
+        <article class="glassmorphism p-8">
+            <header class="mb-8">
+                <span class="text-secondary font-bold text-sm">LARAVEL</span>
+                <h1 class="text-3xl font-bold mt-2 mb-4">Deploying Laravel to Azure</h1>
+                <div class="flex items-center text-gray-500 text-sm">
+                    <span>February 25, 2024</span>
+                    <span class="mx-2">•</span>
+                    <span>13 min read</span>
+                </div>
+            </header>
+            
+            <nav class="bg-gray-100 p-4 rounded-lg mb-8">
+                <h3 class="font-bold mb-2">Table of Contents</h3>
+                <ul class="text-sm space-y-1">
+                    <li><a href="#introduction" class="hover:text-secondary">Introduction</a></li>
+                    <li><a href="#prerequisites" class="hover:text-secondary">Prerequisites</a></li>
+                    <li><a href="#azure-setup" class="hover:text-secondary">Azure Setup</a></li>
+                    <li><a href="#deployment-methods" class="hover:text-secondary">Deployment Methods</a></li>
+                    <li><a href="#configuration" class="hover:text-secondary">Configuration</a></li>
+                    <li><a href="#best-practices" class="hover:text-secondary">Best Practices</a></li>
+                    <li><a href="#summary" class="hover:text-secondary">Summary</a></li>
+                </ul>
+            </nav>
+            
+            <div class="prose">
+                <section id="introduction">
+                    <h2>Introduction</h2>
+                    <p>Microsoft Azure provides a robust platform for deploying Laravel applications. Azure App Service offers managed hosting with automatic scaling, deployment slots, and easy configuration. This guide will walk you through deploying Laravel to Azure.</p>
+                    <p>We'll cover everything from setting up Azure resources to configuring your Laravel application for production deployment.</p>
+                </section>
+
+                <section id="prerequisites">
+                    <h2>Prerequisites</h2>
+                    <p>Before deploying to Azure, ensure you have:</p>
+                    <ul>
+                        <li>Azure subscription with contributor access</li>
+                        <li>Laravel application ready for production</li>
+                        <li>Azure CLI installed locally</li>
+                        <li>Git installed for deployment</li>
+                        <li>Composer installed</li>
+                    </ul>
+                    <p>Prepare your Laravel application for deployment:</p>
+                    <pre><code># Install production dependencies
+composer install --optimize-autoloader --no-dev
+
+# Generate application key
+php artisan key:generate
+
+# Clear and cache configurations
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache</code></pre>
+                </section>
+
+                <section id="azure-setup">
+                    <h2>Azure Setup</h2>
+                    <p>Create the necessary Azure resources using the Azure CLI:</p>
+                    <pre><code># Create a resource group
+az group create --name laravel-rg --location eastus
+
+# Create App Service Plan
+az appservice plan create --name laravel-plan \
+    --resource-group laravel-rg \
+    --sku B1 --is-linux
+
+# Create the web app
+az webapp create --name my-laravel-app \
+    --resource-group laravel-rg \
+    --plan laravel-plan \
+    --runtime "PHP|8.2"</code></pre>
+                    <p>Configure the application settings:</p>
+                    <pre><code>az webapp config appsettings set --name my-laravel-app \
+    --resource-group laravel-rg \
+    --settings \
+        APP_ENV=production \
+        APP_DEBUG=false \
+        LOG_CHANNEL=errorlog</code></pre>
+                </section>
+
+                <section id="deployment-methods">
+                    <h2>Deployment Methods</h2>
+                    <p>There are several ways to deploy Laravel to Azure:</p>
+                    
+                    <h3>Git Deployment</h3>
+                    <pre><code># Configure local git
+az webapp deployment source config-local-git \
+    --name my-laravel-app --resource-group laravel-rg
+
+# Add Azure remote
+git remote add azure <deployment-url>
+
+# Deploy
+git push azure main</code></pre>
+                    
+                    <h3>Azure DevOps</h3>
+                    <p>Set up CI/CD pipelines for automated deployment with Azure DevOps.</p>
+                    
+                    <h3>FTP/SFTP</h3>
+                    <p>Get deployment credentials from Azure Portal and upload files manually.</p>
+                </section>
+
+                <section id="configuration">
+                    <h2>Configuration</h2>
+                    <p>Configure Azure-specific settings for Laravel:</p>
+                    
+                    <h3>PHP Configuration (php.ini)</h3>
+                    <pre><code>az webapp config set --name my-laravel-app \
+    --resource-group laravel-rg \
+    --php-version 8.2</code></pre>
+                    
+                    <h3>Storage Configuration</h3>
+                    <p>Use Azure Blob Storage for file storage:</p>
+                    <pre><code>'azure' => [
+    'driver' => 'azure',
+    'name' => env('AZURE_STORAGE_NAME'),
+    'key' => env('AZURE_STORAGE_KEY'),
+    'container' => env('AZURE_STORAGE_CONTAINER'),
+],</code></pre>
+                    
+                    <h3>Database Configuration</h3>
+                    <p>Connect to Azure MySQL or Azure SQL Database:</p>
+                    <pre><code>DB_CONNECTION=mysql
+DB_HOST=myserver.mysql.database.azure.com
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=admin
+DB_PASSWORD=password</code></pre>
+                </section>
+
+                <section id="best-practices">
+                    <h2>Best Practices</h2>
+                    <ul>
+                        <li><strong>Use deployment slots</strong> - Test changes before production</li>
+                        <li><strong>Enable HTTPS</strong> - Use Azure's free SSL certificates</li>
+                        <li><strong>Configure autoscaling</strong> - Handle traffic spikes</li>
+                        <li><strong>Monitor performance</strong> - Use Azure Application Insights</li>
+                        <li><strong>Set up backups</strong> - Protect your data</li>
+                        <li><strong>Use environment variables</strong> - Never hardcode secrets</li>
+                    </ul>
+                </section>
+
+                <section id="summary">
+                    <h2>Summary</h2>
+                    <p>Deploying Laravel to Azure provides a scalable, managed infrastructure for your applications. By following this guide, you can set up production-ready deployments with automatic scaling and easy management.</p>
+                    <p>For more information, check out our other tutorials on <a href="laravel-rest-api-development.html" class="text-secondary hover:underline">Laravel REST API Development</a> and <a href="laravel-microservices-architecture.html" class="text-secondary hover:underline">Laravel Microservices</a>.</p>
+                </section>
+            </div>
+            
+            <footer class="mt-12 pt-6 border-t-2 border-black">
+                <div class="flex items-center justify-between">
+                    <a href="../blogs.html" class="neobrutalist-btn bg-secondary hover:bg-green-500 text-black font-bold py-2 px-4">← Back to Blog</a>
+                    <div class="flex gap-2">
+                        <span class="px-3 py-1 bg-gray-200 text-sm">Laravel</span>
+                        <span class="px-3 py-1 bg-gray-200 text-sm">Azure</span>
+                        <span class="px-3 py-1 bg-gray-200 text-sm">Deployment</span>
+                    </div>
+                </div>
+            </footer>
+        </article>
+    </div>
+
+    <footer class="bg-white border-t-4 border-black py-8 mt-12">
+        <div class="container mx-auto px-6 text-center">
+            <p>&copy; 2023 John Kihiu. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        feather.replace();
+        
+        const menuButton = document.getElementById('menuButton');
+        const mobileMenu = document.getElementById('mobileMenu');
+        menuButton.addEventListener('click', () => mobileMenu.classList.toggle('active'));
+        document.addEventListener('click', (e) => {
+            if (!menuButton.contains(e.target) && !mobileMenu.contains(e.target)) {
+                mobileMenu.classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>
