@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weighbridge Capture Integration for Acumatica | John Kihiu</title>
+<meta name="description" content="Direct weighbridge serial-port / TCP capture integration that streams gross, tare and net weights into Acumatica purchase receipts and stock movements.">
+<meta name="keywords" content="Weighbridge Capture, Acumatica Operations, Any market ERP Integration">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://kihiujohn.github.io/integrations/weighbridge-capture/">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kihiujohn.github.io/integrations/weighbridge-capture/">
+<meta property="og:title" content="Weighbridge Capture Integration for Acumatica">
+<meta property="og:description" content="Direct weighbridge serial-port / TCP capture integration that streams gross, tare and net weights into Acumatica purchase receipts and stock movements.">
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Courier New', monospace; background: #fff; color: #000; }
+  .neobrutalist { border: 3px solid #000; box-shadow: 8px 8px 0 #000; background: #fff; }
+  .neobrutalist-btn { border: 3px solid #000; box-shadow: 4px 4px 0 #000; transition: all 0.2s; background: #fff; }
+  .neobrutalist-btn:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+  .text-secondary { color: #4ade80; }
+  .bg-secondary { background-color: #4ade80; }
+  .hover\:bg-secondary:hover { background-color: #4ade80; }
+  .hover\:text-secondary:hover { color: #4ade80; }
+  .mobile-menu { display: none; position: fixed; top: 80px; right: 20px; background: white; border: 3px solid black; box-shadow: 8px 8px 0 #000; z-index: 20; }
+  .mobile-menu.active { display: block; }
+
+  .hero-wrap { background: linear-gradient(135deg, #fef3c7 0%, #d1fae5 100%); border-bottom: 4px solid #000; padding: 60px 20px 50px; }
+  .hero-flag { font-size: 4rem; margin-bottom: 10px; line-height: 1; }
+  .hero-badge { display: inline-block; background: #000; color: #4ade80; padding: 4px 14px; font-size: .7rem; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px; }
+  .hero-title { font-size: 2.2rem; font-weight: bold; max-width: 820px; margin: 0 auto 16px; line-height: 1.2; }
+  @media (min-width: 768px) { .hero-title { font-size: 3rem; } }
+  .hero-sub { max-width: 700px; margin: 0 auto; color: #374151; }
+
+  .content-wrap { max-width: 880px; margin: 0 auto; padding: 48px 20px; }
+  .content-card { border: 4px solid #000; box-shadow: 8px 8px 0 #000; background: #fff; padding: 32px; margin-bottom: 32px; }
+  .content-card h2 { font-size: 1.6rem; font-weight: bold; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .content-card h2::before { content: ''; display: inline-block; width: 6px; height: 24px; background: #4ade80; border: 2px solid #000; }
+  .content-card p { line-height: 1.75; margin-bottom: 12px; color: #1f2937; }
+  .feature-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 640px) { .feature-list { grid-template-columns: 1fr 1fr; } }
+  .feature-list li { padding: 10px 12px 10px 34px; background: #f0fdf4; border: 2px solid #000; position: relative; font-size: .92rem; }
+  .feature-list li::before { content: "✓"; position: absolute; left: 12px; color: #16a34a; font-weight: bold; font-size: 1.1rem; }
+  .best-for-list { list-style: none; padding: 0; margin: 0; }
+  .best-for-list li { padding: 8px 0 8px 26px; position: relative; }
+  .best-for-list li::before { content: "→"; position: absolute; left: 0; color: #4ade80; font-weight: bold; }
+
+  .arch-step { border: 3px solid #000; padding: 16px 18px; margin-bottom: 12px; background: #fff; box-shadow: 4px 4px 0 #000; }
+  .arch-step-title { font-weight: bold; font-size: .95rem; color: #16a34a; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px; }
+  .arch-step-detail { font-size: .92rem; color: #1f2937; line-height: 1.6; }
+
+  .cta-card { background: #000; color: #fff; border: 4px solid #000; padding: 32px; text-align: center; box-shadow: 8px 8px 0 #4ade80; }
+  .cta-card h3 { font-size: 1.6rem; font-weight: bold; margin-bottom: 10px; }
+  .cta-card p { color: #d1d5db; margin-bottom: 20px; }
+  .cta-grid { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 520px; margin: 0 auto; }
+  @media (min-width: 640px) { .cta-grid { grid-template-columns: 1fr 1fr; } }
+  .cta-link { display: flex; align-items: center; justify-content: center; gap: 8px; background: #fff; color: #000; padding: 14px; border: 3px solid #fff; font-weight: bold; text-decoration: none; transition: all .15s; font-size: .92rem; }
+  .cta-link:hover { background: #4ade80; border-color: #4ade80; }
+  .cta-link.primary { background: #4ade80; }
+  .cta-link.primary:hover { background: #fff; }
+
+  .related-card { display: flex; align-items: center; gap: 14px; padding: 14px; border: 3px solid #000; background: #fff; text-decoration: none; color: #000; box-shadow: 4px 4px 0 #000; transition: all .15s; }
+  .related-card:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #000; }
+  .related-title { font-weight: bold; font-size: .95rem; }
+  .related-country { font-size: .75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; }
+
+  footer.site { border-top: 4px solid #000; background: #fff; padding: 32px 20px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+<nav class="bg-white border-b-4 border-black fixed w-full z-10" role="navigation" aria-label="Main navigation">
+  <div class="container mx-auto px-6 py-3">
+    <div class="flex items-center justify-between">
+      <a href="/" class="text-2xl font-bold text-black hover:text-secondary transition">John<span class="text-secondary">Kihiu</span></a>
+      <div class="hidden md:flex space-x-8">
+        <a href="/#home" class="hover:text-secondary transition">Home</a>
+        <a href="/#about" class="hover:text-secondary transition">About</a>
+        <a href="/#skills" class="hover:text-secondary transition">Skills</a>
+        <a href="/integrations/" class="text-secondary font-bold">Integrations</a>
+        <a href="/blog/" class="hover:text-secondary transition">Blog</a>
+        <a href="/#contact" class="hover:text-secondary transition">Contact</a>
+      </div>
+      <button id="menuButton" class="md:hidden focus:outline-none" aria-label="Toggle menu">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+      </button>
+      <div id="mobileMenu" class="mobile-menu p-4">
+        <div class="flex flex-col space-y-4">
+          <a href="/#home" class="hover:text-secondary transition">Home</a>
+          <a href="/#about" class="hover:text-secondary transition">About</a>
+          <a href="/#skills" class="hover:text-secondary transition">Skills</a>
+          <a href="/integrations/" class="text-secondary font-bold">Integrations</a>
+          <a href="/blog/" class="hover:text-secondary transition">Blog</a>
+          <a href="/#contact" class="hover:text-secondary transition">Contact</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</nav>
+<div style="height:72px"></div>
+
+<section class="hero-wrap text-center">
+  <div class="hero-flag" aria-hidden="true">⚖️</div>
+  <div class="hero-badge">Operations</div>
+  <h1 class="hero-title">Weighbridge Capture Integration for Acumatica</h1>
+  <p class="hero-sub">Direct weighbridge serial-port / TCP capture integration that streams gross, tare and net weights into Acumatica purchase receipts and stock movements.</p>
+</section>
+
+<div class="content-wrap">
+  <div class="content-card">
+    <h2>Overview</h2>
+    <p>Paper weight tickets and manual data entry are the #1 source of inventory variance for bulk-goods businesses. This integration connects weighbridge indicators (Mettler Toledo, Avery, Rice Lake, generic RS232/TCP) directly to Acumatica, so the weight on the scale is the weight on the purchase receipt — full stop. The operator confirms; Acumatica posts.</p>
+  </div>
+
+  <div class="content-card">
+    <h2>Core Features</h2>
+    <ul class="feature-list">
+      <li>Serial (RS232/485) &amp; TCP weighbridge support</li>
+      <li>Gross / tare / net capture in a single operator screen</li>
+      <li>Auto-creation of Acumatica Purchase Receipts &amp; Inventory Receipts</li>
+      <li>Vehicle registration, driver &amp; supplier lookup</li>
+      <li>Two-pass (inbound / outbound) weighing workflow</li>
+      <li>Weight ticket PDF with photo &amp; signature capture</li>
+      <li>GL posting &amp; costing using Acumatica standard flow</li>
+      <li>Audit trail of raw indicator stream for compliance</li>
+    </ul>
+  </div>
+
+  <div class="content-card">
+    <h2>How It Works</h2>
+      <div class="arch-step"><div class="arch-step-title">1. Connect</div><div class="arch-step-detail">Local agent reads the weighbridge indicator over serial or TCP.</div></div>
+      <div class="arch-step"><div class="arch-step-title">2. Capture</div><div class="arch-step-detail">Operator confirms gross/tare; net is computed and validated.</div></div>
+      <div class="arch-step"><div class="arch-step-title">3. Post</div><div class="arch-step-detail">A Purchase Receipt (or Inventory Transaction) is created in Acumatica.</div></div>
+      <div class="arch-step"><div class="arch-step-title">4. Attach</div><div class="arch-step-detail">Weight ticket PDF, signatures, and photos are attached to the receipt.</div></div>
+      <div class="arch-step"><div class="arch-step-title">5. Ship/Invoice</div><div class="arch-step-detail">Downstream Acumatica processes pick up the receipt unchanged.</div></div>
+  </div>
+
+  <div class="content-card">
+    <h2>Best Fit</h2>
+    <ul class="best-for-list">
+      <li>Agribusiness, feed mills, cement, scrap metal, aggregates, FMCG</li>
+      <li>Companies automating purchase receipts from bulk deliveries</li>
+      <li>Multi-site operations needing centralized weight capture data</li>
+    </ul>
+  </div>
+
+  <div class="cta-card">
+    <h3>Ready to deploy Weighbridge Capture on Acumatica?</h3>
+    <p>Every engagement starts with a free discovery call to scope your requirements. Reach out via any channel below and I'll get back within one business day.</p>
+    <div class="cta-grid">
+      <a href="mailto:kihiujohn12@gmail.com?subject=Weighbridge%20Capture%20Integration%20Inquiry" class="cta-link primary">📧 Email John</a>
+      <a href="https://wa.me/254115169705?text=Hi%20John%2C%20I'm%20interested%20in%20the%20Weighbridge%20Capture%20integration%20for%20Acumatica." target="_blank" rel="noopener" class="cta-link">💬 WhatsApp</a>
+      <a href="https://www.linkedin.com/in/john-kihiu-3481b8232/" target="_blank" rel="noopener" class="cta-link">🔗 LinkedIn</a>
+      <a href="/#contact" class="cta-link">📝 Contact form</a>
+    </div>
+  </div>
+
+  <div class="content-card">
+    <h2>Other Integrations</h2>
+    <div style="display:grid;grid-template-columns:1fr;gap:12px">
+      <a href="/integrations/kra-etims-vscu/" class="related-card">
+        <span style="font-size:1.6rem">🇰🇪</span>
+        <div>
+          <div class="related-title">KRA eTIMS VSCU</div>
+          <div class="related-country">Kenya</div>
+        </div>
+      </a>
+      <a href="/integrations/rra-vsdc/" class="related-card">
+        <span style="font-size:1.6rem">🇷🇼</span>
+        <div>
+          <div class="related-title">RRA VSDC</div>
+          <div class="related-country">Rwanda</div>
+        </div>
+      </a>
+      <a href="/integrations/zra-smart-invoice/" class="related-card">
+        <span style="font-size:1.6rem">🇿🇲</span>
+        <div>
+          <div class="related-title">ZRA Smart Invoice</div>
+          <div class="related-country">Zambia</div>
+        </div>
+      </a>
+    </div>
+  </div>
+</div>
+
+<footer class="site">
+  <div class="text-2xl font-bold mb-2">John<span class="text-secondary">Kihiu</span></div>
+  <p class="text-sm" style="color:#6b7280">&copy; 2024 John Kihiu. All rights reserved.</p>
+</footer>
+<script>
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && ['u','U','s','S','i','I'].includes(e.key)) e.preventDefault();
+    if (e.key === 'F12') e.preventDefault();
+    if (e.ctrlKey && e.shiftKey && ['i','I','j','J','c','C'].includes(e.key)) e.preventDefault();
+  });
+</script>
+<script>
+  const menuButton = document.getElementById('menuButton');
+  const mobileMenu = document.getElementById('mobileMenu');
+  if (menuButton && mobileMenu) {
+    menuButton.addEventListener('click', () => mobileMenu.classList.toggle('active'));
+    document.addEventListener('click', (e) => {
+      if (!menuButton.contains(e.target) && !mobileMenu.contains(e.target)) mobileMenu.classList.remove('active');
+    });
+  }
+</script>
+</body>
+</html>
