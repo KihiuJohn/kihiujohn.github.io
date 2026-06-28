@@ -157,8 +157,7 @@
         <li>${link('home', 'Home', '#home')}</li>
         <li>${link('about', 'About', '#about')}</li>
         <li>${link('work', 'Work', '#work')}</li>
-        <li><a href="/services/" data-link="services" class="${PAGE==='services'?'active':''}">Services</a>
-  <a href="/quote/" data-link="quote" class="${PAGE==='quote'?'active':''}">Quote</a></li>
+        <li><a href="/services/" data-link="services" class="${PAGE==='services'?'active':''}">Services</a></li>
         <li><a href="/quote/" data-link="quote" class="${PAGE==='quote'?'active':''}">Quote</a></li>
         <li><a href="/integrations/" data-link="integrations" class="${PAGE==='integrations'?'active':''}">Integrations</a></li>
         <li><a href="/blog/" data-link="blog" class="${PAGE==='blog'||PAGE==='post'?'active':''}">Blog</a></li>
