@@ -93,18 +93,165 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica GI and Business Events Integration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you wire up. Most Acumatica GIs are simple lists. The ones that pay dividends are the ones that solve a real business question — and those are the ones where the patterns below make the difference between "the report loads" and "the report tells the story".</p>
+
+<h2 id="anatomy">Anatomy of a powerful GI</h2>
+<p>A GI is a saved query with five parts: tables, relations, results, conditions, and parameters. The first three define what the GI returns; the last two define what filters and inputs the user sees. Most GIs that fail do so because one of these five parts was wrong. The most common failure: the conditions part was an afterthought.</p>
+
+<div class="callout">
+  <strong>Filter at the GI, not the UI</strong>
+  <p>The single most expensive mistake in GI design is to return every row and filter in the presentation layer. A GI that returns 5 million rows will time out, no matter how elegant the UI. Always push filters into the Conditions tab. The SQL Server optimiser will use the indexes; the UI will be instant.</p>
+</div>
+
+<h2 id="joins">The join strategy</h2>
+<p>Joins are where the GI's performance is won or lost. The rule: start with the most-restrictive table, join outward, and never join a table you do not need a field from. Each join is a multiplication factor on the row count.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · GI COMPILES TO THIS (APPROXIMATELY)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+  ar.RefNbr, ar.DocDate, ar.CuryOrigDocAmt, c.AcctName, b.BranchCD
+FROM ARInvoice ar
+INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
+INNER JOIN Branch b ON ar.BranchID = b.BranchID
+WHERE ar.DocDate BETWEEN '2026-01-01' AND '2026-12-31'
+  AND ar.Status = 'O'
+  AND ar.BranchID IN (1, 2, 3)
+ORDER BY ar.DocDate DESC;</code></pre>
+</div>
+
+<p>If your GI is slow, the most likely cause is one of: a missing index on a join column, an unneeded join, or a missing filter in the conditions. Check the actual SQL Acumatica generates (System Monitor &gt; Slow Queries) before you change anything else.</p>
+<p>For the full SQL Server performance playbook, see the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
+
+<h2 id="calculated-columns">Calculated columns that earn their keep</h2>
+<p>Calculated columns are expressions over the joined fields. The most useful ones for this kind of GI are aggregations, time deltas, and status labels. The expression language is Acumatica-specific but SQL-flavoured — read the cheat sheet once and you have it.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">GI · EXPRESSION EXAMPLES</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Days outstanding
+=IIf([Status] = 'O', DateDiff('d', [DueDate], Today()), 0)
+// Status label
+=IIf([Status] = 'H', 'On Hold', IIf([Status] = 'O', 'Open', IIf([Status] = 'C', 'Closed', 'Other')))
+// Line total
+=[Qty] * [UnitPrice]
+// Aggregate: =Sum([CuryOrigDocAmt])</code></pre>
+</div>
+
+<p>For the full pattern catalog, see the <a href="/blog/acumatica-gi-aggregations-group-by-having/">aggregations and rollups</a> article.</p>
+
+<h2 id="parameters">Parameters that change behaviour</h2>
+<p>Parameters are what make a GI reusable. The patterns I use the most:</p>
+<ul>
+  <li><strong>Date range with sensible defaults.</strong> First of current month to today. The user can override but rarely has to.</li>
+  <li><strong>Branch multi-select.</strong> Defaults to the current branch. Allows multi-tenant reporting.</li>
+  <li><strong>Customer / vendor selector.</strong> Bind to a screen for a typed lookup. Faster and safer than free text.</li>
+  <li><strong>Status checkboxes.</strong> Released vs unreleased, or open vs closed, depending on the document.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">GI · DEFAULT EXPRESSIONS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// First of current month
+=DateSerial(Year(Now), Month(Now), 1)
+// Today
+=Today()
+// 30 days ago
+=DateAdd('d', -30, Today())
+// Current branch
+=GetBranch()
+// Current user
+=GetUserID()</code></pre>
+</div>
+
+<p>For the full parameters reference, see the <a href="/blog/acumatica-gi-parameters-and-default-values/">GI parameters and default values</a> guide.</p>
+
+<h2 id="conditional-formatting">Conditional formatting that tells a story</h2>
+<p>Formatting is not decoration; it is information density. A GI with the right conditional formatting reads like a dashboard; a GI without it reads like a spreadsheet. The patterns I reuse:</p>
+
+<table>
+  <tr><th>Goal</th><th>Expression on the column</th></tr>
+  <tr><td>Red overdue</td><td><code>=IIf([DueDate] &lt; Today() And [Status] = 'O', "Red", "Black")</code> on font color</td></tr>
+  <tr><td>Bold over threshold</td><td><code>=IIf([CuryOrigDocAmt] &gt; 10000, true, false)</code> on font weight</td></tr>
+  <tr><td>Striped rows</td><td><code>=IIf(RowNumber() Mod 2 = 0, "#F5F5F4", "White")</code> on background</td></tr>
+  <tr><td>Icon for status</td><td>Image column with <code>=IIf([Status] = 'R', "released.png", "draft.png")</code></td></tr>
+</table>
+
+<p>For a complete style template, see the <a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">conditional formatting guide</a>.</p>
+
+<h2 id="security">Row-level security</h2>
+<p>Acumatica's role-based access control governs which screens a user can see. It does not, by default, govern which rows a GI returns. For GIs that touch sensitive data, you need to add an explicit row-level filter.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">GI · ROW-LEVEL SECURITY CONDITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Always include the current user/branch in the WHERE clause
+Conditions tab:
+  [BranchID] IN (GetAccessibleBranches())
+  OR GetUserID() = 'ADMIN'</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>The default is no row-level security</strong>
+  <p>A GI on a multi-tenant Acumatica returns rows from every tenant unless you filter explicitly. Always test your GIs with a restricted user before publishing.</p>
+</div>
+
+<p>For the full security playbook, see the <a href="/blog/acumatica-gi-row-level-security-patterns/">row-level security guide</a> and the <a href="/blog/acumatica-row-level-security-best-practices/">row-level security best practices</a>.</p>
+
+<h2 id="publishing">Publishing to the right surface</h2>
+<p>Where a GI is published changes its access model. The options:</p>
+<ul>
+  <li><strong>Workspace</strong> — visible to the user, scoped to a workspace, typical for an internal analytical tool.</li>
+  <li><strong>Site Map</strong> — full screen, classic UI navigation, for a report the user accesses directly.</li>
+  <li><strong>Self-Service Portal</strong> — customer-facing. Strict row-level security required.</li>
+  <li><strong>Dashboard widget</strong> — a small GI on a dashboard. Top N rows, usually aggregated.</li>
+  <li><strong>Data source</strong> — for a report, an integration, or another GI. No direct user access.</li>
+</ul>
+
+<p>For the portal pattern specifically, see the <a href="/blog/acumatica-gi-publishing-to-portal-acumatica-self-service/">portal publishing guide</a>.</p>
+
+<h2 id="performance">GI performance at scale</h2>
+<p>When a GI is slow, the diagnostic flow is:</p>
+<ol>
+  <li>Run the GI with a single parameter set. Time it.</li>
+  <li>Capture the SQL Acumatica generates (System Monitor &gt; Slow Queries).</li>
+  <li>Look at the execution plan. Find the largest cost step.</li>
+  <li>Add the missing index, or rewrite the join.</li>
+  <li>Re-run. Repeat until sub-second.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · FIND THE MISSING INDEX</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT TOP 20
+    migs.avg_total_user_cost * (migs.avg_user_impact / 100.0) AS improvement_measure,
+    OBJECT_NAME(d.object_id, d.database_id) AS table_name,
+    d.equality_columns, d.inequality_columns, d.included_columns
+FROM sys.dm_db_missing_index_groups mig
+JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
+JOIN sys.dm_db_missing_index_details d ON mig.index_handle = d.index_handle
+ORDER BY improvement_measure DESC;</code></pre>
+</div>
+
+<p>For the full performance playbook, see the <a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">cross-table joins deep-dive</a>, the <a href="/blog/acumatica-gi-aggregations-group-by-having/">aggregations guide</a>, and the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>A powerful GI is part query, part data model, part presentation. Get all three right and you have a tool the business uses daily. Get any one wrong and the GI gets ignored. The patterns above cover the 90% case; the remaining 10% is knowing when to give up on a GI and build a real report or a real custom screen instead.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-gi-mass-update-workflow/">Acumatica GI Mass Update Workflow</a></li>
+      <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters — Dependent Filters</a></li>
+      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
+      <li><a href="/blog/acumatica-gi-styling-templates/">Acumatica GI Styling Templates — Reusable Designs</a></li>
+      <li><a href="/blog/acumatica-gi-dashboard-best-practices/">Acumatica GI on Dashboards — Best Practices</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

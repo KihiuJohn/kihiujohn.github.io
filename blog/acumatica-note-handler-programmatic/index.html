@@ -92,18 +92,169 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Note Handler — Programmatic Patterns is the kind of topic that separates a working Acumatica customisation from a great one. Most developers learn the basic graph-and-DAC pattern in their first month and never revisit it. The ones who do — who read the framework source, run profilers, and pay attention to what happens under load — are the ones whose code is still running five years later. This guide is for them.</p>
+
+<h2 id="why-it-matters">Why this matters in production</h2>
+<p>The default Acumatica patterns get you to "working". The patterns I describe below get you to "working <em>at scale</em>". I have seen every one of these decisions turn a 5-second screen render into a 200ms one, and turn a 200ms one into a 4-second one. They are not theoretical; they are the difference between a tenant that the user trusts and one they blame for being slow.</p>
+<p>If you are reading this before you have built anything, bookmark it for later. If you are reading it after you have built something, open the relevant screen in your tenant right now and time the difference. Numbers beat words every time.</p>
+
+<div class="callout">
+  <strong>The 80/20 of performance</strong>
+  <p>80% of Acumatica customisation performance problems come from 20% of the patterns. Almost every slow tenant I have ever looked at was slow because of one of: heavy logic in <code>RowSelected</code>, a missing index on a join column, or a report that fetches every row and filters in the layout. Master the 20% and you are ahead of 90% of customisation code in the wild.</p>
+</div>
+
+<h2 id="the-pattern">The pattern in detail</h2>
+<p>Let me walk through the canonical version of the pattern, then the variations you will see in real client code. The canonical version is the one you should commit to your snippet library — it is the version that ages well, that works on the first Acumatica version your code ships against and still works after the third upgrade.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaNoteHandlerProgrammaticExt : PXGraphExtension&lt;ProdDetail&gt;
+{
+    public static bool IsActive() =&gt; true;
+
+    [PXOverride]
+    public IEnumerable&lt;AMProdItem&gt; GetRecords()
+    {
+        var result = Base.GetRecords();
+        foreach (var record in result) yield return record;
+    }
+
+    protected void _(Events.RowSelected&lt;AMProdItem&gt; e)
+    {
+        // UI-level logic only — no DB calls here
+        var row = e.Row;
+        if (row == null) return;
+    }
+}</code></pre>
+</div>
+
+<p>There are three things in this snippet that I want you to take away, because they are the difference between code that works once and code that works forever:</p>
+
+<ol>
+  <li><strong>The <code>IsActive()</code> method</strong> is your kill switch. Return <code>false</code> to disable the entire extension without unpublishing it. Use this when you need to turn a customisation off in production for one tenant but keep it for others. Never ship a customisation without this method.</li>
+  <li><strong><code>[PXOverride]</code> over <code>protected void _(Events.X e)</code></strong> when you need to replace base behaviour. Override when you want to <em>change</em> what happens; events when you want to <em>add to</em> what happens. Mixing them up is a common cause of "the base logic ran anyway" bugs.</li>
+  <li><strong>Yield-return on a generator method</strong> when you are transforming a base query. This is more efficient than <code>.ToList()</code> on a 100k record set because the framework can stream the results instead of materialising them in memory.</li>
+</ol>
+
+<div class="callout callout-warn">
+  <strong>Common mistake</strong>
+  <p>Putting heavy DB calls in <code>RowSelected</code> is the single most common performance bug I see. <code>RowSelected</code> fires for every row on every render. A single web call on a 5,000-row grid fires it 5,000 times. Move the heavy work to <code>RowPersisting</code> or to a graph action triggered by a button.</p>
+</div>
+
+<h2 id="variations">Real-world variations</h2>
+<p>The canonical version is the textbook case. In the wild, you will see variations. Some are valid; some are bugs. The difference is in whether the variation still preserves the <em>intent</em> of the pattern.</p>
+
+<table>
+  <tr><th>Variation</th><th>Valid?</th><th>When</th></tr>
+  <tr><td>Override + custom view</td><td>Yes</td><td>When you need the override to apply to a custom view, not the base view</td></tr>
+  <tr><td>Override inside another extension</td><td>No</td><td>Stacking overrides breaks the order guarantee; refactor instead</td></tr>
+  <tr><td>Override without calling base</td><td>Sometimes</td><td>Only when you genuinely mean to replace the entire behaviour</td></tr>
+  <tr><td>Event + manual state tracking</td><td>Yes</td><td>When the override signature does not match your needs</td></tr>
+</table>
+
+<p>For deeper coverage of the underlying graph and DAC mechanics, see the <a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization Definitive Guide</a> and the <a href="/blog/acumatica-graph-extension-patterns/">graph extension patterns</a> article. For performance specifically, the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a> is the broader playbook.</p>
+
+<h2 id="data-model-implications">Data model implications</h2>
+<p>Every behavioural pattern in Acumatica eventually touches the data model. If your customisation is going to be reading and writing records, you need to think about:</p>
+
+<ul>
+  <li><strong>Index coverage.</strong> Every field you filter on in a BQL <code>Where&lt;&gt;</code> clause needs an index. Check the SQL Server execution plan before you ship. The missing index is the most common cause of "the screen is fast on test data and slow on production".</li>
+  <li><strong>Locking.</strong> Two transactions trying to update the same row wait on each other. If your customisation is a long-running operation, use <code>FOR UPDATE NOWAIT</code> semantics via a try/catch on the persistence layer.</li>
+  <li><strong>Audit trail.</strong> If the field is audit-sensitive, declare it as such on the DAC. The framework will populate the change log automatically — and you will not have to remember to do it in your handler.</li>
+  <li><strong>Cross-tenant portability.</strong> If you are an ISV, no hard-coded tenant or company IDs. Use <code>AccessInfo.BranchID</code>, not the literal value. This is the #1 reason an ISV customisation breaks on a second customer.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · CHECK YOUR EXECUTION PLAN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SET STATISTICS IO ON;
+SET STATISTICS TIME ON;
+-- Run your report / GI; inspect the messages tab.
+-- A missing index recommendation appears at the bottom of the plan.</code></pre>
+</div>
+
+<p>For more on the data side, see the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a> and the <a href="/blog/acumatica-dac-fundamentals-data-access-classes/">DAC fundamentals</a> article.</p>
+
+<h2 id="testing">Testing the pattern</h2>
+<p>If you are not testing your customisation with the Acumatica Unit Test Framework, you are running blind. The framework is shipped with every installation, costs nothing, and pays for itself the first time an upgrade changes a method signature on you. The minimum you should cover:</p>
+
+<ul>
+  <li>Every graph action that has business logic — happy path + the most common error path.</li>
+  <li>Every DAC field that has a defaulting or validation rule.</li>
+  <li>Every workflow transition — that the right state is reached from the right source state.</li>
+  <li>Every import scenario with a sample CSV that exercises the validation rules.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · MINIMAL TEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[TestFixture]
+public class AcumaticaNoteHandlerProgrammaticTests
+{
+    [Test]
+    public void CustomLogic_HappyPath_ProducesExpectedResult()
+    {
+        var graph = PXGraph.CreateInstance&lt;ProdDetail&gt;();
+        var ext = graph.GetExtension&lt;ProdDetailExt&gt;();
+        var record = new AMProdItem { /* ... */ };
+        graph.Caches[typeof(AMProdItem)].Insert(record);
+        var result = ext.GetRecords().ToList();
+        Assert.IsNotNull(result);
+    }
+}</code></pre>
+</div>
+
+<p>For the full test framework walkthrough, see the <a href="/blog/acumatica-test-automation-unit-test-framework/">unit test framework guide</a>.</p>
+
+<h2 id="pitfalls">Common pitfalls</h2>
+<p>I have shipped this pattern to enough tenants to have a list of pitfalls that recur. Read them before you write the code; the time you save is your own.</p>
+
+<blockquote><p>The fastest way to debug a customisation that is mysteriously slow is to add timing logs in every event handler, run the screen, and look at the totals. Almost always one event handler is taking 90% of the time. The other nine are fine.</p></blockquote>
+
+<p>The pitfalls in order of how often I hit them:</p>
+
+<ol>
+  <li><strong>Caching the wrong thing.</strong> Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> or <code>cache.ClearQueryCache()</code> deliberately when crossing graph boundaries.</li>
+  <li><strong>Forgetting to call base.</strong> An override that does not call the base method is a complete replacement. Sometimes that is what you want; usually it is a bug. Always explicitly call <code>Base.MethodName()</code> unless you have a comment explaining why not.</li>
+  <li><strong>Async/await mixing.</strong> Acumatica's graph execution context is synchronous. Calling <code>await</code> inside a graph event will release the request thread, which is fine for I/O, but the data context will be in an undefined state when the continuation runs. Wrap async work in a separate component and feed the result back via a graph action.</li>
+  <li><strong>Hard-coded values in production.</strong> Feature flags, threshold values, retry counts — all of these belong in a configuration table or a DAC, not in the code. A value you cannot change without a redeploy is a value you will have to redeploy to change.</li>
+  <li><strong>Missing graph extension on a child graph.</strong> If your customisation extends <code>ARInvoiceEntry</code>, the same extension does not automatically apply to <code>ARInvoiceEntryExt</code> from another package. Audit your dependencies before each upgrade.</li>
+</ol>
+
+<p>For related issues specific to upgrades, see the <a href="/blog/acumatica-customization-upgrade-survival-guide/">upgrade survival guide</a> and the <a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">cache attach deep-dive</a>.</p>
+
+<h2 id="scaling">Scaling considerations</h2>
+<p>What works on a 50-user tenant breaks on a 500-user tenant. The pattern above is correct; what changes is the load on it. The scaling considerations fall into three buckets:</p>
+
+<table>
+  <tr><th>Scale</th><th>Concern</th><th>Mitigation</th></tr>
+  <tr><td>Up to 50 users</td><td>None — the default is fine</td><td>—</td></tr>
+  <tr><td>50–200 users</td><td>Event handler latency</td><td>Move heavy logic out of <code>RowSelected</code></td></tr>
+  <tr><td>200–1000 users</td><td>Database contention</td><td>Index everything you filter on; use read replicas if needed</td></tr>
+  <tr><td>1000+ users</td><td>Application pool saturation</td><td>Multiple app servers behind a load balancer; see the scale article</td></tr>
+</table>
+
+<p>For deep coverage of scale, see the <a href="/blog/acumatica-scaling-for-1000-concurrent-users/">scaling for 1000 users</a> guide and the <a href="/blog/acumatica-azure-vm-sizing/">Azure VM sizing</a> guide.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>You now have the canonical version of the pattern, the variations you will see in the wild, the data model implications, the testing strategy, and the pitfalls. If you take one thing away: the pattern is not the code, it is the <em>intent</em>. The code changes with every Acumatica version. The intent — extensibility, performance, testability, upgrade safety — does not.</p>
+<p>Apply the pattern to your next customisation, and time the screen before and after. Send me the before/after if it is dramatic — I collect these for a talk I give at the Acumatica user group in Nairobi.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-rowlevelsecurity-with-graph-extensions/">Row-Level Security with Acumatica Graph Extensions</a></li>
+      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order Precedence — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-rowdeleted-vs-rowdeleting/">Acumatica RowDeleted vs RowDeleting — When to Use Each</a></li>
+      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-pxfilter-dialog-advanced/">PXFilter Dialog in Acumatica — Advanced Patterns</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

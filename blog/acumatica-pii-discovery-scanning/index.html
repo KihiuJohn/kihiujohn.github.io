@@ -93,18 +93,178 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica PII Discovery and Scanning is the Acumatica security topic that is invisible until it is breached. By the time you have a security incident, the questions are being asked at the board level and the answers are due yesterday. This guide is what to do before that point. It is the threat model, the controls, the operational hygiene, and the runbook that keeps the data safe and the auditors happy.</p>
+
+<h2 id="threat-model">The threat model</h2>
+<p>Start with a clear threat model. Who can attack, what do they want, how do they get it?</p>
+
+<table>
+  <tr><th>Threat actor</th><th>What they want</th><th>How they get in</th></tr>
+  <tr><td>External attacker</td><td>Customer data, financial data, ransomware</td><td>API, weak credentials, unpatched vulnerabilities</td></tr>
+  <tr><td>Malicious insider</td><td>Data exfiltration, sabotage</td><td>Legitimate access, privilege abuse</td></tr>
+  <tr><td>Negligent insider</td><td>Accidental data loss</td><td>Misconfiguration, weak passwords, lost devices</td></tr>
+  <tr><td>Compromised vendor</td><td>Supply chain attack</td><td>Customisation code, ISV solution</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Document the threat model</strong>
+  <p>The threat model is the basis for every security decision. Without it, you are guessing at controls. With it, every control has a justification and every gap has a reason. Review it annually; update it when the system changes.</p>
+</div>
+
+<h2 id="controls">The controls</h2>
+<p>Acumatica's security model is layered. The layers, from the outside in:</p>
+<ol>
+  <li><strong>Network.</strong> Firewall, VPN, IP allowlist for the admin surface.</li>
+  <li><strong>Authentication.</strong> Strong passwords, 2FA, SSO via Azure AD or Okta.</li>
+  <li><strong>Authorisation.</strong> Role-based access control at the screen, row, and field level.</li>
+  <li><strong>Audit.</strong> Every change logged, every login logged, every sensitive action logged.</li>
+  <li><strong>Encryption.</strong> TLS in transit, encryption at rest for the database, field-level encryption for sensitive fields.</li>
+  <li><strong>Data lifecycle.</strong> Retention policy, archival, secure deletion.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">CONFIG · STRONG PASSWORD POLICY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Acumatica password policy
+Minimum length: 12 characters
+Require: upper, lower, number, symbol
+Rotation: 90 days (privileged), 180 days (standard)
+Lockout: 5 failed attempts, 15-minute lockout
+Reuse: cannot reuse last 5 passwords</code></pre>
+</div>
+
+<p>For the broader authentication configuration, see the <a href="/blog/acumatica-2fa-and-password-policies/">2FA and password policies</a> guide and the <a href="/blog/acumatica-sso-setup-azure-ad/">Azure AD SSO guide</a>.</p>
+
+<h2 id="api-security">API security</h2>
+<p>The REST API is the most common attack surface. The controls:</p>
+<ul>
+  <li><strong>OAuth 2.0, not cookie auth.</strong> For server-to-server; cookie auth only for trusted internal integrations.</li>
+  <li><strong>TLS everywhere.</strong> No HTTP, no self-signed certs in production.</li>
+  <li><strong>Rate limiting.</strong> Per-client rate limits, per-IP rate limits, exponential backoff on retry.</li>
+  <li><strong>IP allowlist.</strong> For the most sensitive endpoints (admin actions, fiscalisation), restrict to known IPs.</li>
+  <li><strong>Input validation.</strong> Acumatica does this; do not bypass it.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · SECURE API CLIENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SecureApiClient
+{
+    private readonly HttpClient _http;
+    public async Task&lt;T&gt; Send&lt;T&gt;(HttpRequestMessage req)
+    {
+        var token = await GetAccessToken();
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        req.Headers.Add("X-Correlation-ID", Guid.NewGuid().ToString());
+        var resp = await _http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync&lt;T&gt;();
+    }
+}</code></pre>
+</div>
+
+<p>For the broader OAuth pattern, see the <a href="/blog/acumatica-oauth-2-setup-step-by-step/">OAuth setup guide</a>. For the API security model, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a>.</p>
+
+<h2 id="row-level">Row-level security</h2>
+<p>Acumatica's row-level security controls which rows a user can see within a screen. The configuration:</p>
+<ul>
+  <li><strong>Branch restrictions.</strong> The most common; restrict users to one or a few branches.</li>
+  <li><strong>Customer / vendor restrictions.</strong> Sales reps see only their customers; purchasing sees only their vendors.</li>
+  <li><strong>Custom restrictions.</strong> A custom DAC field on the user that determines which records they see.</li>
+</ul>
+
+<div class="callout callout-warn">
+  <strong>GIs bypass row-level security by default</strong>
+  <p>A GI returns rows from every tenant unless you filter explicitly. Always test your GIs with a restricted user before publishing.</p>
+</div>
+
+<p>For the full row-level security playbook, see the <a href="/blog/acumatica-row-level-security-best-practices/">row-level security best practices</a> and the <a href="/blog/acumatica-gi-row-level-security-patterns/">GI row-level security guide</a>.</p>
+
+<h2 id="encryption">Encryption</h2>
+<p>Three layers of encryption to consider:</p>
+
+<table>
+  <tr><th>Layer</th><th>What it protects</th><th>Implementation</th></tr>
+  <tr><td>In transit</td><td>Network traffic</td><td>TLS 1.2+ everywhere</td></tr>
+  <tr><td>At rest</td><td>Database files, backups</td><td>SQL Server TDE; storage-level encryption</td></tr>
+  <tr><td>Field-level</td><td>Sensitive fields (PII, financial)</td><td>Application-level encryption with key in a vault</td></tr>
+</table>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · FIELD-LEVEL ENCRYPTION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public string Encrypt(string plaintext)
+{
+    if (string.IsNullOrEmpty(plaintext)) return plaintext;
+    var key = _vault.GetKey("pii:encryption-key");
+    using var aes = Aes.Create();
+    aes.Key = key;
+    aes.GenerateIV();
+    var iv = aes.IV;
+    using var encryptor = aes.CreateEncryptor();
+    var plainBytes = Encoding.UTF8.GetBytes(plaintext);
+    var cipherBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+    return $"{Convert.ToBase64String(iv)}.{Convert.ToBase64String(cipherBytes)}";
+}</code></pre>
+</div>
+
+<p>For the broader secrets management pattern, see the <a href="/blog/acumatica-secrets-management-vault/">secrets management guide</a>.</p>
+
+<h2 id="audit">Audit and monitoring</h2>
+<p>You cannot defend what you cannot see. The minimum audit configuration:</p>
+<ul>
+  <li><strong>Field-level audit</strong> on every field that contains PII, financial data, or access control data.</li>
+  <li><strong>Login audit</strong> — every login, every failed login, every password change.</li>
+  <li><strong>Action audit</strong> — release, approve, reject, cancel, void, delete.</li>
+  <li><strong>Configuration audit</strong> — every change to a role, a user, a workflow.</li>
+</ul>
+
+<p>For the broader audit configuration, see the <a href="/blog/acumatica-audit-trail-configuration/">audit trail guide</a>.</p>
+
+<h2 id="incident-response">The incident response runbook</h2>
+<p>When (not if) a security incident happens, the runbook:</p>
+<ol>
+  <li><strong>Detect.</strong> The alert fires. Confirm the incident is real (not a false positive).</li>
+  <li><strong>Contain.</strong> Disable the affected user / API key / IP. Isolate the affected system.</li>
+  <li><strong>Eradicate.</strong> Remove the attacker's access. Patch the vulnerability.</li>
+  <li><strong>Recover.</strong> Restore from clean backup. Rotate all credentials. Verify integrity.</li>
+  <li><strong>Notify.</strong> Notify affected parties (customers, regulators) per the regulatory timeline.</li>
+  <li><strong>Post-mortem.</strong> Document the incident; identify the root cause; implement the control that would have prevented it.</li>
+</ol>
+
+<div class="callout">
+  <strong>Test the runbook</strong>
+  <p>An untested runbook is a wish. Run a tabletop exercise annually. Walk through the steps; identify the gaps; update the runbook. The cost of the exercise is one afternoon; the cost of a real incident with an untested runbook is the incident itself.</p>
+</div>
+
+<h2 id="compliance">Regulatory compliance</h2>
+<p>Most Acumatica deployments in Africa are subject to local data protection regulations (Kenya DPA, Rwanda data law, South Africa POPIA). The compliance checklist:</p>
+<ul>
+  <li><strong>Data mapping.</strong> What data do you collect, where is it stored, who has access?</li>
+  <li><strong>Data subject rights.</strong> How do you handle access requests, deletion requests, portability requests?</li>
+  <li><strong>Breach notification.</strong> What is the timeline, who do you notify, what is the format?</li>
+  <li><strong>Cross-border transfer.</strong> Are there restrictions on where data can be stored and processed?</li>
+</ul>
+
+<p>For the broader compliance patterns, see the <a href="/blog/acumatica-gdpr-data-subject-requests/">GDPR guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>Security is a discipline, not a product. The threat model, the controls, the audit, the runbook, the compliance — each is a habit, not a checkbox. The cost of doing it well is small and ongoing; the cost of doing it badly is large and sudden. Invest in the habit.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-secure-coding-checklist/">Acumatica Secure Coding Checklist</a></li>
+      <li><a href="/blog/acumatica-secrets-management-vault/">Acumatica Secrets Management with Vault</a></li>
+      <li><a href="/blog/acumatica-secure-api-key-rotation/">Acumatica Secure API Key Rotation</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

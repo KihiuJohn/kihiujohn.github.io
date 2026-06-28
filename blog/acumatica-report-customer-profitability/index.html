@@ -93,18 +93,225 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Customer Profitability Report — Building It Right is one of those reports every business needs and almost no business has a clean implementation of. The reason is that the report crosses the boundary between the sub-ledger and the GL — and at that boundary, every misconfigured join, missing index, and unfiltered row is a performance problem. This guide is the field-tested pattern for getting it right the first time.</p>
+
+<h2 id="what-the-report-needs">What the report needs to show</h2>
+<p>Before you open Report Designer, write down the question the report answers. The question drives the data model, the joins, and the parameters. For an aged receivables report, the question is: "for each customer, how much is outstanding, broken down by age bucket, as of a given date?" The four parts of the question are the four design constraints:</p>
+<ul>
+  <li><strong>Per customer</strong> — group by customer.</li>
+  <li><strong>How much is outstanding</strong> — sum of open balance, with credit memos applied.</li>
+  <li><strong>By age bucket</strong> — split by 0-30, 31-60, 61-90, 90+ days past due.</li>
+  <li><strong>As of a given date</strong> — back-dated, not just "today".</li>
+</ul>
+
+<div class="callout">
+  <strong>Write the question first</strong>
+  <p>If you cannot state the report's question in one sentence, you cannot build the report. Most bad reports are bad because the question was not stated — the developer started with "show me everything" and then iterated. The iteration never converges.</p>
+</div>
+
+<h2 id="the-schema">The schema, top to bottom</h2>
+<p>The Acumatica view catalogue is the right place to find the data. For AR-related reports, the views you need:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · CORE VIEWS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Document-level (ARInvoice)
+SELECT RefNbr, DocDate, DueDate, CuryOrigDocAmt, CuryDocBal, Status, CustomerID, BranchID
+FROM ARInvoice
+-- Customer (Customer)
+SELECT BAccountID, AcctCD, AcctName, CustomerClassID
+FROM Customer
+-- Branch (Branch)
+SELECT BranchID, BranchCD, AcctName
+FROM Branch
+-- Apply credits (ARAdjust)
+SELECT AdjgRefNbr, AdjdRefNbr, CuryAdjgAmt, CuryAdjdAmt
+FROM ARAdjust</code></pre>
+</div>
+
+<p>For the report, you join the document to the customer and the branch. You bring in the credit applications only if you need to show the gross-vs-net detail.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · REPORT SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Report Designer · Schema (the data view)
+
+Tables:
+  ARInvoice      (the document header)
+  Customer       (joined to ARInvoice.CustomerID)
+  Branch         (joined to ARInvoice.BranchID)
+
+Relations:
+  ARInvoice.CustomerID = Customer.BAccountID
+  ARInvoice.BranchID = Branch.BranchID
+
+Filters:
+  ARInvoice.Status = 'O'
+  ARInvoice.Released = 1
+  ARInvoice.DocDate <= @AsOfDate
+
+Parameters:
+  @AsOfDate       Date, default = Today()
+  @BranchID       Multi-select, default = GetBranch()</code></pre>
+</div>
+
+<p>For the broader Report Designer patterns, see the <a href="/blog/acumatica-report-designer-the-definitive-guide/">Report Designer definitive guide</a>.</p>
+
+<h2 id="the-joins">Join performance is everything</h2>
+<p>For an aged AR report on a 2-million-row ARInvoice table, the joins are the performance story. The columns you join on must be indexed. The fields you select must be minimal. The filters must be in the WHERE, not in the UI.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · EXECUTION PLAN CHECKLIST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- 1. Run the report, time it
+-- 2. Capture the generated SQL
+-- 3. In SSMS, click "Include Actual Execution Plan"
+-- 4. Run the SQL, look for: Table Scan, Hash Match without index, Sort warnings
+-- 5. Add the missing index, re-run</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Table scan on ARInvoice</strong>
+  <p>If your execution plan shows a table scan on ARInvoice, the most common cause is a missing index on the filter column. Add an index on <code>(Status, DocDate, CustomerID)</code> and re-run.</p>
+</div>
+
+<p>For the full performance playbook, see the <a href="/blog/acumatica-report-designer-performance-tuning/">Report Designer performance guide</a> and the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a>.</p>
+
+<h2 id="age-buckets">The age bucket calculation</h2>
+<p>The age bucket is a calculated column. The pattern:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">REPORT · AGE BUCKET EXPRESSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>=IIf(
+    [DocDate] >= @AsOfDate, 0,
+    IIf(
+        DateDiff('d', [DocDate], @AsOfDate) <= 30, 1,
+        IIf(
+            DateDiff('d', [DocDate], @AsOfDate) <= 60, 2,
+            IIf(
+                DateDiff('d', [DocDate], @AsOfDate) <= 90, 3,
+                4))))</code></pre>
+</div>
+
+<p>The result is a number (0 = not yet due, 1-3 = days 1-30, 31-60, 61-90, 4 = 90+). Use it in a column expression to show the bucket label, and use it in a group-by to roll up the totals.</p>
+
+<table>
+  <tr><th>Bucket</th><th>Label</th></tr>
+  <tr><td>0</td><td>Not due</td></tr>
+  <tr><td>1</td><td>1–30 days</td></tr>
+  <tr><td>2</td><td>31–60 days</td></tr>
+  <tr><td>3</td><td>61–90 days</td></tr>
+  <tr><td>4</td><td>90+ days</td></tr>
+</table>
+
+<h2 id="grouping">Grouping and rollup</h2>
+<p>The natural group-by is customer, with sub-totals by bucket. In Report Designer, add the bucket as a column, group by customer, group by bucket, and the sum is the column total. The grand total is the customer total across all buckets.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">REPORT · GROUP STRUCTURE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Group 1: Customer
+//   Group 2: Age Bucket
+//     Sum: [CuryDocBal]
+//   Sum: [CuryDocBal] (subtotal by customer)
+// Sum: [CuryDocBal] (grand total)</code></pre>
+</div>
+
+<h2 id="parameters">Parameters that make the report reusable</h2>
+<p>The aged report is most useful when it can be run for any date, any branch, any customer class. The parameter set:</p>
+<ul>
+  <li><strong>As-of date</strong> — back-dated reporting. Default to today.</li>
+  <li><strong>Branch</strong> — multi-select. Default to current branch.</li>
+  <li><strong>Customer class</strong> — optional filter, default to all classes.</li>
+  <li><strong>Customer</strong> — optional, for the case where the user wants a single-customer report.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">REPORT · PARAMETER EXPRESSIONS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// @AsOfDate: default to today
+=Today()
+// @BranchID: default to current branch
+=GetBranch()
+// @CustomerClassID: default to all (no filter)
+=Null
+// @CustomerID: default to all
+=Null</code></pre>
+</div>
+
+<p>For the full parameters reference, see the <a href="/blog/acumatica-report-parameters-vs-prompts/">parameters vs prompts</a> guide.</p>
+
+<h2 id="conditional-formatting">Conditional formatting that makes the report scannable</h2>
+<p>A well-formatted aged report is one where the user can see the problem customers in 5 seconds. The formatting rules:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">REPORT · CONDITIONAL FORMATTING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Red on the 90+ bucket (column font color)
+=IIf([AgeBucket] = 4, "Red", "Black")
+// Bold on customer total
+=IIf([RowType] = "Total", true, false)
+// Background on the grand total row
+=IIf([RowType] = "GrandTotal", "#FEF3C7", "White")
+// Italic on rows that have been written off
+=IIf([WriteOff] = true, true, false) on font italic</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Visibility vs WHERE</strong>
+  <p>Hiding rows with Visibility still returns them from SQL. For true filtering, push the condition into the schema WHERE. Visibility is for layout, not query optimisation.</p>
+</div>
+
+<p>For the broader pattern, see the <a href="/blog/acumatica-report-designer-conditional-visibility/">conditional visibility guide</a>.</p>
+
+<h2 id="subreports">Subreports for related detail</h2>
+<p>The summary report is the user-facing view. The detail (which invoices, which credit memos) goes in a subreport. The pattern:</p>
+<ol>
+  <li>Build the parent report with the summary (customer, bucket, total).</li>
+  <li>Build a child report with the detail (invoice list with dates, amounts, references).</li>
+  <li>On the parent, drop a Subreport control. Bind its <code>CustomerID</code> parameter to the parent row's customer.</li>
+  <li>Place the Subreport in the detail band of the parent.</li>
+</ol>
+
+<p>For the full subreport pattern, see the <a href="/blog/acumatica-subreports-hierarchical-data/">subreports guide</a>.</p>
+
+<h2 id="performance">Performance at production scale</h2>
+<p>The aged report is the most-clicked report in most finance teams. Performance is the difference between a report that the team trusts and a report they curse. The numbers that matter:</p>
+
+<table>
+  <tr><th>Scale</th><th>Time to render</th><th>Acceptable?</th></tr>
+  <tr><td>10k documents</td><td>&lt; 1 second</td><td>Yes</td></tr>
+  <tr><td>100k documents</td><td>1–3 seconds</td><td>Yes</td></tr>
+  <tr><td>500k documents</td><td>3–10 seconds</td><td>Borderline</td></tr>
+  <tr><td>1M+ documents</td><td>10+ seconds</td><td>No — needs pre-aggregation</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Pre-aggregate when you must</strong>
+  <p>For very large tenants (1M+ open documents), pre-aggregate the balances into a snapshot table. Run a nightly job to populate the snapshot. The report queries the snapshot, not the live ARInvoice table. Instant results; consistent data.</p>
+</div>
+
+<p>For the full performance playbook, see the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a> and the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>That is the pattern, top to bottom. The question first, the schema second, the joins third, the bucketing fourth, the formatting fifth, the performance sixth. Get all six right and the report becomes a tool the team uses daily. Get any one wrong and the report gets ignored. The difference is in the discipline of the build, not in the technology.</p>
+<p>For the related reading, the <a href="/blog/acumatica-report-designer-the-definitive-guide/">Report Designer definitive guide</a> covers the broader pattern catalog. The <a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Generic Inquiries guide</a> is the right starting point if your report is really a query, not a document.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-report-margins-by-product/">Acumatica Margins by Product Report — Building It Right</a></li>
+      <li><a href="/blog/acumatica-report-customer-credit-analysis/">Acumatica Customer Credit Analysis Report</a></li>
+      <li><a href="/blog/acumatica-report-aged-receivables-tuning/">Acumatica Aged Receivables Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-report-aged-payables-tuning/">Acumatica Aged Payables Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-report-sales-by-period-tuning/">Acumatica Sales by Period Report — Tuning Guide</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

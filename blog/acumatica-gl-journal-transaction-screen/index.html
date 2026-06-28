@@ -93,18 +93,179 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica GL Journal Transaction Screen — A Deep Dive is the screen the user actually lives in. Every other piece of Acumatica — the workflows, the reports, the integrations — exists to feed this screen or be fed by it. If you do not understand this screen, you do not understand the module. This guide is the field-tested walkthrough I wish someone had given me the first time I had to customise it.</p>
+
+<h2 id="what-the-screen-does">What the screen actually does</h2>
+<p>Most Acumatica screens look similar at first glance — a form view, a tab, a grid. The difference is in the document lifecycle, the events that fire as you move through the tabs, and the state machine that controls what is editable. This screen is a <em>document-entry</em> screen: each row in the grid is a line item, the header aggregates the lines, and the release action posts the document to the sub-ledger.</p>
+
+<div class="callout">
+  <strong>Read the header before you read the lines</strong>
+  <p>Whenever you are debugging a document-entry screen, look at the header first. The header carries the document type, status, customer, dates, and totals. The lines are downstream of the header. If the lines look wrong, the header is the first place to look — most "line bug" tickets are actually "header state bug" tickets in disguise.</p>
+</div>
+
+<h2 id="header-fields">The header fields that matter</h2>
+<p>Not every field on the header is used in every workflow. The fields that are reliably used in customisations are:</p>
+
+<table>
+  <tr><th>Field</th><th>Why it matters</th><th>Common customisation</th></tr>
+  <tr><td>Document type</td><td>Drives status, numbering, posting</td><td>Add a custom document type for a tenant-specific flow</td></tr>
+  <tr><td>Reference Nbr</td><td>External identifier; idempotency key</td><td>Stamp with an order ID from an external system</td></tr>
+  <tr><td>Status</td><td>Controls what is editable; part of the workflow</td><td>Auto-set a custom status from a business event</td></tr>
+  <tr><td>Date</td><td>Drives period, ageing, FX</td><td>Default to the customer's order date</td></tr>
+  <tr><td>Customer / Vendor</td><td>Drives pricing, terms, GL accounts</td><td>Filter by a custom field on the customer record</td></tr>
+  <tr><td>Branch</td><td>Drives ledgers, tax zones, restrict users</td><td>Default to the current branch</td></tr>
+</table>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · HEADER FIELD DEFAULTING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected void _(Events.FieldDefaulting&lt;Batch, Batch.docDate&gt; e)
+{
+    var row = e.Row;
+    if (row?.CustomerID != null)
+    {
+        var customer = (Customer)PXSelect&lt;Customer,
+            Where&lt;Customer.bAccountID, Equal&lt;Required&lt;Customer.bAccountID&gt;&gt;&gt;&gt;
+            .Select(Base, row.CustomerID);
+        if (customer?.LastOrderDate != null)
+        {
+            e.NewValue = customer.LastOrderDate;
+            e.Cancel = true;
+        }
+    }
+}</code></pre>
+</div>
+
+<p>For deeper coverage of DAC fields and the defaulting pattern, see the <a href="/blog/acumatica-dac-fundamentals-data-access-classes/">DAC fundamentals article</a> and the <a href="/blog/acumatica-field-level-attribs-decimal-precision/">field attributes guide</a>.</p>
+
+<h2 id="the-tabs">The tabs, and what they each do</h2>
+<p>The tab structure on this screen is more than layout — it is the navigation contract. Each tab loads a related set of records; each has its own data view; each can be hidden, shown, or disabled based on the header state. The conventions for the tabs on this screen, from left to right:</p>
+
+<ul>
+  <li><strong>Document details</strong> — the header fields. Always visible; always editable in <code>Hold</code> state.</li>
+  <li><strong>Lines / Items</strong> — the line items. The big grid. Where most of the work happens.</li>
+  <li><strong>Taxes</strong> — per-line or per-document tax amounts. Auto-calculated but manually overridable.</li>
+  <li><strong>Addresses</strong> — ship-to / bill-to. Defaults from the customer; can be overridden per document.</li>
+  <li><strong>Financial details</strong> — terms, branch, GL accounts, retainage. Usually for advanced customisation.</li>
+  <li><strong>Approvals</strong> — workflow status, current approver, approval history.</li>
+  <li><strong>Activities</strong> — emails, tasks, events linked to the document.</li>
+  <li><strong>Files</strong> — attachments. The screen is also a file store.</li>
+</ul>
+
+<div class="callout callout-warn">
+  <strong>Custom tab gone after upgrade</strong>
+  <p>If you add a custom tab and the tab disappears after an upgrade, the most common cause is the tab ID not being a unique key. Always use a namespace-prefixed tab ID (e.g. <code>tabUsrCustom</code> not <code>tabCustom1</code>). Acumatica uses the ID to identify the tab across versions.</p>
+</div>
+
+<h2 id="lines">The lines grid: the one you will spend the most time on</h2>
+<p>The lines grid is where the work is. The patterns that matter:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · LINE-LEVEL EVENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected void _(Events.RowSelected&lt;BatchLine&gt; e)
+{
+    var row = e.Row;
+    if (row == null) return;
+    var doc = Base.Document.Current;
+    if (doc == null) return;
+    PXUIStateAttribute.SetEnabled&lt;BatchLine.qty&gt;(
+        e.Cache, row, doc.Hold == false && doc.Status == "N");
+}</code></pre>
+</div>
+
+<p>For the full event pattern catalog, see the <a href="/blog/acumatica-events-row-selected-row-inserted-explained/">events explained article</a>.</p>
+
+<h2 id="actions">The toolbar actions</h2>
+<p>The toolbar on this screen carries the document lifecycle actions. The standard ones are <em>Hold</em>, <em>Remove Hold</em>, <em>Submit for Approval</em>, <em>Approve</em>, <em>Reject</em>, <em>Release</em>, <em>Copy</em>, <em>Print</em>, <em>Email</em>, and <em>Cancel</em>. Each is a graph action with a server-side handler. Adding a custom action to the toolbar is a common customisation:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CUSTOM TOOLBAR ACTION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public PXAction&lt;Batch&gt; SubmitToCustomWorkflow;
+[PXButton(CommitChanges = true)]
+[PXUIField(DisplayName = "Submit to Custom Workflow")]
+protected void submitToCustomWorkflow()
+{
+    var row = Base.Document.Current;
+    if (row == null) return;
+    Base.Document.Cache.SetValueExt&lt;Batch.Status&gt;(row, "C");
+    Base.Document.Cache.SetValueExt&lt;Batch.CustomField&gt;(row, "SUBMITTED");
+    Base.Document.Update(row);
+    Base.Actions.PressSave();
+}</code></pre>
+</div>
+
+<p>For more on actions and the workflow glue, see the <a href="/blog/acumatica-workflow-engine-the-definitive-guide/">workflow engine guide</a>.</p>
+
+<h2 id="releases">Release: what actually happens</h2>
+<p>The Release action is the most important button on the screen. It is also the most dangerous — once released, a document cannot be edited in place. Most customisations need to either add a pre-release validation or extend what release does (e.g. stamp a custom field, post to a custom table).</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · EXTEND RELEASE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXOverride]
+public virtual void Release(Batch doc)
+{
+    if (doc.CuryOrderTotal &lt;= 0)
+        throw new PXException("Cannot release a document with zero total.");
+    Base.Release(doc);
+    var ext = doc.GetExtension&lt;BatchExt&gt;();
+    if (ext != null)
+    {
+        Base.Document.Cache.SetValueExt&lt;BatchExt.usrReleasedAt&gt;(doc, DateTime.UtcNow);
+        Base.Document.Update(doc);
+        Base.Actions.PressSave();
+    }
+}</code></pre>
+</div>
+
+<p>For more on overrides, see the <a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension</a> guide.</p>
+
+<h2 id="performance">Performance on this screen</h2>
+<p>This screen's performance is dominated by three things:</p>
+
+<ol>
+  <li>The number of lines (rows in the grid). 10 lines render instantly; 1,000 lines take 4 seconds; 10,000 lines take 30 seconds.</li>
+  <li>The number of event handlers firing on each render. Every <code>RowSelected</code> on the lines fires per row per render.</li>
+  <li>The number of <code>PXSelect</code> calls in those handlers. Each one is a database round-trip.</li>
+</ol>
+
+<div class="callout">
+  <strong>Profile, then optimise</strong>
+  <p>Before you change anything, profile. Add timing logs to the event handlers, run the screen on production-scale data, and look at where the time goes. Optimising the wrong handler is the most expensive mistake.</p>
+</div>
+
+<p>For the full performance playbook, see the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a> and the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
+
+<h2 id="customisation-recipes">Common customisation recipes</h2>
+<p>Three customisations I have implemented on this screen repeatedly, and the patterns they follow:</p>
+
+<ol>
+  <li><strong>Default the branch from the user.</strong> If the user is restricted to a single branch, default the branch field to that branch and hide the selector. Saves clicks, prevents misposting.</li>
+  <li><strong>Add a custom approval step.</strong> If the standard approval map does not match the business process, add a custom approval step. Configure in the workflow, then add a button on the toolbar that triggers it.</li>
+  <li><strong>Stamp an external reference.</strong> If the document is created from an external system (e-commerce, portal, EDI), set the <code>UsrExternalRef</code> field on creation. Use it as the idempotency key.</li>
+</ol>
+
+<p>For related reading, see the <a href="/blog/acumatica-graph-extension-patterns/">graph extension patterns</a>, the <a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">cache attach pitfalls</a>, and the <a href="/blog/acumatica-events-row-selected-row-inserted-explained/">events explained</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>That is the screen, top to bottom. The patterns here apply to most document-entry screens in Acumatica — the same structure, the same lifecycle, the same customisation playbook. Internalise the pattern, and the next screen you are asked to customise will be a 2-day job instead of a 2-week job.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-gl-account-screen-deep-dive/">Acumatica GL Account Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-sub-account-screen/">Acumatica Sub-Account Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-ar-invoice-screen-deep-dive/">Acumatica AR Invoice Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-cash-transaction-screen/">Acumatica Cash Transaction Screen — A Deep Dive</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

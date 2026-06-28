@@ -93,18 +93,160 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Projects Module — Extension Patterns is one of those Acumatica customisations that every team eventually needs and almost no team does well the first time. The Acumatica module ships with a complete set of fields, but every real business has a field the framework does not provide — a <em>reference number</em>, a <em>department code</em>, a <em>tenant-specific workflow flag</em>. Adding that field cleanly is what this guide is about.</p>
+
+<h2 id="the-decision">To add a field, a UDF, or a separate DAC</h2>
+<p>Before you write any code, decide which of the three patterns fits. The wrong choice costs you at every upgrade; the right choice disappears into the platform.</p>
+
+<table>
+  <tr><th>Pattern</th><th>When to use</th><th>Upgrade cost</th></tr>
+  <tr><td>User-Defined Field (UDF)</td><td>End users should be able to add the field without a developer</td><td>Low — UDFs survive upgrades</td></tr>
+  <tr><td>DAC extension (Usr field on existing DAC)</td><td>Code needs to read/write the field programmatically</td><td>Low — extensions are the standard pattern</td></tr>
+  <tr><td>Separate DAC with a relationship</td><td>The field has its own workflow, validations, or sub-records</td><td>Medium — a new DAC means a new table and a new graph</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Decision short-circuit</strong>
+  <p>If you find yourself wanting to add more than three fields to the same screen at once, stop. A separate DAC with a relationship is almost always the right move. Fields on a DAC should be the obvious ones the screen needs; complex sub-entities belong in their own table.</p>
+</div>
+
+<h2 id="dac-extension-pattern">The DAC extension pattern</h2>
+<p>For the 80% case — adding a custom field to a built-in screen — the DAC extension is the right tool. The pattern has three moving parts: the extension class, the graph extension to expose the field, and the screen configuration to show it.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · DAC EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXTable(IsOptional = true)]
+public class PMProjectExt : PXCacheExtension&lt;PMProject&gt;
+{
+    #region UsrExternalRef
+    [PXDBString(40)]
+    [PXUIField(DisplayName = "External Ref")]
+    public virtual string UsrExternalRef { get; set; }
+    public abstract class usrExternalRef :
+        PX.Data.BQL.BqlString.Field&lt;usrExternalRef&gt; { }
+    #endregion
+
+    #region UsrCustomCategory
+    [PXDBString(20)]
+    [PXUIField(DisplayName = "Custom Category")]
+    [PXStringList(new[] { "STANDARD", "PRIORITY", "INTERNAL" },
+        new[] { "Standard", "Priority", "Internal" })]
+    public virtual string UsrCustomCategory { get; set; }
+    public abstract class usrCustomCategory :
+        PX.Data.BQL.BqlString.Field&lt;usrCustomCategory&gt; { }
+    #endregion
+}</code></pre>
+</div>
+
+<p>The pattern above has three Acumatica-specific things that are easy to get wrong:</p>
+
+<ol>
+  <li><strong>The <code>Usr</code> prefix.</strong> Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it to know what to preserve.</li>
+  <li><strong>The <code>PXTable(IsOptional = true)</code> attribute.</strong> This tells the framework the extension is a "soft" extension — if the database table does not have the column, no error. Without this, an upgrade that drops a table would crash the customisation.</li>
+  <li><strong>The abstract class for BQL.</strong> The dual-field pattern (property + abstract class) is how Acumatica queries work. The property holds the value at runtime; the abstract class is the type token the BQL compiler uses. Skipping the abstract class means you cannot query the field in BQL.</li>
+</ol>
+
+<div class="callout callout-warn">
+  <strong>The field did not persist</strong>
+  <p>If you add a field and the screen lets you type a value but the value disappears on save, the column probably does not exist in the database. The most common cause is forgetting to publish the database script along with the customization. Always publish both as a pair.</p>
+</div>
+
+<h2 id="screen-configuration">Wiring the field to the screen</h2>
+<p>For the Modern UI, the screen configuration model picks up your new field automatically once the customization is published. For the classic UI, you need to add the field to the ASPX layout explicitly. Either way, the work is the same — declare the field, declare its container (a tab, a section, a grid), and let the framework render it.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">ASPX · ADD FIELD TO SCREEN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;px:PXFormView ID="form" runat="server" DataSourceID="ds" DataMember="PMProject"&gt;
+  &lt;Template&gt;
+    &lt;px:PXLayoutRule runat="server" StartColumn="True" /&gt;
+    &lt;px:PXTextEdit runat="server" ID="edUsrExternalRef" DataField="UsrExternalRef" /&gt;
+    &lt;px:PXDropDown runat="server" ID="edUsrCustomCategory" DataField="UsrCustomCategory" /&gt;
+  &lt;/Template&gt;
+&lt;/px:PXFormView&gt;</code></pre>
+</div>
+
+<p>For the Modern UI, the equivalent is a screen configuration entry in the <code>Screen Configuration</code> screen. The drag-and-drop editor lets you place the field on any tab; the resulting JSON is committed to the customisation package.</p>
+
+<h2 id="graph-handler">Reading and writing the field</h2>
+<p>Once the field is on the screen, you need to read it (for filtering, reporting) and write it (for automation). The pattern for both is the same: get the cache, cast to the extension, access the field.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · READ / WRITE THE CUSTOM FIELD</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ProjectEntryExt : PXGraphExtension&lt;ProjectEntry&gt;
+{
+    protected void _(Events.RowPersisting&lt;PMProject&gt; e)
+    {
+        var row = e.Row;
+        if (row == null) return;
+        var ext = row.GetExtension&lt;PMProjectExt&gt;();
+        if (ext?.UsrExternalRef == null)
+            ext.UsrExternalRef = $"REF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..8]}";
+    }
+}</code></pre>
+</div>
+
+<p>For a deeper treatment of BQL syntax and the dual-field pattern, see the <a href="/blog/acumatica-dac-fundamentals-data-access-classes/">DAC fundamentals article</a> and the <a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">cache attach pitfalls</a> guide.</p>
+
+<h2 id="migration">Migrating data into the new field</h2>
+<p>Adding the field is half the work. The other half is getting existing data into it. Three options, in order of complexity:</p>
+
+<ol>
+  <li><strong>Import Scenario.</strong> Define a mapping from a CSV (or another table) to the new field. Run it once. The audit trail tells you what was set.</li>
+  <li><strong>Graph event handler.</strong> Set the field in <code>RowPersisting</code> based on a lookup against another table. The field gets populated as records are touched.</li>
+  <li><strong>SQL update.</strong> A direct <code>UPDATE</code> statement. Fast, but no audit trail and no upgrade safety. Use only when you have full control of the database.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · DIRECT UPDATE (USE WITH CARE)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>UPDATE ar
+SET ar.UsrExternalRef = src.ExternalRefNbr
+FROM dbo.PMProject ar
+INNER JOIN dbo.SomeSourceTable src ON ar.NoteID = src.NoteID
+WHERE ar.UsrExternalRef IS NULL;
+SELECT COUNT(*) FROM dbo.PMProject WHERE UsrExternalRef IS NOT NULL;</code></pre>
+</div>
+
+<p>For production deployments, prefer the Import Scenario. The audit trail alone is worth the slight extra effort. See the <a href="/blog/acumatica-data-migration-import-scenarios/">data migration guide</a> for the full pattern.</p>
+
+<h2 id="upgrade-safety">Upgrade safety</h2>
+<p>Customisations break on Acumatica upgrades most often because the field they added depended on a base DAC field that was renamed, removed, or had its type changed. The defensive habits:</p>
+
+<ul>
+  <li>Never modify a base DAC. Always extend.</li>
+  <li>Use the <code>Usr</code> prefix religiously.</li>
+  <li>Wrap your screen in a customisation project so it ships with versioned metadata.</li>
+  <li>Maintain a regression suite that touches every record type that has custom fields.</li>
+</ul>
+
+<div class="callout">
+  <strong>Test on production data</strong>
+  <p>The most common upgrade failure is "the field worked in test but the upgrade failed in production because the data shape was different". Test your customisation on a copy of the production database, not on a sample. The cost of the staging tenant is a fraction of the cost of a production failure.</p>
+</div>
+
+<p>For the full upgrade playbook, see the <a href="/blog/acumatica-upgrade-checklist-r1-r2/">upgrade checklist</a> and the <a href="/blog/acumatica-customization-upgrade-survival-guide/">customisation upgrade survival guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>Adding a custom field to the Acumatica Projects is not a 5-minute job, but it is also not a 5-day job if you follow the right pattern. The DAC extension, the screen configuration, the graph event handler, the data migration, and the upgrade test are the five steps. Do them in order; do them with attention; the result is a customisation that survives the next three Acumatica releases without intervention.</p>
+<p>If your team is adding custom fields at scale (more than 20 across multiple modules), consider a naming convention document and a shared snippet library. Both pay for themselves within a quarter.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-time-entry-customisation/">Acumatica Time Entry — Customisation Patterns</a></li>
+      <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
+      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

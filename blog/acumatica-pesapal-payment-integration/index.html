@@ -93,18 +93,222 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Pesapal Payment Integration — A Complete Guide is the kind of integration that pays for itself the first time it runs without intervention. Most Acumatica integrations start as weekend projects and end as 6-month engagements — not because they are hard, but because the failure modes are not obvious until you have seen them. This guide is the field-tested pattern for Pesapal, with the failure modes called out and the production hygiene that keeps the integration quiet at 3 AM.</p>
+
+<h2 id="the-decision">To build, to buy, or to wait</h2>
+<p>Before you write a line of code, decide whether the integration is worth building. The decision matrix:</p>
+
+<table>
+  <tr><th>Question</th><th>If yes</th><th>If no</th></tr>
+  <tr><td>Does the provider have a documented, supported API?</td><td>Build</td><td>Wait for the provider to ship one</td></tr>
+  <tr><td>Is there an ISV solution on the Acumatica Marketplace?</td><td>Buy (and customise)</td><td>Build</td></tr>
+  <tr><td>Is the data volume &gt; 100k records per day?</td><td>Build a queue-based integration</td><td>Synchronous REST will do</td></tr>
+  <tr><td>Is the integration a one-off for one tenant?</td><td>Build quickly, document</td><td>Build carefully, version, package</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Buy before you build (when you can)</strong>
+  <p>If an ISV solution exists, buy it. The cost of an ISV solution is 2-4 weeks of subscription; the cost of building the same thing is 3-6 months of engineering. The ISV also handles the upgrade story, which is the most expensive part of a custom integration.</p>
+</div>
+
+<h2 id="the-flow">The data flow</h2>
+<p>Most integrations follow a four-step pattern: pull from source, transform, push to destination, reconcile. Each step has its own failure modes. The right way to build it:</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PSEUDOCODE · THE FOUR STEPS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// 1. PULL: fetch from source
+var sourceRecords = await sourceClient.FetchSince(lastSyncTimestamp);
+// 2. TRANSFORM: map to Acumatica shape
+var acumaticaRecords = sourceRecords.Select(MapToAcumatica).ToList();
+// 3. PUSH: write to Acumatica (with idempotency)
+foreach (var batch in acumaticaRecords.Chunk(100))
+    await acumaticaClient.BulkUpsert(batch, idempotencyKey: r =&gt; r.ExternalRef);
+// 4. RECONCILE: verify counts, alert on mismatch
+if (Math.Abs(sourceCount - acumaticaCount) &gt; threshold)
+    await alert.Send($"Sync mismatch: source={sourceCount}, acumatica={acumaticaCount}");</code></pre>
+</div>
+
+<p>For the broader Acumatica REST patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a> and the <a href="/blog/acumatica-rest-api-bulk-data-load/">bulk data loads guide</a>.</p>
+
+<h2 id="authentication">Authentication</h2>
+<p>Pesapal uses OAuth 2.0 with a consumer key/secret. The flow:</p>
+<ol>
+  <li>Register an OAuth client with the provider (developer portal).</li>
+  <li>Configure the client ID, client secret, and redirect URI in a secrets manager (not in code).</li>
+  <li>Request a token at the start of every integration run.</li>
+  <li>Refresh the token before it expires (typically 5 minutes early).</li>
+  <li>Handle 401 by re-authenticating and retrying once.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · OAUTH CLIENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaPesapalPaymentIntegrationClient
+{
+    private readonly HttpClient _http;
+    private string _accessToken;
+    private DateTime _tokenExpiry = DateTime.MinValue;
+
+    public async Task&lt;string&gt; GetAccessToken()
+    {
+        if (DateTime.UtcNow &lt; _tokenExpiry.AddMinutes(-5)) return _accessToken;
+        var form = new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair&lt;string,string&gt;("grant_type", "client_credentials"),
+            new KeyValuePair&lt;string,string&gt;("client_id", _clientId),
+            new KeyValuePair&lt;string,string&gt;("client_secret", _clientSecret),
+        });
+        var resp = await _http.PostAsync("/oauth/token", form);
+        resp.EnsureSuccessStatusCode();
+        var token = await resp.Content.ReadFromJsonAsync&lt;TokenResponse&gt;();
+        _accessToken = token.access_token;
+        _tokenExpiry = DateTime.UtcNow.AddSeconds(token.expires_in);
+        return _accessToken;
+    }
+}</code></pre>
+</div>
+
+<p>For the broader OAuth pattern in Acumatica, see the <a href="/blog/acumatica-oauth-2-setup-step-by-step/">OAuth 2.0 setup guide</a>.</p>
+
+<h2 id="idempotency">Idempotency is not optional</h2>
+<p>Every PUT to Acumatica must carry an idempotency key. The key is the natural identifier of the record — a customer reference, an order ID, an external system GUID. Without the key, a retry after a network timeout creates a duplicate. With the key, the retry is a no-op.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · IDEMPOTENT PUSH</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>foreach (var record in acumaticaRecords)
+{
+    var payload = new { ExternalRef = { value = record.ExternalRef } };
+    var maxRetries = 5;
+    for (int attempt = 0; attempt &lt; maxRetries; attempt++)
+    {
+        try
+        {
+            var resp = await _http.PutAsJsonAsync(
+                $"/entity/Default/24.200.001/APInvoice", payload);
+            resp.EnsureSuccessStatusCode();
+            break;
+        }
+        catch (HttpRequestException) when (attempt &lt; maxRetries - 1)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Concurrency exceptions</strong>
+  <p>When two processes try to update the same record, Acumatica returns a concurrency exception. Re-fetch the record (which gets the new ETag), apply your change, retry. The retry is part of the contract, not a bug.</p>
+</div>
+
+<p>For the full retry and concurrency pattern, see the <a href="/blog/acumatica-rest-api-rate-limiting-and-retry/">rate limiting and retry guide</a> and the <a href="/blog/acumatica-rest-api-error-handling-patterns/">error handling guide</a>.</p>
+
+<h2 id="rate-limits">Rate limits and the licence cap</h2>
+<p>Pesapal has rate limits. Acumatica has a licence cap on concurrent users. Both must be respected. The right way:</p>
+<ul>
+  <li>Throttle outgoing requests to 10–20 concurrent per tenant.</li>
+  <li>Use exponential backoff with jitter for retries.</li>
+  <li>Track per-tenant licence headroom and alert before you run out.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · THROTTLED PUSH WITH BACKPRESSURE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var semaphore = new SemaphoreSlim(20);
+var tasks = acumaticaRecords.Select(async record =&gt;
+{
+    await semaphore.WaitAsync();
+    try { await PushRecord(record); }
+    finally { semaphore.Release(); }
+});
+await Task.WhenAll(tasks);</code></pre>
+</div>
+
+<p>For the full performance and licence guidance, see the <a href="/blog/acumatica-license-concurrency-explained/">licence concurrency guide</a> and the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a>.</p>
+
+<h2 id="webhooks">Webhooks for event-driven work</h2>
+<p>If the provider supports webhooks, use them. Polling is a tax; webhooks are free. The pattern:</p>
+<ol>
+  <li>Register your HTTPS endpoint with the provider.</li>
+  <li>Validate the signature on every incoming webhook.</li>
+  <li>Respond 200 fast; process async.</li>
+  <li>Make your handler idempotent — webhooks are at-least-once delivery.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · WEBHOOK HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[HttpPost("/webhooks/acumatica-pesapal-payment-integration")]
+public async Task&lt;IActionResult&gt; Handle(AcumaticaPesapalPaymentIntegrationEvent evt)
+{
+    if (!VerifySignature(Request)) return Unauthorized();
+    _ = Task.Run(async () =&gt;
+    {
+        try { await Process(evt); }
+        catch (Exception ex) { _logger.LogError(ex, "Webhook processing failed"); }
+    });
+    return Ok();
+}</code></pre>
+</div>
+
+<p>For the full webhook pattern, see the <a href="/blog/acumatica-webhooks-vs-rest-polling/">webhooks vs polling guide</a>.</p>
+
+<h2 id="reconciliation">Reconciliation and the runbook</h2>
+<p>The integration will fail. The question is how quickly you notice. The minimum hygiene:</p>
+<ol>
+  <li>Log every push with the source ID, the Acumatica ID, the timestamp, and the response code.</li>
+  <li>Run a daily reconciliation that compares source count to Acumatica count, alert on mismatch.</li>
+  <li>Maintain a dead-letter table for records that failed to push; a worker replays them after fix.</li>
+  <li>Track per-tenant error rate; alert on a spike.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · RECONCILIATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var sourceCount = await sourceClient.CountSince(lastSync);
+var acumaticaCount = await acumaticaClient.CountWhere($"ExternalRef like 'SRC-%' AND CreatedAt &gt; '{lastSync:o}'");
+if (Math.Abs(sourceCount - acumaticaCount) &gt; 0.01 * sourceCount)
+    await alert.Send($"Sync mismatch: source={sourceCount}, acumatica={acumaticaCount}");</code></pre>
+</div>
+
+<p>For the broader reconciliation patterns, see the <a href="/blog/acumatica-rest-api-error-handling-patterns/">error handling guide</a> and the <a href="/blog/acumatica-rest-api-bulk-data-load/">bulk loads guide</a>.</p>
+
+<h2 id="operational-hygiene">Operational hygiene</h2>
+<p>The integration will need to be maintained. The habits that pay for themselves:</p>
+<ul>
+  <li>All secrets in a vault, not in code or config files.</li>
+  <li>Structured logging with a correlation ID that flows from source to Acumatica.</li>
+  <li>Health check endpoint; monitor with a watchdog.</li>
+  <li>Document the runbook: what to do when the integration fails, who to call, how to replay.</li>
+  <li>Run the integration on a schedule that does not coincide with other batch jobs.</li>
+</ul>
+
+<div class="callout">
+  <strong>Test on production data</strong>
+  <p>Always test the integration on a copy of production data before going live. Sample data misses the edge cases — a customer with a special character in the name, an invoice in a foreign currency, a record with a null in a required field. Production data has all of these.</p>
+</div>
+
+<p>For the broader operational patterns, see the <a href="/blog/acumatica-cicd-github-actions-for-acumatica/">CI/CD guide</a> and the <a href="/blog/acumatica-monitoring-alerting/">monitoring and alerting guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>The four steps (pull, transform, push, reconcile), the auth flow, the idempotency, the rate limit, the webhooks, the reconciliation, the runbook. Get all eight right and the integration is invisible. Skip any one and you are debugging at 2 AM. The discipline is not glamorous, but it is what separates an integration that works from an integration that survives.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-flutterwave-integration/">Acumatica Flutterwave Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-interswitch-integration/">Acumatica Interswitch Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-twilio-sms-integration/">Acumatica Twilio SMS Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-sendgrid-email-integration/">Acumatica SendGrid Email Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-zoom-meetings-integration/">Acumatica Zoom Meetings Integration — A Complete Guide</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

@@ -93,18 +93,182 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Performance — CPU Profiling is the Acumatica performance topic that nobody asks about until they have to. By the time a tenant is "slow", the user base has been frustrated for weeks, the IT team is in firefighting mode, and the budget for a fix is whatever the CFO approves in a panic. This guide is what to do before that point. It is the diagnostic flow, the fixes, and the monitoring that keeps a tenant fast.</p>
+
+<h2 id="baseline">Establish a baseline first</h2>
+<p>Before you tune anything, you need a number to compare against. The baseline:</p>
+<ol>
+  <li>Pick the top 20 screens by user count.</li>
+  <li>For each, time the render from navigation to interactive.</li>
+  <li>For each, capture the SQL the screen generates.</li>
+  <li>For each, record the SQL Server wait stats during the render.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · TIMING LOG INSTRUMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected void _(Events.RowSelected&lt;INItemSite&gt; e)
+{
+    var sw = Stopwatch.StartNew();
+    // ... existing logic
+    sw.Stop();
+    if (sw.ElapsedMilliseconds &gt; 100)
+        PXTrace.WriteInformation($"Slow RowSelected on {e.Row}: {sw.ElapsedMilliseconds}ms");
+}</code></pre>
+</div>
+
+<div class="callout">
+  <strong>Always baseline before tuning</strong>
+  <p>Tuning without a baseline is guessing. You change a parameter, the screen feels faster, but you cannot prove it. With a baseline, you know what 200ms feels like, what 2 seconds feels like, and what 20 seconds feels like. Numbers beat feelings every time.</p>
+</div>
+
+<h2 id="diagnostic">The diagnostic flow</h2>
+<p>When a screen is slow, the diagnostic order is:</p>
+<ol>
+  <li><strong>Is the SQL Server busy?</strong> Check <code>sys.dm_exec_query_stats</code> and <code>sys.dm_os_wait_stats</code>. If the server is saturated, no amount of code tuning helps.</li>
+  <li><strong>Is the slow screen a single query or many?</strong> Look at the SQL Profiler trace. A single slow query is a query-tuning problem; many slow queries is a data-volume problem.</li>
+  <li><strong>Is the slowness on the server or the client?</strong> Server: SQL, BQL, event handlers. Client: rendering, JS, network.</li>
+  <li><strong>What is the execution plan of the slow query?</strong> Table scan, missing index, parameter sniffing — each has a different fix.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · TOP EXPENSIVE QUERIES</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT TOP 20
+    total_worker_time / execution_count AS avg_cpu,
+    total_elapsed_time / execution_count AS avg_duration,
+    total_logical_reads / execution_count AS avg_reads,
+    SUBSTRING(text, 1, 200) AS query_text
+FROM sys.dm_exec_query_stats
+CROSS APPLY sys.dm_exec_sql_text(sql_handle)
+ORDER BY avg_cpu DESC;</code></pre>
+</div>
+
+<p>For the broader SQL Server performance playbook, see the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a> and the <a href="/blog/acumatica-sql-query-store-for-acumatica/">Query Store guide</a>.</p>
+
+<h2 id="fixes">The fixes that work 90% of the time</h2>
+<p>The five fixes I try first, in order:</p>
+<ol>
+  <li><strong>Add the missing index.</strong> Most slow queries are missing-index queries. Use the missing-index DMVs to find the candidate.</li>
+  <li><strong>Move heavy logic out of <code>RowSelected</code>.</strong> Push validation to <code>RowPersisting</code>, side effects to a graph action.</li>
+  <li><strong>Filter at the GI, not the UI.</strong> The most common performance bug in a GI is a row-level visibility expression that returns every row.</li>
+  <li><strong>Reduce the number of joins.</strong> Each join is a multiplication factor. Drop the ones you do not need.</li>
+  <li><strong>Batch the work.</strong> Loop with 1,000 calls is slow; loop with 10 calls of 100 records is fast.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · MISSING INDEX CANDIDATE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT TOP 20
+    migs.avg_total_user_cost * (migs.avg_user_impact / 100.0) AS improvement_measure,
+    OBJECT_NAME(d.object_id, d.database_id) AS table_name,
+    d.equality_columns, d.inequality_columns, d.included_columns
+FROM sys.dm_db_missing_index_groups mig
+JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
+JOIN sys.dm_db_missing_index_details d ON mig.index_handle = d.index_handle
+ORDER BY improvement_measure DESC;</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Do not over-index</strong>
+  <p>Every index speeds reads but slows writes. The Acumatica write path (insert, update, delete) updates every index on the table. A table with 20 indexes is fast to read, slow to write. The right number is usually 5-10 per table, depending on usage.</p>
+</div>
+
+<p>For the broader customisation performance patterns, see the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning definitive guide</a>.</p>
+
+<h2 id="iis">IIS application pool tuning</h2>
+<p>The IIS application pool is the second most common performance bottleneck. The right configuration:</p>
+
+<table>
+  <tr><th>Setting</th><th>Default</th><th>Recommended</th></tr>
+  <tr><td>Recycling (time)</td><td>29 hours</td><td>Disabled (or 7 days at 3 AM Sunday)</td></tr>
+  <tr><td>Recycling (requests)</td><td>Disable</td><td>Disable</td></tr>
+  <tr><td>Idle timeout</td><td>20 min</td><td>0 (disabled)</td></tr>
+  <tr><td>Queue length</td><td>1000</td><td>5000</td></tr>
+  <tr><td>Worker process</td><td>1</td><td>1 (per core, total = cores / 2)</td></tr>
+  <tr><td>Max worker processes</td><td>1</td><td>nProc (per application)</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Disable the 5 AM recycle</strong>
+  <p>The default 29-hour recycle kills in-flight requests and discards the cache. The first 5-10 minutes after the recycle are noticeably slower. Disable it (or schedule a weekly recycle at a known low-traffic window).</p>
+</div>
+
+<p>For the full IIS tuning playbook, see the <a href="/blog/acumatica-iis-application-pool-tuning/">IIS application pool tuning guide</a>.</p>
+
+<h2 id="monitoring">Continuous monitoring</h2>
+<p>Tuning is not a one-time event. The monitoring that keeps a tenant fast:</p>
+<ul>
+  <li><strong>SQL Server wait stats.</strong> Alert on a sudden increase in any wait type (PAGEIOLATCH, LCK_M_X, ASYNC_NETWORK_IO).</li>
+  <li><strong>Slow query log.</strong> Capture any query over 5 seconds; review weekly.</li>
+  <li><strong>Application pool recycling.</strong> Alert on every recycle; verify the cause is planned.</li>
+  <li><strong>User-reported slowness.</strong> Trend ticket volume by screen; alert on a spike.</li>
+  <li><strong>Customisation event handler timing.</strong> Log timing in every event handler; review weekly.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · MONITORING HOOK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class PerformanceMonitor
+{
+    public static void Record(string operation, long milliseconds)
+    {
+        if (milliseconds &gt; 1000)
+            PXTrace.WriteWarning($"SLOW: {operation} took {milliseconds}ms");
+    }
+}</code></pre>
+</div>
+
+<p>For the broader monitoring patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring and alerting guide</a>.</p>
+
+<h2 id="load-testing">Load testing</h2>
+<p>Before you declare the tenant tuned, load test it. The tools:</p>
+<ul>
+  <li><strong>Visual Studio Load Test.</strong> Built in, easy to use, good for Windows shops.</li>
+  <li><strong>JMeter.</strong> Open source, platform-independent, steeper learning curve.</li>
+  <li><strong>k6.</strong> Modern, JavaScript, scriptable, good for CI integration.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">K6 · SAMPLE LOAD TEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import http from 'k6/http';
+import { check, sleep } from 'k6';
+export const options = {
+  stages: [
+    { duration: '1m', target: 50 },
+    { duration: '5m', target: 50 },
+    { duration: '1m', target: 100 },
+    { duration: '5m', target: 100 },
+  ],
+  thresholds: { http_req_duration: ['p(95)&lt;2000'] },
+};
+export default function () {
+  const res = http.get('https://acumatica.example.com/app');
+  check(res, { 'status is 200': (r) =&gt; r.status === 200 });
+  sleep(1);
+}</code></pre>
+</div>
+
+<p>For the broader scaling patterns, see the <a href="/blog/acumatica-scaling-for-1000-concurrent-users/">scaling for 1000 users</a> guide and the <a href="/blog/acumatica-azure-vm-sizing/">Azure VM sizing</a> guide.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>The diagnostic flow, the five fixes, the IIS tuning, the monitoring, the load testing. Get all five right and the tenant is fast. The discipline is not glamorous, but it is the difference between a tenant the user trusts and a tenant they blame. Numbers, not feelings.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-perf-memory-leak-hunting/">Acumatica Performance — Memory Leak Hunting</a></li>
+      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Diagnosing a Slow GI</a></li>
+      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
+      <li><a href="/blog/acumatica-perf-graph-event-loop/">Acumatica Performance — Graph Event Loop Optimisation</a></li>
+      <li><a href="/blog/acumatica-perf-cache-tuning/">Acumatica Performance — Cache Tuning</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

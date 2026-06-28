@@ -92,18 +92,228 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica South Africa SARS VAT — A Complete Guide is one of those projects that every Acumatica implementer in Africa eventually takes on, and one that no two countries do the same way. The tax authority's API, the device registration flow, the receipt format, the offline tolerance — all vary. This guide is the field-tested pattern for South Africa, with the regulatory specifics, the integration architecture, and the operational hygiene that keeps the SARS happy and the finance team sane.</p>
+
+<h2 id="regulatory-context">The regulatory context</h2>
+<p>The regulatory framework is set by the tax authority. Every detail — what triggers a submission, what format the receipt must take, what happens when the device is offline — flows from that framework. Skim the official documentation before you write any code. The cost of getting it wrong is a fine, a failed audit, or both.</p>
+
+<table>
+  <tr><th>Concept</th><th>What it means</th></tr>
+  <tr><td>Device</td><td>A registered point-of-sale or invoice issuance point</td></tr>
+  <tr><td>Receipt</td><td>A fiscal document with a unique number and a signed payload</td></tr>
+  <tr><td>Fiscal day</td><td>The period between opening and closing of a device</td></tr>
+  <tr><td>Offline mode</td><td>Operation when the device cannot reach the tax authority's servers</td></tr>
+  <tr><td>Audit file</td><td>The export of all fiscal receipts for a given period</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Read the regulation, then the API</strong>
+  <p>The API is a reflection of the regulation. If the API behaves in a way that seems strange, it is because the regulation requires it. The fastest way to debug a fiscalisation integration is to re-read the relevant section of the regulation, not to re-read the API docs.</p>
+</div>
+
+<h2 id="acumatica-role">What Acumatica brings to the table</h2>
+<p>Acumatica's tax engine handles the data model — tax zones, tax categories, tax schedules, the calculation per line. The fiscalisation layer is yours to build on top. The integration sits between Acumatica and the tax authority's API; the finance team works in Acumatica as normal.</p>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · THE FISCALISATION LAYER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaSouthAfricaSarsVatService
+{
+    private readonly HttpClient _http;
+    private readonly AcumaticaClient _acumatica;
+
+    public async Task&lt;FiscalReceipt&gt; IssueReceipt(ARInvoice invoice)
+    {
+        var receipt = MapToFiscalReceipt(invoice);
+        var response = await _http.PostAsJsonAsync("/api/receipts", receipt);
+        invoice.GetExtension&lt;ARInvoiceExt&gt;().UsrFiscalReceiptNbr = response.ReceiptNbr;
+        invoice.GetExtension&lt;ARInvoiceExt&gt;().UsrFiscalSignature = response.Signature;
+        invoice.GetExtension&lt;ARInvoiceExt&gt;().UsrFiscalQR = response.QRCode;
+        await _acumatica.Update(invoice);
+        return response;
+    }
+}</code></pre>
+</div>
+
+<p>For the broader Acumatica REST patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a>.</p>
+
+<h2 id="device-registration">Device registration</h2>
+<p>Every South Africa fiscalisation integration starts with device registration. The flow:</p>
+<ol>
+  <li>Generate a device key pair (or use the authority's).</li>
+  <li>Submit the public key, the device serial, and the taxpayer TIN to the authority.</li>
+  <li>Receive a device ID and a certificate back.</li>
+  <li>Store the certificate and the private key in a vault.</li>
+  <li>Open a fiscal day on the device before any receipts are issued.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · DEVICE REGISTRATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public async Task&lt;Device&gt; RegisterDevice(string tin, string serial)
+{
+    var keyPair = RsaKeyPair.Generate(2048);
+    var registration = new { TIN = tin, SerialNbr = serial, PublicKey = keyPair.PublicKeyPem };
+    var resp = await _http.PostAsJsonAsync("/api/devices/register", registration);
+    var device = await resp.Content.ReadFromJsonAsync&lt;Device&gt;();
+    _vault.Store($"device:{device.DeviceID}:privateKey", keyPair.PrivateKeyPem);
+    _vault.Store($"device:{device.DeviceID}:certificate", device.Certificate);
+    return device;
+}</code></pre>
+</div>
+
+<div class="callout">
+  <strong>Store the private key in a vault</strong>
+  <p>The private key signs every fiscal receipt. If it leaks, the device is compromised and the taxpayer is liable. Azure Key Vault, AWS Secrets Manager, HashiCorp Vault — all fine. The key never lives in code, config files, or environment variables.</p>
+</div>
+
+<h2 id="fiscal-day">The fiscal day</h2>
+<p>A fiscal day is the period between opening and closing of a device. Within a fiscal day, receipts are numbered sequentially; cross-day numbering is not allowed. The integration must:</p>
+<ul>
+  <li>Open a fiscal day on the first receipt of the day (or on schedule, if the device is shared).</li>
+  <li>Close the fiscal day at end of day (or on demand).</li>
+  <li>Number receipts within the day sequentially.</li>
+  <li>Handle the case where the day was never opened (raise an alert).</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · FISCAL DAY LIFECYCLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public async Task OpenFiscalDay(Device device, DateTime date)
+{
+    var resp = await _http.PostAsJsonAsync($"/api/devices/{device.DeviceID}/days", new { Date = date });
+    var day = await resp.Content.ReadFromJsonAsync&lt;FiscalDay&gt;();
+    _state.SetOpenDay(device.DeviceID, day);
+}
+public async Task CloseFiscalDay(Device device, FiscalDay day)
+{
+    var resp = await _http.PostAsync($"/api/devices/{device.DeviceID}/days/{day.DayID}/close", null);
+    _state.ClearOpenDay(device.DeviceID);
+}</code></pre>
+</div>
+
+<h2 id="offline-mode">Offline mode</h2>
+<p>Most fiscalisation frameworks allow offline operation for a limited period, after which the device must reconnect and submit the backlog. The integration must handle the transition cleanly.</p>
+
+<table>
+  <tr><th>State</th><th>Action</th></tr>
+  <tr><td>Online</td><td>Submit each receipt in real time</td></tr>
+  <tr><td>Offline (transient)</td><td>Buffer locally, submit when online</td></tr>
+  <tr><td>Offline (extended)</td><td>Alert, continue buffering, escalate</td></tr>
+  <tr><td>Backlog</td><td>Drain in batches, in order, with retries</td></tr>
+</table>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · OFFLINE BUFFER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class OfflineBuffer
+{
+    private readonly Queue&lt;FiscalReceipt&gt; _buffer = new();
+    public async Task Submit(FiscalReceipt receipt)
+    {
+        if (IsOnline())
+        {
+            try { await _http.Submit(receipt); }
+            catch (NetworkException)
+            {
+                _buffer.Enqueue(receipt);
+                _state.SetOffline();
+            }
+        }
+        else { _buffer.Enqueue(receipt); }
+    }
+    public async Task Drain()
+    {
+        while (_buffer.TryDequeue(out var receipt)) await _http.Submit(receipt);
+    }
+}</code></pre>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Buffer capacity</strong>
+  <p>The offline buffer must be sized for the worst-case outage. A buffer of 10,000 receipts is usually enough; 100,000 is safe. Beyond that, the system should fail loudly — better to stop issuing receipts than to silently lose them.</p>
+</div>
+
+<h2 id="credit-notes">Credit notes and refunds</h2>
+<p>Credit notes are not just reverses; they are fiscal documents in their own right. The integration must:</p>
+<ol>
+  <li>Reference the original fiscal receipt number.</li>
+  <li>Generate a new fiscal receipt for the credit note.</li>
+  <li>Maintain the audit trail (which credit note for which receipt).</li>
+  <li>Submit the credit note to the authority; do not modify the original.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CREDIT NOTE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public async Task&lt;FiscalReceipt&gt; IssueCreditNote(ARInvoice creditNote, ARInvoice original)
+{
+    var ext = original.GetExtension&lt;ARInvoiceExt&gt;();
+    var receipt = new FiscalReceipt
+    {
+        Type = "CreditNote",
+        OriginalReceiptNbr = ext.UsrFiscalReceiptNbr,
+        OriginalSignature = ext.UsrFiscalSignature,
+    };
+    var response = await _http.PostAsJsonAsync("/api/receipts", receipt);
+    creditNote.GetExtension&lt;ARInvoiceExt&gt;().UsrFiscalReceiptNbr = response.ReceiptNbr;
+    creditNote.GetExtension&lt;ARInvoiceExt&gt;().UsrFiscalSignature = response.Signature;
+    creditNote.GetExtension&lt;ARInvoiceExt&gt;().UsrReferenceOriginal = ext.UsrFiscalReceiptNbr;
+    return response;
+}</code></pre>
+</div>
+
+<h2 id="reconciliation">Reconciliation</h2>
+<p>At month end, the integration must reconcile the Acumatica records with the authority's records. The checks:</p>
+<ul>
+  <li>Every Acumatica invoice has a fiscal receipt number.</li>
+  <li>Every fiscal receipt number on the authority's side has an Acumatica record.</li>
+  <li>The totals match (Acumatica total = authority total).</li>
+  <li>There are no receipts in offline buffer that have not been submitted.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · MONTH-END RECONCILIATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Find Acumatica invoices without a fiscal receipt
+SELECT ar.RefNbr, ar.DocDate, ar.CuryOrigDocAmt
+FROM ARInvoice ar
+LEFT JOIN ARInvoiceExt ext ON ar.NoteID = ext.NoteID
+WHERE ar.Released = 1
+  AND ar.DocDate BETWEEN '2026-01-01' AND '2026-01-31'
+  AND (ext.UsrFiscalReceiptNbr IS NULL OR ext.UsrFiscalReceiptNbr = '');</code></pre>
+</div>
+
+<p>For the broader data reconciliation patterns, see the <a href="/blog/acumatica-data-migration-import-scenarios/">data migration guide</a>.</p>
+
+<h2 id="common-failures">Common failures</h2>
+<p>The five failures I have seen, in order of how often they happen:</p>
+<ol>
+  <li><strong>Expired device certificate.</strong> Certificates have a validity period; the renewal must be scheduled.</li>
+  <li><strong>Offline buffer overflow.</strong> A long network outage; the buffer fills; the device stops issuing receipts.</li>
+  <li><strong>Clock drift.</strong> The device clock is wrong; the authority rejects the receipt. Use NTP.</li>
+  <li><strong>Duplicate receipts.</strong> A retry that was not idempotent; the authority rejects the second submission. Use the natural key as the idempotency token.</li>
+  <li><strong>Schema change.</strong> The authority updates the API; the integration breaks. Subscribe to the authority's developer newsletter.</li>
+</ol>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>South Africa's fiscalisation is not a weekend project. The integration touches the device, the certificate, the fiscal day, the receipts, the credit notes, the offline buffer, the reconciliation, and the audit trail. Get all eight right and the authority is happy, the auditor is happy, and the finance team is happy. Skip any one and you are debugging in production with a deadline.</p>
+<p>For the broader tax engine configuration, see the <a href="/blog/acumatica-tax-engine-configuring-multi-country/">multi-country tax engine guide</a>. For the related reading, see the <a href="/blog/zimbabwe-zimra-fdms-acumatica-integration/">Zimbabwe ZIMRA FDMS guide</a> and the <a href="/blog/kra-etims-acumatica-integration/">KRA eTIMS guide</a>.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-kenya-withholding-tax-setup/">Acumatica Kenya Withholding Tax Setup — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-rwanda-trading-account/">Acumatica Rwanda Trading Account Reconciliation</a></li>
+      <li><a href="/blog/acumatica-zambia-turnover-tax/">Acumatica Zambia Turnover Tax — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-tanzania-excise-duty/">Acumatica Tanzania Excise Duty Configuration</a></li>
+      <li><a href="/blog/acumatica-kenya-vat-return-automation/">Acumatica Kenya VAT Return Automation — A Complete Guide</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>

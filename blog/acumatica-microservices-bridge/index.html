@@ -93,18 +93,174 @@
 </header>
 <main class="article">
   <div class="container">
-    undefined
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+<p>Acumatica Microservices Bridge Pattern is the Acumatica operations topic that you only get good at by doing it badly a few times. The first upgrade is always a surprise; the second is a learning; the third is a process. This guide is the process — the planning, the execution, the validation, the rollback — that turns the upgrade from a high-risk event into a routine maintenance task.</p>
+
+<h2 id="release-cadence">The Acumatica release cadence</h2>
+<p>Acumatica ships two major releases per year — R1 (around March) and R2 (around September). Each release introduces new features, deprecates old ones, and occasionally makes breaking changes. The customisation you ship today must survive the next 4-6 releases without intervention.</p>
+
+<div class="callout">
+  <strong>Plan for upgrades, not against them</strong>
+  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control with a clear branch strategy. The discipline is small; the payoff is large.</p>
+</div>
+
+<h2 id="4-weeks-out">Four weeks out</h2>
+<p>The first step is reading. The release notes are 50-100 pages; they tell you:</p>
+<ul>
+  <li>What is new (and how it might interact with your customisation).</li>
+  <li>What is deprecated (and whether your code uses it).</li>
+  <li>What is breaking (and the migration path).</li>
+  <li>What is fixed (and whether the fix changes your workaround).</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TEMPLATE · UPGRADE PLANNING DOCUMENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Acumatica [VERSION] Upgrade Plan
+
+## Pre-upgrade
+- [ ] Release notes read cover to cover (twice)
+- [ ] Breaking changes identified for our customisations
+- [ ] Top 20 screens identified by user count
+- [ ] Staging tenant with production data
+- [ ] Database backup verified
+
+## Upgrade day
+- [ ] Pre-upgrade database backup
+- [ ] Apply upgrade
+- [ ] Run post-upgrade scripts
+- [ ] Smoke test top 20 screens
+- [ ] Run regression suite
+- [ ] Verify customisation compilation
+- [ ] Hand the tenant back</code></pre>
+</div>
+
+<p>For the broader upgrade checklist, see the <a href="/blog/acumatica-upgrade-checklist-r1-r2/">upgrade checklist</a> and the <a href="/blog/acumatica-customization-upgrade-survival-guide/">customisation upgrade survival guide</a>.</p>
+
+<h2 id="2-weeks-out">Two weeks out</h2>
+<p>Apply the upgrade to the staging tenant. Run the test suite. The first wave of issues is usually:</p>
+<ul>
+  <li><strong>Compilation errors.</strong> A method signature changed; your code does not compile. Fix the call sites.</li>
+  <li><strong>Missing fields.</strong> A field was renamed or removed; your code references it. Update the references.</li>
+  <li><strong>Behavioural changes.</strong> An event fires differently; a workflow transitions differently. Update the handlers.</li>
+  <li><strong>New defaults.</strong> A new field is required; your data does not have it. Backfill.</li>
+</ul>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · COMPATIBILITY CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Use conditional compilation to handle multiple versions
+#if ACUMATICA_2025R2_OR_NEWER
+    var result = Base.NewMethod();
+#else
+    var result = Base.LegacyMethod();
+#endif</code></pre>
+</div>
+
+<h2 id="1-week-out">One week out</h2>
+<p>Schedule the production upgrade window. The window should be:</p>
+<ul>
+  <li>Long enough for the upgrade, the smoke test, and the rollback if needed (typically 4-8 hours).</li>
+  <li>At a known low-traffic time (typically Friday evening or Saturday morning for a 24/7 business).</li>
+  <li>With the rollback plan tested and ready to execute.</li>
+  <li>With all stakeholders notified in advance.</li>
+</ul>
+
+<div class="callout callout-warn">
+  <strong>Never upgrade on a Friday afternoon</strong>
+  <p>A Friday afternoon upgrade means the rollback, if needed, happens on Saturday morning when the team is tired and the user base is catching up. Upgrade on Saturday morning instead — the team is fresh, the user base is light, and the rollback is doable.</p>
+</div>
+
+<h2 id="upgrade-day">Upgrade day</h2>
+<p>The sequence:</p>
+<ol>
+  <li><strong>Pre-upgrade backup.</strong> Database, file share, IIS config. The backup that lets you roll back.</li>
+  <li><strong>Apply the upgrade.</strong> Run the Acumatica upgrade tool. This is the longest single step.</li>
+  <li><strong>Post-upgrade scripts.</strong> Any database scripts that need to run after the framework upgrade.</li>
+  <li><strong>Smoke test.</strong> Walk the top 20 screens. Verify they render, the data is correct, the workflows transition.</li>
+  <li><strong>Regression suite.</strong> Run the automated test suite. Failures are signals.</li>
+  <li><strong>Hand the tenant back.</strong> Communicate to the user base that the upgrade is complete.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SCRIPT · ROLLBACK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># If the smoke test fails, execute the rollback:
+
+# 1. Stop IIS
+iisreset /stop
+
+# 2. Restore the database
+sqlcmd -S sqlserver -d acumatica -Q "RESTORE DATABASE acumatica FROM DISK = 'C:\Backups\pre-upgrade.bak' WITH REPLACE, RECOVERY;"
+
+# 3. Restore the file share
+robocopy "C:\Backups\fileshare" "C:\Acumatica\Files" /MIR
+
+# 4. Restart IIS
+iisreset /start</code></pre>
+</div>
+
+<p>For the broader disaster recovery patterns, see the <a href="/blog/acumatica-disaster-recovery-multi-region/">disaster recovery guide</a> and the <a href="/blog/acumatica-backup-and-restore-strategy/">backup and restore guide</a>.</p>
+
+<h2 id="post-upgrade">Post-upgrade</h2>
+<p>The 48 hours after the upgrade are the highest-risk period. The monitoring:</p>
+<ul>
+  <li><strong>Error rate.</strong> A spike in errors indicates a customisation that worked on staging but not on production.</li>
+  <li><strong>Performance.</strong> A slow screen indicates a new query plan that is not as efficient as the old one.</li>
+  <li><strong>User reports.</strong> A new ticket is often a regression. Investigate, don't dismiss.</li>
+  <li><strong>Workflow failures.</strong> A transition that did not fire is a data model or handler issue.</li>
+</ul>
+
+<div class="callout">
+  <strong>Document the upgrade</strong>
+  <p>After every upgrade, document what worked and what did not. The next upgrade is a year away; your memory will not be reliable. The document is the institutional knowledge that makes the next upgrade a routine.</p>
+</div>
+
+<h2 id="ci-cd">CI/CD for customisations</h2>
+<p>The customisation that is not in source control is the customisation that will be lost. The minimum CI/CD:</p>
+<ol>
+  <li><strong>Source control.</strong> Git, with a clear branching strategy.</li>
+  <li><strong>Automated build.</strong> Compile the customisation DLL on every commit.</li>
+  <li><strong>Automated test.</strong> Run the unit test suite on every commit.</li>
+  <li><strong>Automated publish.</strong> On merge to main, publish to a staging tenant.</li>
+  <li><strong>Manual gate.</strong> A human approves the promotion to production.</li>
+</ol>
+
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">GITHUB ACTIONS · CI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>name: CI
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - run: dotnet restore
+      - run: dotnet build --no-restore
+      - run: dotnet test --no-build</code></pre>
+</div>
+
+<p>For the broader CI/CD patterns, see the <a href="/blog/acumatica-cicd-github-actions-for-acumatica/">CI/CD guide</a> and the <a href="/blog/acumatica-cicd-pipeline-design/">pipeline design guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>Read the release notes. Test on staging. Schedule the window. Backup before. Smoke test after. Monitor for 48 hours. Document the upgrade. The discipline is the same.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-event-driven-architecture/">Acumatica Event-Driven Architecture</a></li>
+      <li><a href="/blog/acumatica-cqrs-pattern/">Acumatica CQRS Pattern — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-saga-pattern-transactions/">Acumatica Saga Pattern for Transactions</a></li>
+      <li><a href="/blog/acumatica-domain-driven-design/">Acumatica Domain-Driven Design</a></li>
+      <li><a href="/blog/acumatica-clean-architecture/">Acumatica Clean Architecture</a></li>
+      </ul>
     </div>
+
+    
+
   </div>
 </main>
 <script>
