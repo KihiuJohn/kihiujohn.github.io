@@ -105,17 +105,129 @@
 <h2>Migration strategy</h2>
 <p>Classic UI customisations continue to work in the Modern UI — they just look like classic screens. Migrate progressively, screen by screen, after you've validated that all the field-level extension logic still works. Use the <em>Convert to Modern UI</em> tool as a starting point, but always hand-tune the result.</p>
 
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
-      <div>
-        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
-        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
-      </div>
+    
+<h2 id="deep-dive">Going deeper: production-grade patterns</h2>
+<p>The patterns above cover the basics. In production, the same patterns have to survive three things: scale, edge cases, and the next Acumatica upgrade. Here are the patterns that distinguish a working customisation from a great one — the ones I have applied to every client project in East and Southern Africa, and the ones that make the difference between a customisation the user trusts and a customisation they curse.</p>
+
+<h3>Defensive coding for the unexpected</h3>
+<p>Production is where the assumption dies. Every customisation that "works in test" fails in production the first time a customer name has a special character, an invoice is in a foreign currency, or a record has a null in a field you thought was required. The defensive habit is to <strong>explicitly handle the null, the empty, the special character, and the foreign currency</strong> in every event handler and every code path. The cost is 20% more code. The payoff is 95% fewer production tickets.</p>
+
+<p>Three patterns I apply everywhere:</p>
+<ul>
+  <li><strong>Null-safe property access.</strong> Use <code>?.</code> on every property access; the alternative is a NullReferenceException at 2 AM.</li>
+  <li><strong>Explicit value handling.</strong> If a field can be empty, treat it as empty. Do not assume the default value.</li>
+  <li><strong>Defensive database reads.</strong> A <code>PXSelect</code> that returns null is a valid result, not an error. Handle it.</li>
+</ul>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · DEFENSIVE PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class DefensiveExt : PXGraphExtension&lt;BaseGraph&gt;
+{
+    protected void _(Events.RowSelected&lt;MyDAC&gt; e)
+    {
+        var row = e.Row;
+        if (row == null) return;                          // null-safe
+        var ext = row.GetExtension&lt;MyDACExt&gt;();
+        if (ext == null) return;                         // null-safe extension
+        var value = ext.UsrField ?? "DEFAULT";           // null-coalesce
+        var ok = decimal.TryParse(value, out var n);    // try-parse
+        if (!ok) { /* handle */ }
+    }
+}</code></pre>
+</div>
+
+<h3>Performance: the patterns that scale</h3>
+<p>Five performance patterns I apply on every customisation, in order of impact:</p>
+<ol>
+  <li><strong>Move heavy logic out of <code>RowSelected</code>.</strong> Push validation to <code>RowPersisting</code>, side effects to a graph action triggered by a button. <code>RowSelected</code> fires for every row on every render.</li>
+  <li><strong>Index the join columns.</strong> Every BQL <code>Where&lt;&gt;</code> filter needs an index. Check the execution plan before you ship.</li>
+  <li><strong>Filter at the GI, not the UI.</strong> A GI that returns 5 million rows and filters in the presentation layer will time out. Push filters into the Conditions tab.</li>
+  <li><strong>Batch the work.</strong> Loop with 1,000 calls is slow; loop with 10 calls of 100 records is fast. Batch where you can.</li>
+  <li><strong>Cache the static.</strong> Tax schedules, account lists, and other static reference data can be cached for the lifetime of the app pool. Reduce the database load.</li>
+</ol>
+
+<p>For the full performance playbook, see the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a> and the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
+
+<h3>Upgrade survival</h3>
+<p>The customisation that breaks on the next Acumatica upgrade is the one that took a shortcut. The patterns that survive:</p>
+<ul>
+  <li><strong>Extend, never modify.</strong> <code>PXCacheExtension&lt;T&gt;</code> over editing the base DAC. <code>PXGraphExtension&lt;T&gt;</code> over editing the base graph.</li>
+  <li><strong>Usr prefix on every field.</strong> Acumatica uses this to separate your fields from base fields. Without it, your field collides with a base field on the next upgrade.</li>
+  <li><strong>Source control with a clear branch strategy.</strong> Main is production; develop is next release; feature branches are work in flight. Tag every release.</li>
+  <li><strong>Test on production data.</strong> The staging tenant is a copy of production. The data shape is the same. The bugs are the same.</li>
+</ul>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · USR PREFIX CONVENTION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Base field — Acumatica owns this
+[PXDBString(40)]
+public string RefNbr { get; set; }
+
+// Your field — always Usr prefix, never collides
+[PXDBString(40)]
+[PXUIField(DisplayName = "External Ref")]
+public string UsrExternalRef { get; set; }
+
+// Your DAC extension — soft extension, survives table drops
+[PXTable(IsOptional = true)]
+public class MyDACExt : PXCacheExtension&lt;MyDAC&gt;
+{
+    #region UsrCustomField
+    [PXDBString(60)]
+    public string UsrCustomField { get; set; }
+    public abstract class usrCustomField :
+        PX.Data.BQL.BqlString.Field&lt;usrCustomField&gt; { }
+    #endregion
+}</code></pre>
+</div>
+
+<h3>Testing: the habit that pays for itself</h3>
+<p>If you are not testing your customisation with the Acumatica Unit Test Framework, you are running blind. The framework ships with every installation, costs nothing, and pays for itself the first time an upgrade changes a method signature on you. The minimum coverage:</p>
+<ul>
+  <li>Every graph action with business logic — happy path + the most common error path.</li>
+  <li>Every DAC field with a defaulting or validation rule.</li>
+  <li>Every workflow transition — that the right state is reached from the right source state.</li>
+  <li>Every import scenario with a sample CSV that exercises the validation rules.</li>
+</ul>
+
+<p>For the full test framework walkthrough, see the <a href="/blog/acumatica-test-automation-unit-test-framework/">unit test framework guide</a>.</p>
+
+<h3>Operations: what to do after the customisation is live</h3>
+<p>A customisation is not "done" when it ships. It is "done" when it has run in production for a quarter without a critical incident. The operational habits that get you there:</p>
+<ul>
+  <li><strong>Monitor the slow queries.</strong> Acumatica's System Monitor has a slow-query log. Review weekly; the slow query you ship is the production incident in two months.</li>
+  <li><strong>Track the licence headroom.</strong> Every active session counts. A leaking integration can lock out real users within an hour.</li>
+  <li><strong>Review the audit log.</strong> Not for compliance — for understanding how the system is used. The audit log tells you where to optimise next.</li>
+  <li><strong>Document the runbook.</strong> When the customisation fails (and it will), the runbook is what saves the on-call. Document the failure modes, the diagnostic flow, the fix.</li>
+</ul>
+
+<p>For the broader operational patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring guide</a> and the <a href="/blog/acumatica-license-concurrency-explained/">licence concurrency guide</a>.</p>
+
+<h3>The migration off the old customisation</h3>
+<p>Every customisation is eventually replaced. Plan for that day from the start. The patterns:</p>
+<ul>
+  <li><strong>Wrap external dependencies.</strong> If your customisation talks to an external API, wrap the call in your own service. When the API changes, you change one place.</li>
+  <li><strong>Tag the version.</strong> Every customisation has a version. The version is in the database, in the metadata, in the package. When you upgrade, you know what you are upgrading from.</li>
+  <li><strong>Document the data model.</strong> Every custom field, every new table, every relationship. The next person who has to read the customisation should be able to start with the data model.</li>
+  <li><strong>Test the migration path.</strong> A customisation that ships and cannot be removed is a liability. The migration path off should be tested before the customisation is in production.</li>
+</ul>
+
+<p>For the broader migration patterns, see the <a href="/blog/acumatica-data-migration-import-scenarios/">data migration guide</a>.</p>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+        <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
+        <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
+        <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
+        <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
+        <li><a href="/blog/acumatica-architecture-for-new-developers/">Acumatica Architecture — A Primer for New Developers</a></li>
+      </ul>
     </div>
-  </div>
+</div>
 </main>
 <script>
 document.querySelectorAll('.code-block .copy-btn').forEach(b=>{b.addEventListener('click',async()=>{const c=b.closest('.code-block').querySelector('code');if(!c)return;try{await navigator.clipboard.writeText(c.innerText);const o=b.textContent;b.textContent='✓ Copied';b.classList.add('copied');setTimeout(()=>{b.textContent=o;b.classList.remove('copied')},1800)}catch(e){}});});
