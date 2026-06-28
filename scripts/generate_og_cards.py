@@ -58,8 +58,22 @@ def svg_escape(s: str) -> str:
     )
 
 
+def topic_footer(title: str, tag: str) -> str:
+    blob = f"{title} {tag}".lower()
+    if "laravel" in blob or "php" in blob:
+        return "Laravel · PHP · Nairobi"
+    if "acumatica" in blob:
+        return "Acumatica ERP · Nairobi"
+    if "azure" in blob or "aws" in blob or "cloud" in blob:
+        return "Cloud Engineering · Nairobi"
+    if "kra" in blob or "etims" in blob or "rra" in blob or "zra" in blob or "vsdc" in blob or "fdms" in blob or "fiscal" in blob:
+        return "Tax Fiscalisation · Nairobi"
+    return "John Kihiu · Nairobi"
+
+
 def build_svg(title: str, tag: str) -> str:
     lines = wrap_title(title)
+    footer = topic_footer(title, tag)
     # Vertical centre block of 1-3 lines, line-height 78px
     line_h = 78
     block_h = line_h * len(lines)
@@ -84,7 +98,7 @@ def build_svg(title: str, tag: str) -> str:
   <rect x="0" y="0" width="14" height="630" fill="#059669"/>
   <text x="80" y="110" font-family="Inter, system-ui, sans-serif" font-size="22" font-weight="700" fill="#10B981" letter-spacing="4">{tag_safe}</text>
   {text_lines}<text x="80" y="555" font-family="Inter, system-ui, sans-serif" font-size="26" font-weight="700" fill="#FAFAF9">John Kihiu</text>
-  <text x="80" y="590" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="500" fill="#A8A29E">Acumatica ERP · Laravel · Nairobi</text>
+  <text x="80" y="590" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="500" fill="#A8A29E">{svg_escape(footer)}</text>
   <text x="1120" y="590" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="600" fill="#059669" text-anchor="end">kihiujohn.github.io</text>
 </svg>
 """
@@ -114,17 +128,39 @@ def process(path: Path) -> bool:
     return True
 
 
+LISTING_IMG_RE = re.compile(
+    r'(<a class="blog-img" href="/blog/([^"/]+)/"[^>]*>\s*<img src=")[^"]+(")',
+    re.IGNORECASE,
+)
+
+
+def rewrite_listing() -> int:
+    listing = BLOG / "index.html"
+    raw = listing.read_text(encoding="utf-8")
+    def repl(m: re.Match[str]) -> str:
+        slug = m.group(2)
+        return f"{m.group(1)}{SITE}/assets/og/{slug}.svg{m.group(3)}"
+    new_raw, n = LISTING_IMG_RE.subn(repl, raw)
+    if new_raw != raw:
+        listing.write_text(new_raw, encoding="utf-8", newline="\n")
+    return n
+
+
 def main() -> None:
     count = 0
     skipped: list[str] = []
     for p in sorted(BLOG.glob("*/index.html")):
+        if p.parent.name == "" or p.name != "index.html" or p.parent == BLOG:
+            continue
         if process(p):
             count += 1
         else:
             skipped.append(p.parent.name)
-    print(f"Processed: {count}")
+    print(f"Processed posts: {count}")
     if skipped:
         print(f"Skipped (no <title>): {skipped}")
+    n = rewrite_listing()
+    print(f"Rewrote listing thumbnails: {n}")
 
 
 if __name__ == "__main__":
