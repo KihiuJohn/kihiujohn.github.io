@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acumatica Performance Tuning — The Definitive Guide | John Kihiu</title>
+<meta name="description" content="A complete reference to Acumatica performance tuning — application, database, IIS, Azure, and Acumatica-specific patterns that make a slow tenant fast.">
+<meta name="keywords" content="Acumatica performance, Acumatica slow tenant, Acumatica tuning, Acumatica SQL performance, Acumatica IIS tuning, John Kihiu">
+<meta name="author" content="John Kihiu">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+<link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-performance-tuning-the-definitive-guide/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Acumatica Performance Tuning — The Definitive Guide">
+<meta property="og:description" content="A complete reference to Acumatica performance tuning — application, database, IIS, Azure, and Acumatica-specific patterns that make a slow tenant fast.">
+<meta property="og:image" content="https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=1200&h=630&fit=crop&auto=format">
+<meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-performance-tuning-the-definitive-guide/">
+<meta property="article:author" content="John Kihiu">
+<meta property="article:section" content="acumatica">
+<meta property="article:tag" content="performance">
+<meta property="article:tag" content="sql">
+<meta property="article:tag" content="cloud">
+<meta property="article:tag" content="iis">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Performance Tuning — The Definitive Guide","description":"A complete reference to Acumatica performance tuning — application, database, IIS, Azure, and Acumatica-specific patterns that make a slow tenant fast.","image":"https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=1200&h=630&fit=crop&auto=format","datePublished":"2026-06-11","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-performance-tuning-the-definitive-guide/"}}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Performance Tuning — The Definitive Guide","item":"https://kihiujohn.github.io/blog/acumatica-performance-tuning-the-definitive-guide/"}]}
+</script>
+<link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(48rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
+  html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
+  a{color:inherit;text-decoration:none}
+  .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+  header.post-head{padding:clamp(2rem,5vw,3.5rem) 0 clamp(1.5rem,3vw,2rem);background:linear-gradient(180deg,var(--surface),var(--bg));border-bottom:1px solid var(--border)}
+  .breadcrumb{font-size:0.78rem;color:var(--muted);margin-bottom:1rem}
+  .breadcrumb a:hover{color:var(--accent)}
+  .breadcrumb .sep{margin:0 0.4rem;color:#A8A29E}
+  .tag{display:inline-block;background:var(--accent);color:#fff;padding:0.25rem 0.7rem;border-radius:3px;font-size:0.68rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.85rem}
+  h1{font-size:clamp(1.85rem,4vw,2.85rem);font-weight:800;margin-bottom:1rem;text-wrap:balance}
+  .meta{display:flex;flex-wrap:wrap;gap:1.25rem;font-size:0.85rem;color:var(--muted);padding-top:1rem;border-top:1px solid var(--border);margin-top:1.25rem}
+  main.article{padding:clamp(2rem,5vw,3.5rem) 0 clamp(3rem,6vw,5rem);font-size:1.05rem;color:var(--text-2)}
+  main.article p{margin-bottom:1.1rem}
+  main.article h2{font-size:1.55rem;color:var(--text);margin:2.25rem 0 0.85rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)}
+  main.article h3{font-size:1.15rem;color:var(--text);margin:1.75rem 0 0.65rem}
+  main.article ul,main.article ol{padding-left:1.4rem;margin-bottom:1.1rem}
+  main.article li{margin-bottom:0.4rem}
+  main.article li::marker{color:var(--accent)}
+  main.article strong{color:var(--text);font-weight:600}
+  main.article a{color:var(--accent);border-bottom:1px solid #A7F3D0}
+  main.article blockquote{border-left:3px solid var(--accent);background:var(--accent-light);padding:1rem 1.25rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-style:italic}
+  main.article :not(pre) > code{font-family:'JetBrains Mono',monospace;font-size:0.86em;background:var(--bg-alt);padding:0.12em 0.42em;border-radius:3px;border:1px solid var(--border);color:#047857;font-weight:500}
+  .callout{background:var(--accent-light);border:1px solid #A7F3D0;border-radius:6px;padding:1.1rem 1.3rem;margin:1.5rem 0;font-size:0.95rem;color:var(--text)}
+  .callout strong{display:block;margin-bottom:0.35rem;color:#047857}
+  .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
+  .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
+  .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn:hover{background:#475569;color:#fff}
+  .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
+  .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
+  .code-block pre code{font-family:'JetBrains Mono',monospace;font-size:0.83rem;line-height:1.65;color:#E2E8F0;background:transparent;display:block;white-space:pre}
+  table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:0.92rem}
+  th,td{padding:0.6rem 0.85rem;text-align:left;border-bottom:1px solid var(--border)}
+  th{font-weight:600;background:var(--bg-alt);color:var(--text)}
+</style>
+</head>
+<body data-page="post">
+<header class="post-head">
+  <div class="container">
+    <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Performance Tuning — The Definitive Guide</span></nav>
+    <span class="tag">Acumatica · Performance</span>
+    <h1>Acumatica Performance Tuning — The Definitive Guide</h1>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A complete reference to Acumatica performance tuning — application, database, IIS, Azure, and Acumatica-specific patterns that make a slow tenant fast.</p>
+    <div class="meta"><span>John Kihiu</span><time datetime="2026-06-11">Jun 11, 2026</time><span>18 min read</span></div>
+  </div>
+</header>
+<main class="article">
+  <div class="container">
+    
+<p>Acumatica is fast out of the box. It becomes slow when one of three things happens: the SQL Server is undersized, the IIS application pool is misconfigured, or a customization is doing the wrong thing. This guide is the systematic approach to find and fix all three.</p>
+
+<h2>1. Establish a baseline</h2>
+<p>Before you tune anything, capture a baseline. Use SQL Server's Performance Monitor counters and Acumatica's built-in performance logs. Without a baseline, you cannot prove the fix worked.</p>
+
+<h2>2. The four layers to inspect</h2>
+<ol>
+  <li><strong>SQL Server</strong> — wait stats, query plans, index usage, blocking.</li>
+  <li><strong>IIS / application pool</strong> — recycling settings, thread count, queue length.</li>
+  <li><strong>Acumatica application</strong> — request handling, cache hit rate, slow request log.</li>
+  <li><strong>Custom code</strong> — slow graph events, large data contexts, expensive joins.</li>
+</ol>
+
+<h2>3. SQL Server — start here</h2>
+<p>Acumatica is a SQL Server application. The most common performance problems are SQL problems. Use:</p>
+<ul>
+  <li><code>sys.dm_exec_query_stats</code> — find the most expensive queries.</li>
+  <li><code>sys.dm_exec_wait_stats</code> — see where SQL Server is waiting.</li>
+  <li>Query Store (Acumatica 2022 R2+) — historical query performance over time.</li>
+  <li>Execution plans — the single most useful tool for query tuning.</li>
+</ul>
+
+<h2>4. Indexing</h2>
+<p>Most slow queries are missing-index queries. The rule:</p>
+<ul>
+  <li>Index the join columns.</li>
+  <li>Index the filter columns.</li>
+  <li>Index the foreign keys on every DAC.</li>
+  <li>Don't over-index — every index slows writes.</li>
+</ul>
+
+<h2>5. Application pool</h2>
+<p>IIS application pool misconfiguration is the second most common cause. Set:</p>
+<ul>
+  <li>Recycling: every 24 hours, or never (avoid the 5 AM recycle).</li>
+  <li>Idle timeout: 0 (no idle timeout).</li>
+  <li>Queue length: 5000 (default is too low for heavy load).</li>
+  <li>Worker process: one per core, no more.</li>
+</ul>
+
+<h2>6. Acumatica configuration</h2>
+<p>From the System Monitor screen, check:</p>
+<ul>
+  <li>Cache size — should be &gt; 80% hit rate.</li>
+  <li>Connection pool — should not be saturated.</li>
+  <li>Long-running requests — investigate anything over 30 seconds.</li>
+</ul>
+
+<h2>7. Customization patterns that hurt</h2>
+<ul>
+  <li>Heavy logic in <code>RowSelected</code> — fires for every row.</li>
+  <li>Loops in event handlers that fire on every save.</li>
+  <li>Excessive database calls where one would do.</li>
+  <li>Not using the cache invalidation properly.</li>
+  <li>Reports that fetch every row and filter in the report.</li>
+</ul>
+
+<h2>8. Azure-specific tuning</h2>
+<p>If you are on Azure VM or Azure SQL, additional considerations apply:</p>
+<ul>
+  <li>VM size — Standard D8s v3 minimum for production.</li>
+  <li>Premium storage for SQL data and log disks.</li>
+  <li>SQL Managed Instance vs Azure SQL — Managed Instance is closer to on-prem.</li>
+  <li>Application Insights for distributed tracing.</li>
+</ul>
+
+<h2>9. Load testing</h2>
+<p>Before declaring the tenant tuned, load test it. Tools:</p>
+<ul>
+  <li>Visual Studio Load Test (built in).</li>
+  <li>JMeter (open source).</li>
+  <li>k6 (modern, scriptable).</li>
+  <li>Acumatica's own performance testing tools (since 2024 R2).</li>
+</ul>
+
+<h2>10. Continuous monitoring</h2>
+<p>Tuning is not a one-time event. Set up:</p>
+<ul>
+  <li>SQL Server wait stats alerts.</li>
+  <li>Application pool recycling alerts.</li>
+  <li>Acumatica slow request log review.</li>
+  <li>User-reported "the system is slow" trend.</li>
+</ul>
+
+<h2>11. Common quick wins</h2>
+<ol>
+  <li>Add the missing index. 80% of slow queries are missing-index queries.</li>
+  <li>Move heavy logic out of <code>RowSelected</code>.</li>
+  <li>Disable the IIS 5 AM recycle.</li>
+  <li>Increase the application pool queue length.</li>
+  <li>Check the Acumatica cache hit rate.</li>
+</ol>
+
+<div class="callout">
+  <strong>Don't tune what isn't broken</strong>
+  The most expensive thing in performance work is changing the wrong thing. Baseline first, measure second, change third, measure again.
+</div>
+
+<h2>Related reading</h2>
+<ul>
+  <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server Indexing for Acumatica</a></li>
+  <li><a href="/blog/acumatica-iis-application-pool-tuning/">IIS Application Pool Tuning</a></li>
+  <li><a href="/blog/acumatica-azure-vm-sizing/">Azure VM Sizing</a></li>
+</ul>
+
+    <h2>Wrapping up</h2>
+    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
+      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
+      <div>
+        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+document.querySelectorAll('.code-block .copy-btn').forEach(b=>{b.addEventListener('click',async()=>{const c=b.closest('.code-block').querySelector('code');if(!c)return;try{await navigator.clipboard.writeText(c.innerText);const o=b.textContent;b.textContent='✓ Copied';b.classList.add('copied');setTimeout(()=>{b.textContent=o;b.classList.remove('copied')},1800)}catch(e){}});});
+</script>
+<script src="/assets/site-chrome.js" defer></script>
+</body>
+</html>
