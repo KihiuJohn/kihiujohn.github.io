@@ -15,13 +15,13 @@
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/employee-onboarding-automation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/employee-onboarding-automation/">
 <meta property="article:author" content="John Kihiu">
-<meta property="article:section" content="acumatica">
+<meta property="article:section" content="vertical-saas">
 <meta property="article:tag" content="hr">
 <meta property="article:tag" content="onboarding">
 <meta property="article:tag" content="automation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Employee Onboarding Automation","description": "Employee Onboarding Automation is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/employee-onboarding-automation.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/employee-onboarding-automation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Employee Onboarding Automation","description":"Employee Onboarding Automation is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/employee-onboarding-automation.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/employee-onboarding-automation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Employee Onboarding Automation","item":"https://kihiujohn.github.io/blog/employee-onboarding-automation/"}]}
@@ -85,139 +85,96 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Employee Onboarding Automation</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">Vertical SaaS · Hr</span>
     <h1>Employee Onboarding Automation</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Employee Onboarding Automation — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Employee Onboarding Automation is the work that turns a collection of business systems into a coherent operation.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-18">Jun 18, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Employee Onboarding Automation is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool. The workflow is what connects them. This guide is the field-tested pattern for this workflow tool in a business context.</p>
-
-<h2 id="what-is-workflow-automation">What is workflow automation</h2>
-<p>Workflow automation is the discipline of moving data between systems, transforming it, and triggering actions — without a human in the loop for the routine cases. The three categories:</p>
-<ul>
-  <li><strong>Scheduled</strong> — runs at a time (daily reconciliation, weekly report).</li>
-  <li><strong>Event-driven</strong> — runs when something happens (order created, payment received).</li>
-  <li><strong>On-demand</strong> — runs when a user clicks a button (re-send invoice, re-process batch).</li>
-</ul>
-
-<div class="callout">
-  <strong>Automate the routine, escalate the exception</strong>
-  <p>The 80/20 of workflow automation: 80% of the value comes from automating the 20% of cases that are routine. The other 80% of cases — the exceptions — need a human. A good workflow automation routes exceptions to a human, with all the context.</p>
+    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
+<h2 id="common-production-failure-modes">Common production failure modes</h2>
+<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXTable(IsOptional = true)]
+public class EmployeeExt : PXCacheExtension<Onboarding>
+{
+    [PXDBString(60)]
+    [PXUIField(DisplayName = "Vertical Code")]
+    public virtual string UsrVerticalCode { get; set; }
+}</code></pre>
 </div>
-
-<h2 id="tools">The tool landscape</h2>
-<p>The tools you can choose from, in increasing order of code involvement:</p>
-
+<h2 id="why-employee-on-a-horizontal-platform-beats-from-scratch">Why employee on a horizontal platform beats from-scratch</h2>
+<p>In the work I have done on employee onboarding automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The platform is the moat</strong>
+  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+</div>
+<h2 id="channel-partner-programs-for-onboarding">Channel partner programs for onboarding</h2>
+<p>When the work moves from design to production, the questions change. The employee is not the question; the failure mode of the onboarding is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Feature flag check
+SELECT enabled
+FROM feature_flags
+WHERE feature_key = 'employee'
+  AND tenant_id = @TenantId;</code></pre>
+</div>
+<h2 id="marketplace-listing-for-employee">Marketplace listing for employee</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Pricing is the testing ground</strong>
+  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+</div>
+<h2 id="soc-2-and-iso-27001-for-onboarding">SOC 2 and ISO 27001 for onboarding</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Tenant isolation
+SELECT *
+FROM employee
+WHERE tenant_id = @TenantId
+  AND vertical_code = @VerticalCode;</code></pre>
+</div>
+<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
+<p>The performance of onboarding in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Documentation is the product</strong>
+  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
+</div>
+<h2 id="what-employee-onboarding-automation-is-for">What Employee Onboarding Automation is for</h2>
+<p>Production onboarding looks different from development onboarding. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXTable(IsOptional = true)]
+public class EmployeeExt : PXCacheExtension<Onboarding>
+{
+    [PXDBString(60)]
+    [PXUIField(DisplayName = "Vertical Code")]
+    public virtual string UsrVerticalCode { get; set; }
+}</code></pre>
+</div>
 <table>
-  <tr><th>Tool</th><th>Use when</th><th>Trade-off</th></tr>
-  <tr><td>Zapier, Make, n8n</td><td>Simple integrations, no-code</td><td>Fast to build, hard to scale</td></tr>
-  <tr><td>Workato, Tray.io, Boomi</td><td>Enterprise iPaaS, governance</td><td>Expensive, but with audit and SLAs</td></tr>
-  <tr><td>Custom code (Laravel, .NET, Node)</td><td>Complex logic, performance-critical</td><td>Full control, full responsibility</td></tr>
-  <tr><td>Acumatica Business Events</td><td>ERP-native automation</td><td>Built-in, no external dependency</td></tr>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring onboarding first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add employee on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with onboarding when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
 </table>
-
-<h2 id="patterns">The patterns that work</h2>
-
-<h3>1. Webhook-first</h3>
-<p>For event-driven workflows, use webhooks. The source system pushes; the destination listens. Polling is the tax you pay when webhooks are not available.</p>
-
-<h3>2. Idempotency</h3>
-<p>Every event handler must be idempotent. The same event can fire twice (webhook redelivery, retry on timeout). The handler must recognise the second call and skip the work.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · IDEMPOTENT HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import hashlib
-from redis import Redis
-
-redis = Redis()
-
-def handle_event(event_id: str, event_body: dict):
-    # Compute a deterministic key for this event
-    key = f"event:{hashlib.sha256(event_id.encode()).hexdigest()}"
-    # Try to claim the event
-    if not redis.set(key, "processing", nx=True, ex=3600):
-        # Already claimed — skip
-        return {"status": "already-processed"}
-    # Process
-    do_the_work(event_body)
-    redis.set(key, "done", ex=86400)
-    return {"status": "ok"}</code></pre>
-</div> 
-
-<h3>3. Saga / compensation</h3>
-<p>For multi-step workflows (e.g. Acumatica invoice + payment + email), the steps are not atomic. If step 3 fails after step 1 succeeded, you have an inconsistent state. The pattern: each step has a compensation (an undo). The saga runs the steps; if a step fails, the compensations run in reverse.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SAGA PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class InvoiceSaga:
-    def execute(self, order):
-        invoice = self.create_invoice(order)
-        try:
-            payment = self.create_payment(order, invoice)
-        except Exception:
-            self.cancel_invoice(invoice)  # compensate
-            raise
-        try:
-            self.send_email(order, invoice, payment)
-        except Exception:
-            self.refund_payment(payment)   # compensate
-            self.cancel_invoice(invoice)   # compensate
-            raise</code></pre>
-</div> 
-
-<p>For the broader saga patterns, see the <a href="/blog/acumatica-saga-pattern-transactions/">saga pattern guide</a>.</p>
-
-<h3>4. Dead-letter queue</h3>
-<p>For workflows that fail repeatedly (an integration that is down), the events cannot be lost. The pattern: dead-letter queue. Failed events go to a queue (or table) instead of being dropped; a worker replays them after the integration is fixed.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · DEAD-LETTER HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def handle_with_dlq(event):
-    try:
-        process(event)
-    except Exception as e:
-        attempts = event.get("attempts", 0) + 1
-        if attempts &gt;= 5:
-            # Send to dead-letter
-            dead_letter_queue.push(event, str(e))
-        else:
-            # Retry with exponential backoff
-            delay = 2 ** attempts
-            retry_queue.push(event, delay=delay, attempts=attempts)</code></pre>
-</div> 
-
-<h2 id="monitoring">Monitoring the workflow</h2>
-<p>A workflow that fails silently is worse than a workflow that does not exist. The monitoring:</p>
-<ul>
-  <li><strong>Event counts.</strong> How many events fired, how many succeeded, how many failed.</li>
-  <li><strong>Latency p50/p95/p99.</strong> How long from event fire to action completion.</li>
-  <li><strong>Dead-letter count.</strong> The most important metric. If it is not zero, something is broken.</li>
-  <li><strong>Idempotency collision rate.</strong> How often the same event is being processed twice.</li>
-</ul>
-
-<p>For the broader monitoring patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring guide</a>.</p>
-
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>The tools, the patterns, the safety, the monitoring. Get all four right and the workflow runs itself. Skip any one and you are debugging at 2 AM. The discipline is the same as any production system — fail loudly, fail safely, and have a runbook for when the automation breaks.</p>
-
+<p>That is the working approach I use on employee onboarding automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/customer-onboarding-automation/">Customer Onboarding Automation</a></li>
-      <li><a href="/blog/vendor-onboarding-automation/">Vendor Onboarding Automation</a></li>
-      <li><a href="/blog/leave-approval-automation/">Leave Approval Automation</a></li>
       <li><a href="/blog/hire-to-retire-automation/">Hire-to-Retire Automation</a></li>
-      <li><a href="/blog/n8n-acumatica-integration/">n8n + Acumatica Integration — A Complete Guide</a></li>
+      <li><a href="/blog/leave-approval-automation/">Leave Approval Automation</a></li>
+      <li><a href="/blog/vendor-onboarding-automation/">Vendor Onboarding Automation</a></li>
+      <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     

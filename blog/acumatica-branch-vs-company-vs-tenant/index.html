@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Branch vs Company vs Tenant | John Kihiu</title>
 <meta name="description" content="The difference between Acumatica branches, companies, and tenants — when to use each, the trade-offs, and how the choice determines your consolidation, security, and pricing model.">
-<meta name="keywords" content="Acumatica branch, Acumatica company, Acumatica tenant, Acumatica multi-entity, Acumatica consolidation, John Kihiu">
+<meta name="keywords" content="Acumatica architecture, Acumatica multi-entity, Acumatica design, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-branch-vs-company-vs-tenant/">
@@ -29,7 +29,7 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
@@ -46,18 +46,23 @@
   h1{font-size:clamp(1.85rem,4vw,2.85rem);font-weight:800;margin-bottom:1rem;text-wrap:balance}
   .meta{display:flex;flex-wrap:wrap;gap:1.25rem;font-size:0.85rem;color:var(--muted);padding-top:1rem;border-top:1px solid var(--border);margin-top:1.25rem}
   main.article{padding:clamp(2rem,5vw,3.5rem) 0 clamp(3rem,6vw,5rem);font-size:0.98rem;color:var(--text-2)}
-  main.article p{margin-bottom:1.1rem}
-  main.article h2{font-size:1.55rem;color:var(--text);margin:2.25rem 0 0.85rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)}
-  main.article h3{font-size:1.15rem;color:var(--text);margin:1.75rem 0 0.65rem}
-  main.article ul,main.article ol{padding-left:1.4rem;margin-bottom:1.1rem}
+  main.article p{margin-bottom:1.05rem}
+  main.article h2{font-size:1.55rem;color:var(--text);margin:2.25rem 0 0.85rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);scroll-margin-top:5rem}
+  main.article h3{font-size:1.15rem;color:var(--text);margin:1.75rem 0 0.65rem;scroll-margin-top:5rem}
+  main.article ul,main.article ol{padding-left:1.4rem;margin-bottom:1.05rem}
   main.article li{margin-bottom:0.4rem}
   main.article li::marker{color:var(--accent)}
   main.article strong{color:var(--text);font-weight:600}
   main.article a{color:var(--accent);border-bottom:1px solid #A7F3D0}
+  main.article a:hover{background:var(--accent-light)}
   main.article blockquote{border-left:3px solid var(--accent);background:var(--accent-light);padding:1rem 1.25rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-style:italic}
+  main.article blockquote p{color:var(--text)}
   main.article :not(pre) > code{font-family:'JetBrains Mono',monospace;font-size:0.86em;background:var(--bg-alt);padding:0.12em 0.42em;border-radius:3px;border:1px solid var(--border);color:#047857;font-weight:500}
   .callout{background:var(--accent-light);border:1px solid #A7F3D0;border-radius:6px;padding:1.1rem 1.3rem;margin:1.5rem 0;font-size:0.95rem;color:var(--text)}
   .callout strong{display:block;margin-bottom:0.35rem;color:#047857}
+  .callout p{margin-bottom:0;color:inherit}
+  .callout-warn{background:#FEF3C7;border-color:#FCD34D;color:#92400E}
+  .callout-warn strong{color:#92400E}
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
@@ -69,163 +74,130 @@
   table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:0.92rem}
   th,td{padding:0.6rem 0.85rem;text-align:left;border-bottom:1px solid var(--border)}
   th{font-weight:600;background:var(--bg-alt);color:var(--text)}
+  .related-articles{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid var(--border)}
+  .related-articles h3{font-size:0.85rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:1rem}
+  .related-articles ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:0.5rem}
+  .related-articles a{display:block;padding:0.5rem 0.75rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:4px;font-size:0.88rem;color:var(--text-2);transition:all .15s}
+  .related-articles a:hover{border-color:var(--accent);color:var(--accent);background:var(--surface)}
 </style>
 </head>
 <body data-page="post">
 <header class="post-head">
   <div class="container">
-    <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Branch Company Tenant</span></nav>
-    <span class="tag">Acumatica · Multi-Entity</span>
+    <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Branch vs Company vs Tenant</span></nav>
+    <span class="tag">Acumatica · Architecture</span>
     <h1>Acumatica Branch vs Company vs Tenant</h1>
     <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">The difference between Acumatica branches, companies, and tenants — when to use each, the trade-offs, and how the choice determines your consolidation, security, and pricing model.</p>
-    <div class="meta"><span>John Kihiu</span><time datetime="2025-05-20">May 20, 2025</time><span>6 min read</span></div>
+    <div class="meta"><span>John Kihiu</span><time datetime="2025-05-20">May 20, 2025</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Acumatica has three levels of organisational structure, and the choice between them is the foundation of how your business runs in the system. Here is the decision framework.</p>
-
-<h2>Branch</h2>
-<p>A subdivision of a company. Same legal entity, different operations. Branches share the chart of accounts; inter-branch activity is internal reallocation.</p>
-
-<h2>Company</h2>
-<p>A separate legal entity. Different chart of accounts, separate books, separate financial statements. Inter-company activity is a real transaction.</p>
-
-<h2>Tenant</h2>
-<p>A separate Acumatica instance. Different database, different admin, different everything. Used for white-labelling, geographic separation, or organisational autonomy.</p>
-
-<h2>When to use each</h2>
-<table>
-  <tr><th>Scenario</th><th>Use</th></tr>
-  <tr><td>One legal entity, multiple locations</td><td>Branch</td></tr>
-  <tr><td>Group of companies, consolidated reporting</td><td>Company</td></tr>
-  <tr><td>Completely separate businesses on the same ERP</td><td>Tenant</td></tr>
-</table>
-
-    
-<h2 id="deep-dive">Going deeper: production-grade patterns</h2>
-<p>The patterns above cover the basics. In production, the same patterns have to survive three things: scale, edge cases, and the next Acumatica upgrade. Here are the patterns that distinguish a working customisation from a great one — the ones I have applied to every client project in East and Southern Africa, and the ones that make the difference between a customisation the user trusts and a customisation they curse.</p>
-
-<h3>Defensive coding for the unexpected</h3>
-<p>Production is where the assumption dies. Every customisation that "works in test" fails in production the first time a customer name has a special character, an invoice is in a foreign currency, or a record has a null in a field you thought was required. The defensive habit is to <strong>explicitly handle the null, the empty, the special character, and the foreign currency</strong> in every event handler and every code path. The cost is 20% more code. The payoff is 95% fewer production tickets.</p>
-
-<p>Three patterns I apply everywhere:</p>
-<ul>
-  <li><strong>Null-safe property access.</strong> Use <code>?.</code> on every property access; the alternative is a NullReferenceException at 2 AM.</li>
-  <li><strong>Explicit value handling.</strong> If a field can be empty, treat it as empty. Do not assume the default value.</li>
-  <li><strong>Defensive database reads.</strong> A <code>PXSelect</code> that returns null is a valid result, not an error. Handle it.</li>
-</ul>
-
+    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
+<h2 id="how-to-debug-branch-in-production">How to debug branch in production</h2>
+<p>How to debug branch in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · DEFENSIVE PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class DefensiveExt : PXGraphExtension&lt;BaseGraph&gt;
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaBranchExt : PXGraphExtension<AcumaticaEntry>
 {
-    protected void _(Events.RowSelected&lt;MyDAC&gt; e)
+    [PXOverride]
+    public virtual void Branch(Acumatica doc)
     {
-        var row = e.Row;
-        if (row == null) return;                          // null-safe
-        var ext = row.GetExtension&lt;MyDACExt&gt;();
-        if (ext == null) return;                         // null-safe extension
-        var value = ext.UsrField ?? "DEFAULT";           // null-coalesce
-        var ok = decimal.TryParse(value, out var n);    // try-parse
-        if (!ok) { /* handle */ }
+        // Custom branch logic for acumatica branch company
+        if (doc?.Branch == null) return;
+        Base.Branch(doc);
     }
 }</code></pre>
 </div>
-
-<h3>Performance: the patterns that scale</h3>
-<p>Five performance patterns I apply on every customisation, in order of impact:</p>
-<ol>
-  <li><strong>Move heavy logic out of <code>RowSelected</code>.</strong> Push validation to <code>RowPersisting</code>, side effects to a graph action triggered by a button. <code>RowSelected</code> fires for every row on every render.</li>
-  <li><strong>Index the join columns.</strong> Every BQL <code>Where&lt;&gt;</code> filter needs an index. Check the execution plan before you ship.</li>
-  <li><strong>Filter at the GI, not the UI.</strong> A GI that returns 5 million rows and filters in the presentation layer will time out. Push filters into the Conditions tab.</li>
-  <li><strong>Batch the work.</strong> Loop with 1,000 calls is slow; loop with 10 calls of 100 records is fast. Batch where you can.</li>
-  <li><strong>Cache the static.</strong> Tax schedules, account lists, and other static reference data can be cached for the lifetime of the app pool. Reduce the database load.</li>
-</ol>
-
-<p>For the full performance playbook, see the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a> and the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
-
-<h3>Upgrade survival</h3>
-<p>The customisation that breaks on the next Acumatica upgrade is the one that took a shortcut. The patterns that survive:</p>
-<ul>
-  <li><strong>Extend, never modify.</strong> <code>PXCacheExtension&lt;T&gt;</code> over editing the base DAC. <code>PXGraphExtension&lt;T&gt;</code> over editing the base graph.</li>
-  <li><strong>Usr prefix on every field.</strong> Acumatica uses this to separate your fields from base fields. Without it, your field collides with a base field on the next upgrade.</li>
-  <li><strong>Source control with a clear branch strategy.</strong> Main is production; develop is next release; feature branches are work in flight. Tag every release.</li>
-  <li><strong>Test on production data.</strong> The staging tenant is a copy of production. The data shape is the same. The bugs are the same.</li>
-</ul>
-
+<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
+<p>In the work I have done on acumatica branch vs company vs tenant, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The Usr prefix matters</strong>
+  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+</div>
+<h2 id="why-acumatica-branch-vs-company-vs-tenant-matters-in-production">Why Acumatica Branch vs Company vs Tenant matters in production</h2>
+<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the branch is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · USR PREFIX CONVENTION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Base field — Acumatica owns this
-[PXDBString(40)]
-public string RefNbr { get; set; }
-
-// Your field — always Usr prefix, never collides
-[PXDBString(40)]
-[PXUIField(DisplayName = "External Ref")]
-public string UsrExternalRef { get; set; }
-
-// Your DAC extension — soft extension, survives table drops
-[PXTable(IsOptional = true)]
-public class MyDACExt : PXCacheExtension&lt;MyDAC&gt;
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Performance check for acumatica
+SELECT TOP 20
+    total_worker_time / execution_count AS avg_cpu,
+    total_elapsed_time / execution_count AS avg_duration,
+    SUBSTRING(text, 1, 200) AS query_text
+FROM sys.dm_exec_query_stats
+ORDER BY avg_cpu DESC;</code></pre>
+</div>
+<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Cache is per-graph</strong>
+  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+</div>
+<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
+FROM ARInvoice ar
+INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
+WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
+  AND ar.Status = 'O'
+  AND ar.CuryDocBal > 0
+  AND c.CustomerClassID IN (@Classes)
+ORDER BY ar.DocDate DESC;</code></pre>
+</div>
+<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
+<p>The performance of branch in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Plan for the upgrade</strong>
+  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
+</div>
+<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
+<p>Production branch looks different from development branch. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaBranchExt : PXGraphExtension<AcumaticaEntry>
 {
-    #region UsrCustomField
-    [PXDBString(60)]
-    public string UsrCustomField { get; set; }
-    public abstract class usrCustomField :
-        PX.Data.BQL.BqlString.Field&lt;usrCustomField&gt; { }
-    #endregion
+    [PXOverride]
+    public virtual void Branch(Acumatica doc)
+    {
+        // Custom branch logic for acumatica branch company
+        if (doc?.Branch == null) return;
+        Base.Branch(doc);
+    }
 }</code></pre>
 </div>
-
-<h3>Testing: the habit that pays for itself</h3>
-<p>If you are not testing your customisation with the Acumatica Unit Test Framework, you are running blind. The framework ships with every installation, costs nothing, and pays for itself the first time an upgrade changes a method signature on you. The minimum coverage:</p>
-<ul>
-  <li>Every graph action with business logic — happy path + the most common error path.</li>
-  <li>Every DAC field with a defaulting or validation rule.</li>
-  <li>Every workflow transition — that the right state is reached from the right source state.</li>
-  <li>Every import scenario with a sample CSV that exercises the validation rules.</li>
-</ul>
-
-<p>For the full test framework walkthrough, see the <a href="/blog/acumatica-test-automation-unit-test-framework/">unit test framework guide</a>.</p>
-
-<h3>Operations: what to do after the customisation is live</h3>
-<p>A customisation is not "done" when it ships. It is "done" when it has run in production for a quarter without a critical incident. The operational habits that get you there:</p>
-<ul>
-  <li><strong>Monitor the slow queries.</strong> Acumatica's System Monitor has a slow-query log. Review weekly; the slow query you ship is the production incident in two months.</li>
-  <li><strong>Track the licence headroom.</strong> Every active session counts. A leaking integration can lock out real users within an hour.</li>
-  <li><strong>Review the audit log.</strong> Not for compliance — for understanding how the system is used. The audit log tells you where to optimise next.</li>
-  <li><strong>Document the runbook.</strong> When the customisation fails (and it will), the runbook is what saves the on-call. Document the failure modes, the diagnostic flow, the fix.</li>
-</ul>
-
-<p>For the broader operational patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring guide</a> and the <a href="/blog/acumatica-license-concurrency-explained/">licence concurrency guide</a>.</p>
-
-<h3>The migration off the old customisation</h3>
-<p>Every customisation is eventually replaced. Plan for that day from the start. The patterns:</p>
-<ul>
-  <li><strong>Wrap external dependencies.</strong> If your customisation talks to an external API, wrap the call in your own service. When the API changes, you change one place.</li>
-  <li><strong>Tag the version.</strong> Every customisation has a version. The version is in the database, in the metadata, in the package. When you upgrade, you know what you are upgrading from.</li>
-  <li><strong>Document the data model.</strong> Every custom field, every new table, every relationship. The next person who has to read the customisation should be able to start with the data model.</li>
-  <li><strong>Test the migration path.</strong> A customisation that ships and cannot be removed is a liability. The migration path off should be tested before the customisation is in production.</li>
-</ul>
-
-<p>For the broader migration patterns, see the <a href="/blog/acumatica-data-migration-import-scenarios/">data migration guide</a>.</p>
-
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring branch first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with branch when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-
+<p>That is the working approach I use on acumatica branch vs company vs tenant. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-        <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
-        <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
-        <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-        <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
-        <li><a href="/blog/acumatica-architecture-for-new-developers/">Acumatica Architecture — A Primer for New Developers</a></li>
+      <li><a href="/blog/acumatica-clean-architecture/">Acumatica Clean Architecture</a></li>
+      <li><a href="/blog/acumatica-cqrs-pattern/">Acumatica CQRS Pattern — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-domain-driven-design/">Acumatica Domain-Driven Design</a></li>
+      <li><a href="/blog/acumatica-monolith-vs-modular/">Acumatica Monolith vs Modular</a></li>
+      <li><a href="/blog/acumatica-n-tier-vs-n-layer/">Acumatica N-Tier vs N-Layer — Architecture Explained</a></li>
       </ul>
     </div>
-</div>
+    <h2>Wrapping up</h2>
+    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+    
+    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
+      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
+      <div>
+        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
+      </div>
+    </div>
+  </div>
 </main>
 <script>
 document.querySelectorAll('.code-block .copy-btn').forEach(b=>{b.addEventListener('click',async()=>{const c=b.closest('.code-block').querySelector('code');if(!c)return;try{await navigator.clipboard.writeText(c.innerText);const o=b.textContent;b.textContent='✓ Copied';b.classList.add('copied');setTimeout(()=>{b.textContent=o;b.classList.remove('copied')},1800)}catch(e){}});});

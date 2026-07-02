@@ -1,568 +1,200 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <title>Zimbabwe ZIMRA FDMS Integration with Acumatica | John Kihiu</title>
-  <meta name="description" content="How to integrate Acumatica ERP with the ZIMRA FDMS (Fiscalisation Data Management System) in Zimbabwe — device registration, fiscal day lifecycle, signed receipt submission, credit-note linking and offline buffering.">
-  <meta name="keywords" content="ZIMRA FDMS, Zimbabwe fiscalisation, ZIMRA Acumatica integration, FDMS device registration, fiscal day, signed receipt FDMS, ZIMRA API, John Kihiu Zimbabwe">
-  <meta name="author" content="John Kihiu">
-  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
-  <meta name="theme-color" content="#059669">
-  <link rel="canonical" href="https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/">
-  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-
-  <meta property="og:type" content="article">
-  <meta property="og:url" content="https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/">
-  <meta property="og:title" content="Zimbabwe ZIMRA FDMS Integration with Acumatica">
-  <meta property="og:description" content="Device registration, fiscal day open/close, signed receipts and credit-note linking — the full ZIMRA FDMS flow for Acumatica.">
-  <meta property="og:image" content="https://kihiujohn.github.io/assets/og/zimbabwe-zimra-fdms-acumatica-integration.svg">
-  <meta property="article:published_time" content="2026-05-10T08:00:00+02:00">
-  <meta property="article:modified_time" content="2026-05-10T08:00:00+02:00">
-  <meta property="article:author" content="John Kihiu">
-  <meta property="article:section" content="Integrations">
-  <meta property="article:tag" content="Acumatica">
-  <meta property="article:tag" content="ZIMRA">
-  <meta property="article:tag" content="Zimbabwe">
-
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Zimbabwe ZIMRA FDMS Integration with Acumatica">
-  <meta name="twitter:description" content="Authentication, endpoints, and real-world patterns.">
-  <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/zimbabwe-zimra-fdms-acumatica-integration.svg">
-
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "TechArticle",
-    "headline": "Zimbabwe ZIMRA FDMS Integration with Acumatica",
-    "description": "Authentication patterns, endpoint discovery, and real-world techniques for connecting Acumatica with external systems via REST.",
-    "image": "https://kihiujohn.github.io/assets/og/zimbabwe-zimra-fdms-acumatica-integration.svg",
-    "datePublished": "2026-05-10T08:00:00+02:00",
-    "dateModified": "2026-05-10T08:00:00+02:00",
-    "author": { "@type": "Person", "name": "John Kihiu", "url": "https://kihiujohn.github.io/" },
-    "publisher": { "@type": "Person", "name": "John Kihiu", "url": "https://kihiujohn.github.io/" },
-    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/" },
-    "keywords": "Zimbabwe, ZIMRA, FDMS, Acumatica, Fiscalisation, Integration"
-  }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": [
-      { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://kihiujohn.github.io/" },
-      { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://kihiujohn.github.io/blog/" },
-      { "@type": "ListItem", "position": 3, "name": "Zimbabwe ZIMRA FDMS Integration", "item": "https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/" }
-    ]
-  }
-  </script>
-
-  <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
-  <link rel="apple-touch-icon" href="/profile.jpg">
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #FAFAF9; --bg-alt: #F5F5F4; --surface: #FFFFFF; --border: #E7E5E4; --border-2: #D6D3D1;
-      --text: #0C0A09; --text-2: #44403C; --muted: #78716C; --subtle: #A8A29E;
-      --accent: #059669; --accent-2: #047857; --accent-light: #ECFDF5; --accent-mid: #A7F3D0;
-      --warn: #B45309; --warn-light: #FEF3C7; --info: #1D4ED8; --info-light: #EFF6FF;
-      --code-bg: #1C1917; --code-text: #E7E5E4; --code-comment: #78716C; --code-keyword: #34D399; --code-string: #FCD34D; --code-number: #F472B6;
-      --radius: 3px; --radius-md: 4px; --radius-lg: 6px;
-      --shadow-1: 0 1px 2px rgba(12,10,9,0.06);
-      --shadow-2: 0 2px 6px rgba(12,10,9,0.07), 0 1px 2px rgba(12,10,9,0.05);
-      --shadow-3: 0 8px 28px rgba(12,10,9,0.10), 0 2px 6px rgba(12,10,9,0.06);
-      --nav-h: 4rem;
-      --max: min(72rem, 100% - 2rem);
-      --gutter: clamp(1rem, 3vw, 2.5rem);
-    }
-    html { font-size: clamp(14px, 0.4167vw + 10.83px, 17px); scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-    h1,h2,h3,h4 { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; line-height: 1.25; letter-spacing: -0.02em; }
-    a { color: inherit; text-decoration: none; }
-    button { font-family: inherit; cursor: pointer; }
-    img { display: block; max-width: 100%; height: auto; }
-    ::selection { background: var(--accent-mid); color: var(--accent-2); }
-
-    /* NAV */
-    #navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: var(--nav-h); background: rgba(255,255,255,0.88); backdrop-filter: saturate(160%) blur(10px); border-bottom: 1px solid var(--border); transition: box-shadow .25s; }
-    #navbar.scrolled { box-shadow: var(--shadow-2); }
-    .nav-inner { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
-    .nav-logo { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 1.15rem; color: var(--text); }
-    .nav-logo span { color: var(--accent); }
-    .nav-links { display: flex; align-items: center; gap: clamp(1rem, 2vw, 2rem); list-style: none; }
-    .nav-links a { font-size: 0.875rem; font-weight: 500; color: var(--text-2); transition: color .15s; }
-    .nav-links a:hover, .nav-links a.active { color: var(--accent); }
-    .nav-cta { background: var(--accent); color: #fff !important; padding: 0.55rem 1.1rem; border-radius: var(--radius); font-weight: 600 !important; font-size: 0.85rem; }
-    .nav-burger { display: none; flex-direction: column; gap: 5px; background: none; border: none; padding: 6px; }
-    .nav-burger span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 1px; transition: all .25s; }
-    .nav-burger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
-    .nav-burger.open span:nth-child(2) { opacity: 0; }
-    .nav-burger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
-    #mobileDrawer { display: none; position: fixed; top: var(--nav-h); left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 99; box-shadow: var(--shadow-2); }
-    #mobileDrawer.open { display: block; }
-    #mobileDrawer a { display: block; padding: 0.85rem var(--gutter); font-weight: 500; border-bottom: 1px solid var(--border); color: var(--text-2); font-size: 0.95rem; }
-
-    .container { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
-
-    /* Reading progress */
-    .reading-bar { position: fixed; top: var(--nav-h); left: 0; height: 2px; background: var(--accent); width: 0%; z-index: 99; transition: width .12s; }
-
-    /* HERO */
-    .post-hero { padding-top: calc(var(--nav-h) + clamp(2rem, 5vw, 3.5rem)); padding-bottom: clamp(1.75rem, 3vw, 2.5rem); background: linear-gradient(180deg, var(--surface), var(--bg)); border-bottom: 1px solid var(--border); }
-    .breadcrumb { font-size: 0.78rem; color: var(--muted); margin-bottom: 1.25rem; }
-    .breadcrumb a:hover { color: var(--accent); }
-    .breadcrumb .sep { margin: 0 0.4rem; color: var(--subtle); }
-    .breadcrumb .current { color: var(--text); font-weight: 500; }
-    .post-cat { display: inline-block; background: var(--accent); color: #fff; padding: 0.25rem 0.7rem; border-radius: var(--radius); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1rem; }
-    .post-title { font-size: clamp(1.85rem, 4.2vw, 3rem); font-weight: 800; max-width: 24ch; margin-bottom: 1rem; text-wrap: balance; }
-    .post-meta { display: flex; flex-wrap: wrap; gap: 1.25rem 1.5rem; align-items: center; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 1.5rem; font-size: 0.85rem; color: var(--muted); }
-    .post-author { display: flex; align-items: center; gap: 0.65rem; }
-    .post-author img { width: 2rem; height: 2rem; border-radius: 50%; object-fit: cover; }
-    .post-author-name { font-weight: 600; color: var(--text); display: block; line-height: 1.2; }
-    .post-author-role { font-size: 0.72rem; color: var(--muted); }
-    .post-meta-item { display: flex; align-items: center; gap: 0.4rem; }
-    .post-meta-item svg { width: 0.95rem; height: 0.95rem; }
-
-    /* HERO IMAGE */
-    .post-cover { aspect-ratio: 21/9; max-height: 26rem; overflow: hidden; border-radius: var(--radius-md); border: 1px solid var(--border); box-shadow: var(--shadow-2); margin-top: 1.75rem; background: var(--bg-alt); }
-    .post-cover img { width: 100%; height: 100%; object-fit: cover; }
-
-    /* LAYOUT */
-    .post-layout { display: grid; grid-template-columns: 14rem 1fr; gap: clamp(2rem, 4vw, 3rem); padding: clamp(2rem, 5vw, 3.5rem) 0 clamp(3rem, 6vw, 5rem); align-items: start; }
-    .toc { position: sticky; top: calc(var(--nav-h) + 1.5rem); padding: 1rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
-    .toc-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 0.75rem; }
-    .toc ul { list-style: none; }
-    .toc li { margin-bottom: 0.4rem; }
-    .toc a { font-size: 0.82rem; color: var(--text-2); transition: color .15s; line-height: 1.4; display: block; padding: 0.2rem 0; border-left: 2px solid transparent; padding-left: 0.6rem; }
-    .toc a:hover { color: var(--accent); }
-    .toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
-    .toc li.lvl-3 a { font-size: 0.78rem; padding-left: 1.4rem; color: var(--muted); }
-
-    /* ARTICLE */
-    article { max-width: 44rem; min-width: 0; }
-    .post-content { font-size: 1.0625rem; line-height: 1.75; color: var(--text-2); }
-    .post-content > * + * { margin-top: 1.1em; }
-    .post-content p { color: var(--text-2); }
-    .post-content strong { color: var(--text); font-weight: 600; }
-    .post-content em { color: var(--text); }
-    .post-content h2 { font-size: 1.65rem; color: var(--text); margin-top: 2.5rem; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); scroll-margin-top: calc(var(--nav-h) + 1rem); }
-    .post-content h3 { font-size: 1.2rem; color: var(--text); margin-top: 2rem; margin-bottom: 0.65rem; scroll-margin-top: calc(var(--nav-h) + 1rem); }
-    .post-content ul, .post-content ol { padding-left: 1.4rem; }
-    .post-content li { margin-bottom: 0.4rem; }
-    .post-content li::marker { color: var(--accent); }
-    .post-content a { color: var(--accent); border-bottom: 1px solid var(--accent-mid); transition: all .15s; }
-    .post-content a:hover { background: var(--accent-light); border-color: var(--accent); }
-    .post-content blockquote { border-left: 3px solid var(--accent); background: var(--accent-light); padding: 1rem 1.25rem; margin: 1.5rem 0; border-radius: 0 var(--radius-md) var(--radius-md) 0; font-style: italic; color: var(--text); }
-    .post-content blockquote p { color: var(--text); }
-    .post-content blockquote p:last-child { margin-bottom: 0; }
-    .post-content :not(pre) > code { font-family: 'JetBrains Mono', monospace; font-size: 0.86em; background: var(--bg-alt); padding: 0.12em 0.42em; border-radius: var(--radius); border: 1px solid var(--border); color: var(--accent-2); font-weight: 500; }
-    .callout { padding: 1rem 1.25rem; border-radius: var(--radius-md); margin: 1.5rem 0; border: 1px solid; }
-    .callout-info { background: var(--info-light); border-color: #BFDBFE; color: var(--info); }
-    .callout-warn { background: var(--warn-light); border-color: #FCD34D; color: var(--warn); }
-    .callout strong { display: block; margin-bottom: 0.25rem; font-size: 0.9rem; }
-    .callout p { font-size: 0.92rem; margin: 0 !important; color: inherit; }
-
-    /* CODE BLOCK */
-    .codeblock { position: relative; margin: 1.5rem 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid #292524; background: var(--code-bg); }
-    .codeblock-head { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.85rem; background: #292524; border-bottom: 1px solid #3F3F3F; }
-    .codeblock-lang { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--code-comment); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-    .codeblock-copy { background: transparent; border: 1px solid #44403C; color: #A8A29E; font-size: 0.7rem; font-weight: 600; padding: 0.3rem 0.65rem; border-radius: var(--radius); display: flex; align-items: center; gap: 0.35rem; transition: all .15s; font-family: inherit; }
-    .codeblock-copy svg { width: 0.85rem; height: 0.85rem; }
-    .codeblock-copy:hover { background: #44403C; color: #fff; border-color: #57534E; }
-    .codeblock-copy.copied { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .codeblock pre { margin: 0; padding: 1rem 1.1rem; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; line-height: 1.65; color: var(--code-text); }
-    .codeblock pre code { background: transparent; border: 0; padding: 0; color: inherit; font-size: inherit; font-family: inherit; font-weight: 400; }
-    /* mini-syntax highlight via classes */
-    .tk-c { color: var(--code-comment); font-style: italic; }
-    .tk-k { color: var(--code-keyword); font-weight: 500; }
-    .tk-s { color: var(--code-string); }
-    .tk-n { color: var(--code-number); }
-    .tk-fn { color: #93C5FD; }
-    .tk-p { color: #A8A29E; }
-
-    /* TAGS / SHARE */
-    .post-end { padding: 1.5rem 0; margin-top: 2.5rem; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
-    .post-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-    .post-tag { font-size: 0.78rem; font-weight: 500; color: var(--text-2); background: var(--bg-alt); border: 1px solid var(--border); padding: 0.35rem 0.75rem; border-radius: var(--radius); transition: all .15s; }
-    .post-tag:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .share-btns { display: flex; gap: 0.4rem; }
-    .share-btn { width: 2.2rem; height: 2.2rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; justify-content: center; color: var(--text-2); transition: all .15s; }
-    .share-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .share-btn svg { width: 1rem; height: 1rem; }
-
-    /* AUTHOR CARD */
-    .author-card { margin-top: 2.5rem; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; gap: 1.25rem; align-items: flex-start; }
-    .author-card img { width: 4rem; height: 4rem; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--accent-light); }
-    .author-card-name { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 0.2rem; }
-    .author-card-role { font-size: 0.82rem; color: var(--accent); font-weight: 600; margin-bottom: 0.5rem; }
-    .author-card-bio { font-size: 0.92rem; color: var(--muted); line-height: 1.6; margin-bottom: 0.75rem; }
-    .author-card-links { display: flex; gap: 0.5rem; }
-    .author-card-links a { font-size: 0.82rem; font-weight: 600; color: var(--accent); }
-    .author-card-links a:hover { text-decoration: underline; }
-
-    /* RELATED */
-    .related { padding: clamp(2.5rem, 5vw, 4rem) 0; background: var(--surface); border-top: 1px solid var(--border); }
-    .related h2 { font-size: 1.35rem; font-weight: 700; margin-bottom: 1.5rem; }
-    .related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; }
-    .related-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.1rem; transition: all .2s; display: block; }
-    .related-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--accent-mid); }
-    .related-card-cat { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.5rem; display: inline-block; }
-    .related-card h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.4rem; line-height: 1.4; color: var(--text); }
-    .related-card p { font-size: 0.82rem; color: var(--muted); line-height: 1.55; }
-
-    /* FOOTER */
-    footer { background: #0C0A09; color: #D6D3D1; }
-    .footer-top { padding: clamp(2.5rem, 5vw, 4rem) 0 2.25rem; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: clamp(1.5rem, 4vw, 3rem); border-bottom: 1px solid rgba(255,255,255,0.06); }
-    .footer-logo { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 1.15rem; color: #fff; margin-bottom: 0.6rem; display: inline-block; }
-    .footer-logo span { color: #34D399; }
-    .footer-brand p { font-size: 0.88rem; color: #A8A29E; line-height: 1.7; max-width: 28ch; }
-    .footer-col h4 { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; color: #78716C; margin-bottom: 1rem; }
-    .footer-col a { display: block; font-size: 0.86rem; color: #A8A29E; margin-bottom: 0.5rem; transition: color .15s; }
-    .footer-col a:hover { color: #fff; }
-    .footer-bottom { padding: 1.25rem 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; font-size: 0.78rem; color: #57534E; }
-
-    /* COPY notification */
-    .toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(2rem); background: var(--text); color: #fff; padding: 0.7rem 1.1rem; border-radius: var(--radius-md); font-size: 0.85rem; font-weight: 500; opacity: 0; transition: all .25s; pointer-events: none; z-index: 600; box-shadow: var(--shadow-3); }
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-    @media (max-width: 64rem) {
-      .post-layout { grid-template-columns: 1fr; }
-      .toc { position: static; }
-      .footer-top { grid-template-columns: 1fr 1fr; }
-    }
-    @media (max-width: 48rem) {
-      .nav-links, .nav-cta { display: none; }
-      .nav-burger { display: flex; }
-      .footer-top { grid-template-columns: 1fr; gap: 1.5rem; }
-    }
-  
-    /* Code panel — boxed, dark-shade, copy button top-right */
-    .code-block { position: relative; background: #1E293B; border: 1px solid #334155; border-radius: 6px; margin: 1.5rem 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
-    .code-block .code-header { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.95rem; background: #0F172A; border-bottom: 1px solid #334155; }
-    .code-block .code-lang { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.74rem; font-weight: 600; color: #94A3B8; letter-spacing: 0.03em; }
-    .code-block .copy-btn { background: #334155; color: #E2E8F0; border: 1px solid #475569; padding: 0.32rem 0.75rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: 0.35rem; transition: all .15s; }
-    .code-block .copy-btn:hover { background: #475569; border-color: #64748B; color: #fff; }
-    .code-block .copy-btn.copied { background: #059669; border-color: #047857; color: #fff; }
-    .code-block pre { margin: 0; padding: 1.05rem 1.1rem; background: #1E293B; overflow-x: auto; }
-    .code-block pre code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.83rem; line-height: 1.65; color: #E2E8F0; background: transparent; padding: 0; display: block; white-space: pre; tab-size: 4; }
-    @media (max-width: 30rem){ .code-block pre { padding: 0.85rem 0.9rem; } .code-block pre code { font-size: 0.78rem; } }
-
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zimbabwe ZIMRA FDMS Integration with Acumatica | John Kihiu</title>
+<meta name="description" content="How to integrate Acumatica ERP with the ZIMRA FDMS (Fiscalisation Data Management System) in Zimbabwe — device registration, fiscal day lifecycle, signed receipt submission, credit-note linking and offline buffering.">
+<meta name="keywords" content="Acumatica Acumatica, Acumatica ZIMRA, Acumatica Zimbabwe, John Kihiu">
+<meta name="author" content="John Kihiu">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+<link rel="canonical" href="https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Zimbabwe ZIMRA FDMS Integration with Acumatica">
+<meta property="og:description" content="How to integrate Acumatica ERP with the ZIMRA FDMS (Fiscalisation Data Management System) in Zimbabwe — device registration, fiscal day lifecycle, signed receipt submission, credit-note linking and offline buffering.">
+<meta property="og:image" content="https://kihiujohn.github.io/assets/og/zimbabwe-zimra-fdms-acumatica-integration.svg">
+<meta property="og:url" content="https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/">
+<meta property="article:author" content="John Kihiu">
+<meta property="article:section" content="fiscal">
+<meta property="article:tag" content="Acumatica">
+<meta property="article:tag" content="ZIMRA">
+<meta property="article:tag" content="Zimbabwe">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Zimbabwe ZIMRA FDMS Integration with Acumatica","description":"How to integrate Acumatica ERP with the ZIMRA FDMS (Fiscalisation Data Management System) in Zimbabwe — device registration, fiscal day lifecycle, signed receipt submission, credit-note linking and offline buffering.","image":"https://kihiujohn.github.io/assets/og/zimbabwe-zimra-fdms-acumatica-integration.svg","datePublished":"2026-05-01","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/"}}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Zimbabwe ZIMRA FDMS Integration with Acumatica","item":"https://kihiujohn.github.io/blog/zimbabwe-zimra-fdms-acumatica-integration/"}]}
+</script>
+<link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
+  html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
+  a{color:inherit;text-decoration:none}
+  .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+  header.post-head{padding:clamp(2rem,5vw,3.5rem) 0 clamp(1.5rem,3vw,2rem);background:linear-gradient(180deg,var(--surface),var(--bg));border-bottom:1px solid var(--border)}
+  .breadcrumb{font-size:0.78rem;color:var(--muted);margin-bottom:1rem}
+  .breadcrumb a:hover{color:var(--accent)}
+  .breadcrumb .sep{margin:0 0.4rem;color:#A8A29E}
+  .tag{display:inline-block;background:var(--accent);color:#fff;padding:0.25rem 0.7rem;border-radius:3px;font-size:0.68rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.85rem}
+  h1{font-size:clamp(1.85rem,4vw,2.85rem);font-weight:800;margin-bottom:1rem;text-wrap:balance}
+  .meta{display:flex;flex-wrap:wrap;gap:1.25rem;font-size:0.85rem;color:var(--muted);padding-top:1rem;border-top:1px solid var(--border);margin-top:1.25rem}
+  main.article{padding:clamp(2rem,5vw,3.5rem) 0 clamp(3rem,6vw,5rem);font-size:0.98rem;color:var(--text-2)}
+  main.article p{margin-bottom:1.05rem}
+  main.article h2{font-size:1.55rem;color:var(--text);margin:2.25rem 0 0.85rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);scroll-margin-top:5rem}
+  main.article h3{font-size:1.15rem;color:var(--text);margin:1.75rem 0 0.65rem;scroll-margin-top:5rem}
+  main.article ul,main.article ol{padding-left:1.4rem;margin-bottom:1.05rem}
+  main.article li{margin-bottom:0.4rem}
+  main.article li::marker{color:var(--accent)}
+  main.article strong{color:var(--text);font-weight:600}
+  main.article a{color:var(--accent);border-bottom:1px solid #A7F3D0}
+  main.article a:hover{background:var(--accent-light)}
+  main.article blockquote{border-left:3px solid var(--accent);background:var(--accent-light);padding:1rem 1.25rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-style:italic}
+  main.article blockquote p{color:var(--text)}
+  main.article :not(pre) > code{font-family:'JetBrains Mono',monospace;font-size:0.86em;background:var(--bg-alt);padding:0.12em 0.42em;border-radius:3px;border:1px solid var(--border);color:#047857;font-weight:500}
+  .callout{background:var(--accent-light);border:1px solid #A7F3D0;border-radius:6px;padding:1.1rem 1.3rem;margin:1.5rem 0;font-size:0.95rem;color:var(--text)}
+  .callout strong{display:block;margin-bottom:0.35rem;color:#047857}
+  .callout p{margin-bottom:0;color:inherit}
+  .callout-warn{background:#FEF3C7;border-color:#FCD34D;color:#92400E}
+  .callout-warn strong{color:#92400E}
+  .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
+  .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
+  .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn:hover{background:#475569;color:#fff}
+  .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
+  .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
+  .code-block pre code{font-family:'JetBrains Mono',monospace;font-size:0.83rem;line-height:1.65;color:#E2E8F0;background:transparent;display:block;white-space:pre}
+  table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:0.92rem}
+  th,td{padding:0.6rem 0.85rem;text-align:left;border-bottom:1px solid var(--border)}
+  th{font-weight:600;background:var(--bg-alt);color:var(--text)}
+  .related-articles{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid var(--border)}
+  .related-articles h3{font-size:0.85rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:1rem}
+  .related-articles ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:0.5rem}
+  .related-articles a{display:block;padding:0.5rem 0.75rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:4px;font-size:0.88rem;color:var(--text-2);transition:all .15s}
+  .related-articles a:hover{border-color:var(--accent);color:var(--accent);background:var(--surface)}
+</style>
 </head>
 <body data-page="post">
-
-<main>
-  <header class="post-hero">
-    <div class="container">
-      <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span class="current">Zimbabwe ZIMRA FDMS Integration</span></nav>
-      <span class="post-cat" style="background:#B45309;">Integrations</span>
-      <h1 class="post-title">Zimbabwe ZIMRA FDMS Integration with Acumatica</h1>
-      <p style="font-size: clamp(1rem, 1.4vw, 1.1rem); color: var(--muted); max-width: 60ch; line-height: 1.7;">A practical, end-to-end walk through authenticating with Acumatica, discovering endpoints, and building integrations that hold up under real production traffic.</p>
-
-      <div class="post-meta">
-        <div class="post-author">
-          <img src="/profile.jpg" alt="John Kihiu">
-          <div><span class="post-author-name">John Kihiu</span><span class="post-author-role">Acumatica &amp; Laravel Engineer</span></div>
-        </div>
-        <span class="post-meta-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><time datetime="2026-04-22">Apr 22, 2026</time></span>
-        <span class="post-meta-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>6 min read</span>
-        <span class="post-meta-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>2,840 reads</span>
-      </div>
-      <div class="post-cover"><img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1280&h=540&fit=crop&auto=format" alt="Zimbabwe ZIMRA FDMS Integration" loading="eager" fetchpriority="high"></div>
-    </div>
-  </header>
-
+<header class="post-head">
   <div class="container">
-    <div class="post-layout">
-
-      <aside class="toc" aria-label="Table of contents">
-        <div class="toc-label">On this page</div>
-        <ul>
-          <li><a href="#intro" class="active">Introduction</a></li>
-          <li><a href="#auth">Authentication</a></li>
-          <li class="lvl-3"><a href="#auth-cookie">Cookie-based</a></li>
-          <li class="lvl-3"><a href="#auth-oauth">OAuth 2.0</a></li>
-          <li><a href="#endpoints">Endpoint discovery</a></li>
-          <li><a href="#crud">CRUD patterns</a></li>
-          <li><a href="#actions">Invoking actions</a></li>
-          <li><a href="#errors">Error handling</a></li>
-          <li><a href="#prod">Production tips</a></li>
-        </ul>
-      </aside>
-
-      <article>
-        <div class="post-content">
-          <p id="intro">The Acumatica <strong>contract-based REST API</strong> is the cleanest way to integrate external systems with Acumatica ERP. Whether you're pushing invoices from an e-commerce store, pulling customer data into a CRM, or syncing inventory with a warehouse, the contract-based API is the right tool.</p>
-          <p>This guide walks through what I've learned shipping integrations against this API for production tenants — from the authentication choices that actually matter, to the patterns that prevent you waking up at 3 AM to retry batches.</p>
-
-          <div class="callout callout-info">
-            <strong>Who this is for</strong>
-            <p>Developers who already know REST and JSON, but are new to Acumatica's specific dialect. Examples are language-agnostic but I'll use C# and PHP where it helps.</p>
-          </div>
-
-          <h2 id="overview">What is ZIMRA FDMS?</h2>
-          <p>The <strong>Fiscalisation Data Management System (FDMS)</strong> is the Zimbabwe Revenue Authority's centralised platform for receiving, validating and storing every fiscal receipt issued by a registered taxpayer. Unlike older hardware fiscal-device regimes, FDMS is software-first: your ERP signs each receipt with an FDMS-issued device certificate and submits it over HTTPS in near real time.</p>
-          <p>For an Acumatica deployment in Zimbabwe, that means three jobs the ERP itself was never built to do: hold a per-device X.509 certificate, sign each invoice/credit note payload, and survive offline windows without losing receipts.</p>
-
-          <div class="callout"><strong>Scope of this guide:</strong> device registration, fiscal day lifecycle, receipt submission, credit-note linking, error reconciliation and offline buffering. Code samples are C# (Acumatica extension graph) and the ZIMRA Sandbox API.</div>
-
-          <h2 id="device">1. Device registration</h2>
-          <p>Every fiscal device in FDMS has an ID, a model, a serial and an X.509 certificate issued by ZIMRA. Registration runs once per device — typically during installation:</p>
-          <div class="code-block">
-            <div class="code-header"><span class="code-lang">C# · DeviceRegistration.cs</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// 1. Generate CSR (RSA 2048)
-var rsa = RSA.Create(2048);
-var req = new CertificateRequest(
-    $"CN={deviceSerial}, O={taxpayerName}, C=ZW",
-    rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-var csrPem = PemEncoding.Write("CERTIFICATE REQUEST", req.CreateSigningRequest());
-
-// 2. POST to ZIMRA — receives the signed device certificate
-var body = new {
-    certificateRequest = new string(csrPem),
-    activationKey      = ZimraSettings.ActivationKey
+    <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Zimbabwe ZIMRA FDMS Integration with Acumatica</span></nav>
+    <span class="tag">Tax / Fiscal · Acumatica</span>
+    <h1>Zimbabwe ZIMRA FDMS Integration with Acumatica</h1>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to integrate Acumatica ERP with the ZIMRA FDMS (Fiscalisation Data Management System) in Zimbabwe — device registration, fiscal day lifecycle, signed receipt submission, credit-note linking and offline buffering.</p>
+    <div class="meta"><span>John Kihiu</span><time datetime="2026-05-01">May 1, 2026</time><span>12 min read</span></div>
+  </div>
+</header>
+<main class="article">
+  <div class="container">
+    <p>On real fiscalisation projects, this is rarely the question. The question is the regulatory framework: what does the authority require, what does the device do, what happens when the network is down. This article is the implementation.</p>
+<h2 id="the-audit-trail-for-zimra">The audit trail for zimra</h2>
+<p>The audit trail for zimra is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Device registration
+var device = new FiscalDevice {
+    Tin = "P051234567X",
+    SerialNbr = "DEV001",
+    PublicKey = rsa.ExportPublicKey()
 };
-var resp = await http.PostAsJsonAsync(
-    $"https://fdmsapi.zimra.co.zw/Device/v1/{deviceId}/RegisterDevice", body);
-var pem  = (await resp.Content.ReadFromJsonAsync&lt;RegisterDeviceResponse&gt;()).Certificate;
-SaveDeviceCertificate(deviceId, rsa, pem);  // store private key + cert</code></pre>
-          </div>
-          <p>Persist the private key in a protected store — Acumatica's <code>UploadFile</code> with role-restricted access works, or an Azure Key Vault reference for cloud-hosted tenants. <strong>Never</strong> commit it to a customisation package.</p>
-
-          <h2 id="fiscal-day">2. The fiscal day lifecycle</h2>
-          <p>ZIMRA enforces a strict daily envelope. You must explicitly <em>open</em> a fiscal day before submitting receipts, and explicitly <em>close</em> it (with a Z-report) before opening the next:</p>
-          <ol>
-            <li><strong>OpenDay</strong> → returns a <code>fiscalDayNo</code> you stamp on every receipt.</li>
-            <li><strong>SubmitReceipt</strong> (repeat N times) → each call returns a <code>receiptServerSignature</code>.</li>
-            <li><strong>CloseDay</strong> → submit aggregated totals; ZIMRA validates against the receipts it received.</li>
-          </ol>
-          <p>If aggregates don't match, the day stays open and you must reconcile. Build this lifecycle into a state machine on a custom DAC — never trust an in-memory variable on a multi-user ERP.</p>
-
-          <h2 id="signing">3. Signing and submitting a receipt</h2>
-          <p>Every receipt payload is canonicalised, SHA-256 hashed and RSA-signed with the device certificate. The signature is what ZIMRA validates server-side:</p>
-          <div class="code-block">
-            <div class="code-header"><span class="code-lang">C# · FdmsReceiptSubmitter.cs</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public async Task&lt;FdmsResult&gt; SubmitInvoiceAsync(ARInvoice inv)
-{
-    var payload = new ZimraReceiptDto {
-        DeviceID          = _settings.DeviceId,
-        ReceiptType       = MapType(inv.DocType),       // FiscalInvoice / CreditNote / DebitNote
-        ReceiptCurrency   = inv.CuryID,
-        ReceiptCounter    = _counter.Next(),
-        ReceiptGlobalNo   = _globalCounter.Next(),
-        InvoiceNo         = inv.RefNbr,
-        ReceiptDate       = inv.DocDate.Value,
-        BuyerData         = BuildBuyer(inv),
-        ReceiptLines      = BuildLines(inv),
-        ReceiptTaxes      = BuildTaxes(inv),
-        ReceiptPayments   = BuildPayments(inv),
-        ReceiptTotal      = inv.CuryDocBal,
-        PreviousReceiptHash = _lastHash,                // hash chain
-    };
-
-    var canonical = JsonCanonicalizer.Serialize(payload);
-    var hash      = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
-    payload.ReceiptDeviceSignature = new Signature {
-        Hash      = Convert.ToBase64String(hash),
-        Signature = Convert.ToBase64String(_rsa.SignHash(hash,
-                       HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
-    };
-
-    var resp = await _http.PostAsJsonAsync(
-        $"/Device/v1/{_settings.DeviceId}/SubmitReceipt",
-        new { Receipt = payload });
-
-    return await HandleResponse(resp, inv);
-}</code></pre>
-          </div>
-          <p>The <code>PreviousReceiptHash</code> field forms a tamper-evident chain — losing it forces a fresh fiscal day. Store it durably on the device DAC after every successful submission.</p>
-
-          <h2 id="credit-notes">4. Linking credit and debit notes</h2>
-          <p>FDMS requires every credit/debit note to reference the <strong>original fiscal invoice's global receipt number</strong>, not the Acumatica RefNbr. Add a custom field on <code>ARRegister</code> to capture the original receipt at posting time, and validate it in the graph before submission:</p>
-          <div class="code-block">
-            <div class="code-header"><span class="code-lang">C# · ARRegisterExt.cs</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public sealed class ARRegisterExt : PXCacheExtension&lt;ARRegister&gt;
-{
-    public static bool IsActive() =&gt; true;
-
-    [PXDBString(40, IsUnicode = true)]
-    [PXUIField(DisplayName = "Original FDMS Receipt #")]
-    public string UsrZimraOriginalReceipt { get; set; }
-    public abstract class usrZimraOriginalReceipt : BqlString.Field&lt;usrZimraOriginalReceipt&gt; { }
-}</code></pre>
-          </div>
-
-          <h2 id="offline">5. Offline buffering and retries</h2>
-          <p>Power and connectivity in production sites are unreliable. The FDMS contract <em>allows</em> queued submission as long as you replay receipts in order and close each day within 48 hours of its first receipt. The pattern that has worked for me:</p>
-          <ul>
-            <li>Persist every signed payload to a <code>ZimraOutbox</code> DAC <em>before</em> calling the API.</li>
-            <li>Use an Acumatica <code>PXLongOperation</code> on a 60-second schedule to drain the outbox in FIFO order.</li>
-            <li>On a 4xx response, mark the row <code>Failed</code> and surface it on a Reconciliation screen — never silently retry a hard rejection.</li>
-            <li>On 5xx / network errors, leave the row <code>Pending</code>; the next tick retries.</li>
-          </ul>
-
-          <div class="callout"><strong>Hard-won lesson:</strong> ZIMRA's sandbox and production endpoints reject requests if the device clock drifts more than 60 seconds from theirs. Sync the host VM with NTP and alarm on drift &gt; 30s.</div>
-
-          <h2 id="errors">6. Common errors</h2>
-          <p>The three you will see most in production:</p>
-          <ol>
-            <li><code>INVALID_SIGNATURE</code> — almost always a canonicalisation difference (key order, whitespace, BOM). Use a deterministic JSON canonicalizer; do not let Newtonsoft reorder.</li>
-            <li><code>RECEIPT_COUNTER_OUT_OF_ORDER</code> — your outbox replayed out of order. Re-enable strict FIFO and never parallelise the drain worker.</li>
-            <li><code>FISCAL_DAY_NOT_OPEN</code> — you missed the OpenDay call after an Acumatica service restart. Add a graph-init check.</li>
-          </ol>
-
-          <h2 id="prod">Production checklist</h2>
-          <ul>
-            <li>Device certificate stored encrypted, key access audited.</li>
-            <li>Receipt counter + global counter + previous-hash persisted atomically with the API call.</li>
-            <li>Outbox + reconciliation screen visible to finance, not just IT.</li>
-            <li>Automatic CloseDay scheduler at end-of-business with manual override.</li>
-            <li>Sandbox tested against ZIMRA's full receipt-type matrix — including cancellations and discounted lines.</li>
-            <li>NTP-synced host with drift alerting.</li>
-          </ul>
-
-          <p>If you're rolling out Acumatica into Zimbabwe and want this integration delivered to spec, <a href="/#contact" style="color:var(--accent);font-weight:600;">get in touch</a> — happy to share the production package.</p>
-        </article>
+var response = api.RegisterDevice(device);</code></pre>
+</div>
+<h2 id="cross-border-considerations-for-zimbabwe">Cross-border considerations for zimbabwe</h2>
+<p>In the work I have done on zimbabwe zimra fdms integration with acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The device is the trust boundary</strong>
+  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+</div>
+<h2 id="what-zimbabwe-zimra-fdms-integration-with-acumatica-is-for">What Zimbabwe ZIMRA FDMS Integration with Acumatica is for</h2>
+<p>When the work moves from design to production, the questions change. The zimbabwe is not the question; the failure mode of the zimra is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Credit note
+var creditNote = new FiscalCreditNote {
+    OriginalReceiptNbr = "RC001",
+    Amount = -50.00m,
+    Reason = "RETURN"
+};</code></pre>
+</div>
+<h2 id="the-regulatory-context">The regulatory context</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>The certificate has a shelf life</strong>
+  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
+</div>
+<h2 id="the-implementation-architecture">The implementation architecture</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Receipt submission
+var receipt = new FiscalReceipt {
+    ReceiptNbr = "RC001",
+    Date = DateTime.Now,
+    Amount = 100.00m,
+    VatAmount = 16.00m
+};
+var signature = rsa.Sign(receipt);</code></pre>
+</div>
+<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
+<p>The performance of zimra in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>The audit trail is mandatory</strong>
+  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
+</div>
+<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
+<p>Production zimra looks different from development zimra. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Device registration
+var device = new FiscalDevice {
+    Tin = "P051234567X",
+    SerialNbr = "DEV001",
+    PublicKey = rsa.ExportPublicKey()
+};
+var response = api.RegisterDevice(device);</code></pre>
+</div>
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring zimra first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add zimbabwe on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with zimra when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
+<h2 id="wrapping-up">Wrapping up</h2>
+<p>That is the working approach I use on zimbabwe zimra fdms integration with acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+    <div class="related-articles">
+      <h3>Related reading</h3>
+      <ul>
+      <li><a href="/blog/acumatica-report-designer-guide/">Acumatica Report Designer — A Practical Guide for Real Projects</a></li>
+      <li><a href="/blog/complete-guide-acumatica-rest-api-integration/">Complete Guide to Acumatica REST API Integration</a></li>
+      <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
+      <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
+      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
+      </ul>
+    </div>
+    <h2>Wrapping up</h2>
+    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+    
+    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
+      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
+      <div>
+        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
+      </div>
     </div>
   </div>
-
-  <section class="related">
-    <div class="container">
-      <h2>Related articles</h2>
-      <div class="related-grid">
-        <a href="/blog/complete-guide-acumatica-rest-api-integration/" class="related-card">
-          <span class="related-cat">Acumatica</span>
-          <h3>Complete Guide to Acumatica REST API Integration</h3>
-          <span class="related-meta">6 min read · Acumatica</span>
-        </a>
-        <a href="/blog/" class="related-card">
-          <span class="related-cat">Integrations</span>
-          <h3>KRA eTIMS, RRA, ZRA, TRA — East African Tax Fiscalisation</h3>
-          <span class="related-meta">Browse all integration posts</span>
-        </a>
-        <a href="/integrations/" class="related-card">
-          <span class="related-cat">Portfolio</span>
-          <h3>All Integrations I have built</h3>
-          <span class="related-meta">Browse the catalog</span>
-        </a>
-      </div>
-    </div>
-  </section>
 </main>
-
-<div class="toast" id="toast"></div>
-
 <script>
-  // Nav
-  const burger = document.getElementById('navBurger');
-  const drawer = document.getElementById('mobileDrawer');
-  burger.addEventListener('click', () => { const o = drawer.classList.toggle('open'); burger.classList.toggle('open', o); });
-  const navbar = document.getElementById('navbar');
-
-  // Reading progress
-  const bar = document.getElementById('readingBar');
-  function updateProgress() {
-    const article = document.querySelector('article');
-    if (!article) return;
-    const r = article.getBoundingClientRect();
-    const total = r.height - window.innerHeight + 200;
-    const scrolled = -r.top;
-    const pct = Math.max(0, Math.min(100, (scrolled / total) * 100));
-    bar.style.width = pct + '%';
-    navbar.classList.toggle('scrolled', window.scrollY > 8);
-  }
-  window.addEventListener('scroll', updateProgress, { passive: true });
-
-  // TOC active link
-  const tocLinks = document.querySelectorAll('.toc a');
-  const headings = Array.from(document.querySelectorAll('article h2[id], article h3[id], article p[id]'));
-  const tocObs = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (en.isIntersecting) {
-        const id = '#' + en.target.id;
-        tocLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === id));
-      }
-    });
-  }, { rootMargin: '-15% 0px -75% 0px' });
-  headings.forEach(h => tocObs.observe(h));
-
-  // Smooth scroll w/ offset
-  document.querySelectorAll('a[href^="#"]').forEach(a => {
-    a.addEventListener('click', e => {
-      const t = document.querySelector(a.getAttribute('href'));
-      if (!t) return;
-      e.preventDefault();
-      window.scrollTo({ top: t.getBoundingClientRect().top + window.pageYOffset - 80, behavior: 'smooth' });
-    });
-  });
-
-  // Toast
-  function toast(msg) {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.classList.add('show');
-    clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove('show'), 2200);
-  }
-
-  // Code copy
-  document.querySelectorAll('.codeblock-copy').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const code = btn.closest('.codeblock').querySelector('pre code').innerText;
-      try {
-        await navigator.clipboard.writeText(code);
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Copied';
-        btn.classList.add('copied');
-        toast('Code copied to clipboard');
-        setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
-      } catch (e) { toast('Copy failed — please copy manually'); }
-    });
-  });
-
-  // Share
-  function share(net) {
-    const url = encodeURIComponent(location.href);
-    const title = encodeURIComponent(document.title);
-    const links = {
-      twitter: `https://twitter.com/intent/tweet?url=${url}&text=${title}`,
-      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`
-    };
-    window.open(links[net], '_blank', 'width=560,height=480,noopener');
-  }
-  async function copyLink() {
-    try { await navigator.clipboard.writeText(location.href); toast('Link copied'); }
-    catch(e) { toast('Copy failed'); }
-  }
+document.querySelectorAll('.code-block .copy-btn').forEach(b=>{b.addEventListener('click',async()=>{const c=b.closest('.code-block').querySelector('code');if(!c)return;try{await navigator.clipboard.writeText(c.innerText);const o=b.textContent;b.textContent='✓ Copied';b.classList.add('copied');setTimeout(()=>{b.textContent=o;b.classList.remove('copied')},1800)}catch(e){}});});
 </script>
-
-
-<script>
-  document.querySelectorAll('.code-block .copy-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const code = btn.closest('.code-block').querySelector('pre code');
-      if (!code) return;
-      try {
-        await navigator.clipboard.writeText(code.innerText);
-        const orig = btn.textContent;
-        btn.textContent = '✓ Copied';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
-      } catch (e) {
-        const r = document.createRange(); r.selectNode(code);
-        getSelection().removeAllRanges(); getSelection().addRange(r);
-        document.execCommand('copy'); getSelection().removeAllRanges();
-        btn.textContent = '✓ Copied'; setTimeout(()=>btn.textContent='Copy',1800);
-      }
-    });
-  });
-</script>
-<script src="../../assets/site-chrome.js" defer></script>
+<script src="/assets/site-chrome.js" defer></script>
 </body>
 </html>

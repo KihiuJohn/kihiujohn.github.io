@@ -15,13 +15,13 @@
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-dataloader-n1.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-dataloader-n1/">
 <meta property="article:author" content="John Kihiu">
-<meta property="article:section" content="acumatica">
+<meta property="article:section" content="data">
 <meta property="article:tag" content="graphql">
 <meta property="article:tag" content="dataloader">
 <meta property="article:tag" content="n1">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"GraphQL DataLoader for N+1 — A Field Guide","description": "GraphQL DataLoader for N+1 — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.","image":"https://kihiujohn.github.io/assets/og/graphql-dataloader-n1.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/graphql-dataloader-n1/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"GraphQL DataLoader for N+1 — A Field Guide","description":"GraphQL DataLoader for N+1 — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.","image":"https://kihiujohn.github.io/assets/og/graphql-dataloader-n1.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/graphql-dataloader-n1/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"GraphQL DataLoader for N+1 — A Field Guide","item":"https://kihiujohn.github.io/blog/graphql-dataloader-n1/"}]}
@@ -85,141 +85,99 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">GraphQL DataLoader for N+1 — A Field Guide</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">Data / ML · Graphql</span>
     <h1>GraphQL DataLoader for N+1 — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">GraphQL DataLoader for N+1 — A Field Guide — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">GraphQL DataLoader for N+1 — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>GraphQL DataLoader for N+1 — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether the integration succeeds or fails. This guide is the field-tested pattern for GraphQL in a production context.</p>
-
-<h2 id="rest">REST patterns</h2>
-<p>REST is still the default. The patterns that work:</p>
-
-<ul>
-  <li><strong>Resource-oriented URLs.</strong> <code>/customers/{id}/orders</code>, not <code>/getCustomerOrders?id=123</code>.</li>
-  <li><strong>HTTP verbs.</strong> GET (read), POST (create), PUT/PATCH (update), DELETE (remove).</li>
-  <li><strong>Status codes.</strong> 200 (OK), 201 (Created), 204 (No Content), 400 (Bad Request), 404 (Not Found), 500 (Server Error).</li>
-  <li><strong>Content negotiation.</strong> <code>Accept: application/json</code>.</li>
-  <li><strong>Versioning.</strong> URL versioning (<code>/v1/</code>) or header versioning (<code>Accept: application/vnd.api+json;version=1</code>).</li>
-</ul>
-
-<div class="callout">
-  <strong>The OpenAPI drift</strong>
-  <p>The OpenAPI spec drifts from the implementation within a week of every release. The only fix is generation, not maintenance. Generate the spec from the routes, the validation rules, and the response schemas.</p>
+    <p>On real data teams, this is rarely the question. The question is the failure mode: what happens when the upstream schema changes, when the downstream consumer breaks, when the data quality test fails. This article is the patterns.</p>
+<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
+<p>The pipeline architecture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+  customer_id,
+  SUM(amount) AS total,
+  COUNT(*) AS transactions
+FROM graphql
+WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
+GROUP BY 1
+ORDER BY total DESC
+LIMIT 100;</code></pre>
 </div>
-
-<p>For the broader REST patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a>.</p>
-
-<h2 id="graphql">GraphQL patterns</h2>
-<p>GraphQL is the right tool when the client has many views of the same data and the network is the bottleneck. The patterns:</p>
-
-<ul>
-  <li><strong>Schema-first design.</strong> Define the schema first; resolve against it.</li>
-  <li><strong>DataLoader for N+1.</strong> Batch fetches across resolvers.</li>
-  <li><strong>Persisted queries.</strong> Pre-register common queries; reject the rest.</li>
-  <li><strong>Subscriptions for real-time.</strong> WebSocket-based subscriptions over the same schema.</li>
-</ul>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">GRAPHQL · SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type Query {
-  customer(id: ID!): Customer
-  customers(filter: CustomerFilter): [Customer!]!
-}
-
-type Mutation {
-  createCustomer(input: CustomerInput!): Customer!
-  updateCustomer(id: ID!, input: CustomerInput!): Customer!
-}
-
-type Subscription {
-  orderStatus(orderId: ID!): OrderStatus!
-}
-
-type Customer {
-  id: ID!
-  name: String!
-  email: String!
-  orders(filter: OrderFilter): [Order!]!
-}</code></pre>
-</div> 
-
-<h2 id="grpc">gRPC and protocol buffers</h2>
-<p>gRPC is the right tool for service-to-service communication. The patterns:</p>
-
-<ul>
-  <li><strong>Strong typing.</strong> Protocol buffers define the contract.</li>
-  <li><strong>Streaming.</strong> Server, client, and bidirectional streaming.</li>
-  <li><strong>Code generation.</strong> Generated clients in 11+ languages.</li>
-  <li><strong>HTTP/2.</strong> Multiplexing, header compression.</li>
-</ul>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PROTO · SERVICE DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>syntax = "proto3";
-
-package ar.v1;
-
-service ARService {
-  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse);
-  rpc CreateInvoice(CreateInvoiceRequest) returns (Invoice);
-  rpc StreamInvoices(StreamInvoicesRequest) returns (stream Invoice);
-}
-
-message Invoice {
-  string refnbr = 1;
-  string customer_id = 2;
-  string docdate = 3;
-  double curyorigdocamt = 4;
-  string status = 5;
-}</code></pre>
-</div> 
-
-<h2 id="webhooks">Webhooks for event-driven APIs</h2>
-<p>Webhooks are the right tool when the consumer wants to be notified about events. The patterns:</p>
-
-<ul>
-  <li><strong>Signature verification.</strong> Every webhook includes a signature header; the consumer verifies it.</li>
-  <li><strong>At-least-once delivery.</strong> Webhooks are retried; the consumer must be idempotent.</li>
-  <li><strong>Quick ack.</strong> The consumer returns 200 fast; processes async.</li>
-  <li><strong>Dead-letter queue.</strong> Failed deliveries go to a DLQ; replay later.</li>
-</ul>
-
-<p>For the broader webhook patterns, see the <a href="/blog/acumatica-webhooks-vs-rest-polling/">webhooks vs polling guide</a>.</p>
-
-<h2 id="contract-testing">Contract testing</h2>
-<p>The consumer-producer contract must be tested. The patterns:</p>
-<ul>
-  <li><strong>Pact</strong> (consumer-driven). The consumer defines the contract; the producer verifies.</li>
-  <li><strong>Schema validation</strong> (OpenAPI, JSON Schema). The producer publishes the schema; the consumer validates responses against it.</li>
-  <li><strong>Mock servers</strong> (Prism, Postman mocks). The consumer mocks the producer for local dev.</li>
-</ul>
-
+<h2 id="implementation-code-examples">Implementation: code examples</h2>
+<p>In the work I have done on graphql dataloader for n+1 — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The schema that is not tested is a lie</strong>
-  <p>An OpenAPI spec is a contract. A contract that is not tested is a lie. Run the contract test in CI for both the consumer and the producer. A failing contract test is a release blocker.</p>
+  <strong>The cost is the metric</strong>
+  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
 </div>
-
+<h2 id="data-quality-and-testing">Data quality and testing</h2>
+<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the dataloader is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def transform(df):
+    return df.filter(df.graphql > 0).groupBy("dataloader").agg({"amount": "sum"})</code></pre>
+</div>
+<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>The test is the contract</strong>
+  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+</div>
+<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- dbt model
+{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
+SELECT *
+FROM {{ ref('stg_graphql') }}
+{% if is_incremental() %}
+  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
+{% endif %}</code></pre>
+</div>
+<h2 id="common-production-failure-modes">Common production failure modes</h2>
+<p>The performance of dataloader in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>The pivot is expensive</strong>
+  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
+</div>
+<h2 id="why-graphql-in-the-warehouse-beats-in-the-lake">Why graphql in the warehouse beats in the lake</h2>
+<p>Production dataloader looks different from development dataloader. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+  customer_id,
+  SUM(amount) AS total,
+  COUNT(*) AS transactions
+FROM graphql
+WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
+GROUP BY 1
+ORDER BY total DESC
+LIMIT 100;</code></pre>
+</div>
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring dataloader first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with dataloader when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>REST for general use, GraphQL when the client has many views, gRPC for service-to-service, webhooks for events. The contract is the API; the contract test is the proof. Get the contract right and the integration works. Get the contract test right and the integration stays right.</p>
-
+<p>That is the working approach I use on graphql dataloader for n+1 — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/graphql-schema-design/">GraphQL Schema Design — A Field Guide</a></li>
-      <li><a href="/blog/graphql-resolver-patterns/">GraphQL Resolver Patterns</a></li>
-      <li><a href="/blog/graphql-subscriptions-realtime/">GraphQL Subscriptions for Real-Time</a></li>
-      <li><a href="/blog/graphql-federation/">GraphQL Federation — A Field Guide</a></li>
-      <li><a href="/blog/graphql-persisted-queries/">GraphQL Persisted Queries — A Field Guide</a></li>
+      <li><a href="/blog/api-style-decision/">REST vs GraphQL vs gRPC — Decision Guide</a></li>
+      <li><a href="/blog/apollo-server-patterns/">Apollo Server Patterns — A Field Guide</a></li>
+      <li><a href="/blog/graphql-authentication/">GraphQL Authentication — A Field Guide</a></li>
+      <li><a href="/blog/graphql-caching-patterns/">GraphQL Caching Patterns</a></li>
+      <li><a href="/blog/graphql-error-handling/">GraphQL Error Handling — A Field Guide</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     

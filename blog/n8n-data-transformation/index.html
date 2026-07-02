@@ -15,13 +15,13 @@
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-data-transformation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-data-transformation/">
 <meta property="article:author" content="John Kihiu">
-<meta property="article:section" content="acumatica">
+<meta property="article:section" content="data">
 <meta property="article:tag" content="n8n">
 <meta property="article:tag" content="data">
 <meta property="article:tag" content="transformation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Data Transformation Patterns","description": "n8n Data Transformation Patterns is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-data-transformation.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-data-transformation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Data Transformation Patterns","description":"n8n Data Transformation Patterns is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-data-transformation.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-data-transformation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n Data Transformation Patterns","item":"https://kihiujohn.github.io/blog/n8n-data-transformation/"}]}
@@ -85,139 +85,99 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n Data Transformation Patterns</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">Data / ML · N8n</span>
     <h1>n8n Data Transformation Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n Data Transformation Patterns — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n Data Transformation Patterns is the work that turns a collection of business systems into a coherent operation.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>n8n Data Transformation Patterns is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool. The workflow is what connects them. This guide is the field-tested pattern for n8n in a business context.</p>
-
-<h2 id="what-is-workflow-automation">What is workflow automation</h2>
-<p>Workflow automation is the discipline of moving data between systems, transforming it, and triggering actions — without a human in the loop for the routine cases. The three categories:</p>
-<ul>
-  <li><strong>Scheduled</strong> — runs at a time (daily reconciliation, weekly report).</li>
-  <li><strong>Event-driven</strong> — runs when something happens (order created, payment received).</li>
-  <li><strong>On-demand</strong> — runs when a user clicks a button (re-send invoice, re-process batch).</li>
-</ul>
-
-<div class="callout">
-  <strong>Automate the routine, escalate the exception</strong>
-  <p>The 80/20 of workflow automation: 80% of the value comes from automating the 20% of cases that are routine. The other 80% of cases — the exceptions — need a human. A good workflow automation routes exceptions to a human, with all the context.</p>
+    <p>The data stack in 2026 is more capable than it was in 2020. dbt, lakehouses, vector databases, streaming. this is one of the parts of the modern stack. This article is the part.</p>
+<h2 id="backfills-and-rollbacks-for-nn">Backfills and rollbacks for nn</h2>
+<p>Backfills and rollbacks for nn is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+  customer_id,
+  SUM(amount) AS total,
+  COUNT(*) AS transactions
+FROM nn
+WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
+GROUP BY 1
+ORDER BY total DESC
+LIMIT 100;</code></pre>
 </div>
-
-<h2 id="tools">The tool landscape</h2>
-<p>The tools you can choose from, in increasing order of code involvement:</p>
-
+<h2 id="what-n8n-data-transformation-patterns-is-for">What n8n Data Transformation Patterns is for</h2>
+<p>In the work I have done on n8n data transformation patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The cost is the metric</strong>
+  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+</div>
+<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
+<p>When the work moves from design to production, the questions change. The nn is not the question; the failure mode of the data is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def transform(df):
+    return df.filter(df.nn > 0).groupBy("data").agg({"amount": "sum"})</code></pre>
+</div>
+<h2 id="implementation-code-examples">Implementation: code examples</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>The test is the contract</strong>
+  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+</div>
+<h2 id="data-quality-and-testing">Data quality and testing</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- dbt model
+{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
+SELECT *
+FROM {{ ref('stg_nn') }}
+{% if is_incremental() %}
+  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
+{% endif %}</code></pre>
+</div>
+<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
+<p>The performance of data in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>The pivot is expensive</strong>
+  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
+</div>
+<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
+<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+  customer_id,
+  SUM(amount) AS total,
+  COUNT(*) AS transactions
+FROM nn
+WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
+GROUP BY 1
+ORDER BY total DESC
+LIMIT 100;</code></pre>
+</div>
 <table>
-  <tr><th>Tool</th><th>Use when</th><th>Trade-off</th></tr>
-  <tr><td>Zapier, Make, n8n</td><td>Simple integrations, no-code</td><td>Fast to build, hard to scale</td></tr>
-  <tr><td>Workato, Tray.io, Boomi</td><td>Enterprise iPaaS, governance</td><td>Expensive, but with audit and SLAs</td></tr>
-  <tr><td>Custom code (Laravel, .NET, Node)</td><td>Complex logic, performance-critical</td><td>Full control, full responsibility</td></tr>
-  <tr><td>Acumatica Business Events</td><td>ERP-native automation</td><td>Built-in, no external dependency</td></tr>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add n8n on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
 </table>
-
-<h2 id="patterns">The patterns that work</h2>
-
-<h3>1. Webhook-first</h3>
-<p>For event-driven workflows, use webhooks. The source system pushes; the destination listens. Polling is the tax you pay when webhooks are not available.</p>
-
-<h3>2. Idempotency</h3>
-<p>Every event handler must be idempotent. The same event can fire twice (webhook redelivery, retry on timeout). The handler must recognise the second call and skip the work.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · IDEMPOTENT HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import hashlib
-from redis import Redis
-
-redis = Redis()
-
-def handle_event(event_id: str, event_body: dict):
-    # Compute a deterministic key for this event
-    key = f"event:{hashlib.sha256(event_id.encode()).hexdigest()}"
-    # Try to claim the event
-    if not redis.set(key, "processing", nx=True, ex=3600):
-        # Already claimed — skip
-        return {"status": "already-processed"}
-    # Process
-    do_the_work(event_body)
-    redis.set(key, "done", ex=86400)
-    return {"status": "ok"}</code></pre>
-</div> 
-
-<h3>3. Saga / compensation</h3>
-<p>For multi-step workflows (e.g. Acumatica invoice + payment + email), the steps are not atomic. If step 3 fails after step 1 succeeded, you have an inconsistent state. The pattern: each step has a compensation (an undo). The saga runs the steps; if a step fails, the compensations run in reverse.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SAGA PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class InvoiceSaga:
-    def execute(self, order):
-        invoice = self.create_invoice(order)
-        try:
-            payment = self.create_payment(order, invoice)
-        except Exception:
-            self.cancel_invoice(invoice)  # compensate
-            raise
-        try:
-            self.send_email(order, invoice, payment)
-        except Exception:
-            self.refund_payment(payment)   # compensate
-            self.cancel_invoice(invoice)   # compensate
-            raise</code></pre>
-</div> 
-
-<p>For the broader saga patterns, see the <a href="/blog/acumatica-saga-pattern-transactions/">saga pattern guide</a>.</p>
-
-<h3>4. Dead-letter queue</h3>
-<p>For workflows that fail repeatedly (an integration that is down), the events cannot be lost. The pattern: dead-letter queue. Failed events go to a queue (or table) instead of being dropped; a worker replays them after the integration is fixed.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · DEAD-LETTER HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def handle_with_dlq(event):
-    try:
-        process(event)
-    except Exception as e:
-        attempts = event.get("attempts", 0) + 1
-        if attempts &gt;= 5:
-            # Send to dead-letter
-            dead_letter_queue.push(event, str(e))
-        else:
-            # Retry with exponential backoff
-            delay = 2 ** attempts
-            retry_queue.push(event, delay=delay, attempts=attempts)</code></pre>
-</div> 
-
-<h2 id="monitoring">Monitoring the workflow</h2>
-<p>A workflow that fails silently is worse than a workflow that does not exist. The monitoring:</p>
-<ul>
-  <li><strong>Event counts.</strong> How many events fired, how many succeeded, how many failed.</li>
-  <li><strong>Latency p50/p95/p99.</strong> How long from event fire to action completion.</li>
-  <li><strong>Dead-letter count.</strong> The most important metric. If it is not zero, something is broken.</li>
-  <li><strong>Idempotency collision rate.</strong> How often the same event is being processed twice.</li>
-</ul>
-
-<p>For the broader monitoring patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring guide</a>.</p>
-
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>The tools, the patterns, the safety, the monitoring. Get all four right and the workflow runs itself. Skip any one and you are debugging at 2 AM. The discipline is the same as any production system — fail loudly, fail safely, and have a runbook for when the automation breaks.</p>
-
+<p>That is the working approach I use on n8n data transformation patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/n8n-acumatica-integration/">n8n + Acumatica Integration — A Complete Guide</a></li>
-      <li><a href="/blog/n8n-erp-automation/">n8n for ERP Automation — A Field Guide</a></li>
-      <li><a href="/blog/n8n-webhook-patterns/">n8n Webhook Patterns — A Field Guide</a></li>
-      <li><a href="/blog/n8n-error-handling/">n8n Error Handling Patterns</a></li>
-      <li><a href="/blog/n8n-credential-management/">n8n Credential Management — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-data-mesh-pattern/">Acumatica Data Mesh Pattern</a></li>
+      <li><a href="/blog/acumatica-data-migration-import-scenarios/">Acumatica Data Migration — Import Scenarios</a></li>
+      <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-pii-discovery-scanning/">Acumatica PII Discovery and Scanning</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     

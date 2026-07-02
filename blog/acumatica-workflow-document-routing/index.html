@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Workflow — Document Routing Patterns | John Kihiu</title>
 <meta name="description" content="Acumatica Workflow — Document Routing Patterns is one of the most common workflow customisations in Acumatica.">
-<meta name="keywords" content="Acumatica Workflow, Acumatica Approvals, Acumatica Acumatica, Workflow Acumatica, Document Acumatica, Routing Acumatica, Patterns Acumatica, Acumatica, Acumatica ERP, John Kihiu">
+<meta name="keywords" content="Acumatica workflow, Acumatica approvals, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-workflow-document-routing/">
@@ -15,12 +15,12 @@
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-workflow-document-routing.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-workflow-document-routing/">
 <meta property="article:author" content="John Kihiu">
-<meta property="article:section" content="acumatica">
+<meta property="article:section" content="workflow">
 <meta property="article:tag" content="workflow">
 <meta property="article:tag" content="approvals">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Workflow — Document Routing Patterns","description": "Acumatica Workflow — Document Routing Patterns is one of the most common workflow customisations in Acumatica.","image":"https://kihiujohn.github.io/assets/og/acumatica-workflow-document-routing.svg","datePublished":"2026-06-14","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-workflow-document-routing/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Workflow — Document Routing Patterns","description":"Acumatica Workflow — Document Routing Patterns is one of the most common workflow customisations in Acumatica.","image":"https://kihiujohn.github.io/assets/og/acumatica-workflow-document-routing.svg","datePublished":"2026-06-14","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-workflow-document-routing/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Workflow — Document Routing Patterns","item":"https://kihiujohn.github.io/blog/acumatica-workflow-document-routing/"}]}
@@ -84,186 +84,123 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Workflow — Document Routing Patterns</span></nav>
-    <span class="tag">Acumatica · Workflow</span>
+    <span class="tag">Workflow · Workflow</span>
     <h1>Acumatica Workflow — Document Routing Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Workflow — Document Routing Patterns — a complete, field-tested reference by John Kihiu, Acumatica developer in Nairobi.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Workflow — Document Routing Patterns is one of the most common workflow customisations in Acumatica.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-14">Jun 14, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Acumatica Workflow — Document Routing Patterns is one of the most common workflow customisations in Acumatica. Every business has a process that does not fit the standard approval map, and the workflow engine is the right place to model it. The trap is that the engine has a lot of moving parts — states, transitions, conditions, handlers, business events, approval groups — and the patterns are not always obvious. This guide walks through the canonical pattern for the scenario, then the variations you will see in the wild.</p>
-
-<h2 id="what-the-workflow-does">What the workflow needs to do</h2>
-<p>The workflow exists to enforce a process. The process has three things: a <em>trigger</em> (something happens), a <em>decision</em> (some condition is checked), and an <em>action</em> (a state change or a notification). The workflow engine implements all three.</p>
-
-<div class="callout">
-  <strong>Map it on paper first</strong>
-  <p>Before you write any code, draw the state diagram. Each state is a node, each transition is an arrow, each arrow has a label (the condition) and a side effect (the action). If you cannot draw it on a single page, the workflow is too complex and should be split.</p>
-</div>
-
-<h2 id="the-states">The states</h2>
-<p>For most approval workflows, the states are:</p>
-
-<table>
-  <tr><th>State</th><th>Code</th><th>Meaning</th></tr>
-  <tr><td>Draft</td><td>D</td><td>Created but not submitted</td></tr>
-  <tr><td>Pending Approval</td><td>P</td><td>Waiting for the approver</td></tr>
-  <tr><td>Approved</td><td>A</td><td>Approval received</td></tr>
-  <tr><td>Rejected</td><td>R</td><td>Approval denied</td></tr>
-  <tr><td>Released</td><td>E</td><td>Posted to the sub-ledger</td></tr>
-</table>
-
-<p>Some workflows add a <em>Held</em> state (waiting for additional information) or split the approval into multiple sequential or parallel groups. The pattern is the same; just add the state and the transitions.</p>
-
-<h2 id="the-transitions">The transitions</h2>
-<p>Each transition has a source state, a target state, a condition, and a handler. The condition is the gate (who can do this); the handler is the work (what happens).</p>
-
-
+    <p>Workflow automation is mostly about how to handle the cases that don't show up in the happy path. this is one of the patterns that handles them. The pattern that works is to push the workflow towards being deterministic, testable, and observable. This article is that pattern.</p>
+<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
+<p>The architecture of a workflow automation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · WORKFLOW TRANSITION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXWorkflowDependsOnType(typeof(INItemSite))]
-public class InventoryItemMaintWF : PXGraphExtension&lt;InventoryItemMaint&gt;
-{
-    public sealed class States : PX.Data.PXWorkflowStatusAttribute
-    {
-        public const string Draft = "D";
-        public const string PendingApproval = "P";
-        public const string Approved = "A";
-        public const string Rejected = "R";
-        public const string Released = "E";
-    }
-    public static class Conditions
-    {
-        public static bool RequiresManagerApproval(INItemSite doc)
-            =&gt; doc?.CuryOrderTotal &gt; 10000m;
-    }
-    public sealed class Handlers
-    {
-        [PXWorkflowHandler]
-        public static IEnumerable&lt;INItemSite&gt; SubmitForApproval(
-            PXGraph graph, INItemSite entity)
-        {
-            entity.Status = States.PendingApproval;
-            yield return entity;
-        }
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+    "nodes": [
+        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
+        {"name": "Transform", "type": "n8n-nodes-base.set"},
+        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
+    ],
+    "connections": {
+        "Trigger": {"main": [[{"node": "Transform"}]]},
+        "Transform": {"main": [[{"node": "Acumatica"}]]}
     }
 }</code></pre>
 </div>
-
-<p>For the broader workflow patterns, see the <a href="/blog/acumatica-workflow-engine-the-definitive-guide/">workflow engine definitive guide</a>.</p>
-
-<h2 id="approval-groups">Approval groups</h2>
-<p>For multi-approver scenarios, configure approval groups on the Employee screen first, then reference them in the workflow. The patterns:</p>
-
-<table>
-  <tr><th>Pattern</th><th>When</th><th>Configuration</th></tr>
-  <tr><td>Single approver</td><td>Manager signs off</td><td>One group, one approver</td></tr>
-  <tr><td>Sequential</td><td>Manager, then director</td><td>Two groups, ordered</td></tr>
-  <tr><td>Parallel</td><td>All departments must sign off</td><td>Multiple groups, AND logic</td></tr>
-  <tr><td>Threshold-based</td><td>Under $5k auto, over $5k manager</td><td>Two workflows, condition-gated</td></tr>
-</table>
-
+<h2 id="implementation-a-working-example">Implementation: a working example</h2>
+<p>In the work I have done on acumatica workflow — document routing patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>Do not mix sequential and parallel</strong>
-  <p>A workflow that goes through a sequential step and then branches into parallel groups is the most common source of "stuck approvals" tickets. Pick one pattern per workflow; do not mix.</p>
+  <strong>Dead-letter or die</strong>
+  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
 </div>
-
-<p>For the parallel approval pattern specifically, see the <a href="/blog/acumatica-workflow-parallel-approvals/">parallel approvals guide</a>.</p>
-
-<h2 id="email-notifications">Email notifications</h2>
-<p>A workflow that does not notify the next approver stalls. The pattern is Acumatica Business Events: configure the trigger (state change), the filter (only fire for this transition), and the subscriber (email, push, webhook).</p>
-
-
+<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
+<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">CONFIG · BUSINESS EVENT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Business Event setup
-// Screen: INItemSite
-// Event:  Status changes to PendingApproval
-// Filter: CuryOrderTotal > 10000
-// Subscriber: Email to employee with the approver role</code></pre>
-</div>}
-
-<p>For the full notification pattern, see the <a href="/blog/acumatica-workflow-automated-actions-emails/">automated actions and emails</a> guide.</p>
-
-<h2 id="conditional-assignment">Conditional assignment</h2>
-<p>Static approval maps are fine until your business has more than one rule. Dynamic assignment — "if amount &gt; X, route to the CFO; if customer class is VIP, route to the relationship manager" — is what you actually need.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · DYNAMIC APPROVER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>protected void _(Events.RowPersisting&lt;INItemSite&gt; e)
-{
-    var row = e.Row;
-    if (row == null) return;
-    if (row.CuryOrderTotal &gt; 100000m)
-        row.ApproverID = CfoEmployeeID;
-    else if (row.CustomerClassID == "VIP")
-        row.ApproverID = RelationshipManagerID;
-    else
-        row.ApproverID = DefaultManagerID;
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>async function handleAcumatica(event) {
+    try {
+        const result = await processWorkflow(event.body);
+        return { status: 'ok', result };
+    } catch (err) {
+        await deadLetter.push(event, err.message);
+        return { status: 'failed' };
+    }
 }</code></pre>
 </div>
-
-<p>For the full pattern, see the <a href="/blog/acumatica-workflow-conditional-assignment/">conditional assignment guide</a>.</p>
-
-<h2 id="testing">Testing the workflow</h2>
-<p>Workflows are deceptively hard to test because they involve time (the approver's response) and human judgment (the rejection reason). The minimum coverage:</p>
-<ol>
-  <li>Submit a document that meets the condition. Verify it transitions to Pending Approval.</li>
-  <li>Approve as the assigned approver. Verify it transitions to Approved.</li>
-  <li>Reject as the assigned approver. Verify it transitions to Rejected and the reason is captured.</li>
-  <li>Submit a document that does not meet the condition. Verify it auto-approves (or whatever the alternative is).</li>
-  <li>Verify the email notifications fire.</li>
-</ol>
-
-
+<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Run on a schedule that does not conflict</strong>
+  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+</div>
+<h2 id="monitoring-and-observability">Monitoring and observability</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · WORKFLOW TEST</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[Test]
-public void SubmitForApproval_TriggersTransition()
-{
-    var graph = PXGraph.CreateInstance&lt;InventoryItemMaint&gt;();
-    var doc = new INItemSite { CuryOrderTotal = 50000m };
-    graph.Document.Insert(doc);
-    graph.Actions.PressSave();
-    PXAutomation.GetStep&lt;INItemSite&gt;(graph, doc, "Submit", "PendingApproval").Invoke();
-    var refreshed = (INItemSite)graph.Document.Search&lt;INItemSite.refNbr&gt;(doc.RefNbr);
-    Assert.AreEqual("P", refreshed.Status);
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// n8n expression
+const items = $input.all();
+return items.map(item =&gt; ({
+    json: {
+        id: item.json.id,
+        acumatica: item.json.acumatica,
+        timestamp: new Date().toISOString()
+    }
+}));</code></pre>
+</div>
+<h2 id="common-production-failure-modes">Common production failure modes</h2>
+<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Test the failure modes</strong>
+  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
+</div>
+<h2 id="why-acumatica-fails-at-3-am-and-what-to-do">Why acumatica fails at 3 AM and what to do</h2>
+<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+    "nodes": [
+        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
+        {"name": "Transform", "type": "n8n-nodes-base.set"},
+        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
+    ],
+    "connections": {
+        "Trigger": {"main": [[{"node": "Transform"}]]},
+        "Transform": {"main": [[{"node": "Acumatica"}]]}
+    }
 }</code></pre>
 </div>
-
-<p>For the full unit testing pattern, see the <a href="/blog/acumatica-test-automation-unit-test-framework/">unit test framework guide</a>.</p>
-
-<h2 id="common-pitfalls">Common pitfalls</h2>
-<p>The pitfalls I see most often, in order of frequency:</p>
-<ol>
-  <li><strong>Forgetting the initial state.</strong> A record that enters the workflow without a state gets stuck. Always set the status field to the initial state on insert.</li>
-  <li><strong>Mixing the condition and the handler.</strong> The condition is a one-liner; the handler is the work. If the condition does more than a boolean check, refactor.</li>
-  <li><strong>Not testing with restricted users.</strong> A workflow that exposes "approve" to a user with no approval rights is a leak. Test with restricted users.</li>
-  <li><strong>Hard-coded approver IDs.</strong> Approver IDs are tenant-specific. Use roles, not literal IDs.</li>
-  <li><strong>Forgetting to publish both the workflow and the graph.</strong> The workflow is part of the customisation package. Publish both as a unit.</li>
-</ol>
-
-<p>For the upgrade survival playbook, see the <a href="/blog/acumatica-customization-upgrade-survival-guide/">customisation upgrade survival guide</a>.</p>
-
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>The pattern is: state diagram on paper, states in code, transitions with conditions and handlers, approval groups configured, business events wired, tests written, restricted users verified. Do all six and the workflow is solid. Skip any one and you are debugging a stuck-approval ticket six months from now.</p>
-
+<p>That is the working approach I use on acumatica workflow — document routing patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount Thresholds</a></li>
-      <li><a href="/blog/acumatica-workflow-discount-approval/">Acumatica Workflow — Discount Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-purchase-order-approval/">Acumatica Workflow — Purchase Order Approval</a></li>
       <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-leave-request/">Acumatica Workflow — Leave Request Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
+      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-discount-approval/">Acumatica Workflow — Discount Approval Patterns</a></li>
       </ul>
     </div>
-
+    <h2>Wrapping up</h2>
+    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-
+    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
+      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
+      <div>
+        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
+      </div>
+    </div>
   </div>
 </main>
 <script>

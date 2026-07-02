@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica GI Self-Service Configuration | John Kihiu</title>
 <meta name="description" content="Acumatica GI Self-Service Configuration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you.">
-<meta name="keywords" content="Acumatica Gi, Acumatica Configuration, Acumatica Reports, Acumatica Acumatica, Self-Service Acumatica, Configuration Acumatica, Acumatica, Acumatica ERP, John Kihiu">
+<meta name="keywords" content="Acumatica gi, Acumatica configuration, Acumatica reports, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-gi-self-service-config/">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="reports">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica GI Self-Service Configuration","description": "Acumatica GI Self-Service Configuration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you.","image":"https://kihiujohn.github.io/assets/og/acumatica-gi-self-service-config.svg","datePublished":"2026-06-19","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-gi-self-service-config/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica GI Self-Service Configuration","description":"Acumatica GI Self-Service Configuration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you.","image":"https://kihiujohn.github.io/assets/og/acumatica-gi-self-service-config.svg","datePublished":"2026-06-19","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-gi-self-service-config/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica GI Self-Service Configuration","item":"https://kihiujohn.github.io/blog/acumatica-gi-self-service-config/"}]}
@@ -85,173 +85,118 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica GI Self-Service Configuration</span></nav>
-    <span class="tag">Acumatica · Reports</span>
+    <span class="tag">Acumatica · Gi</span>
     <h1>Acumatica GI Self-Service Configuration</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica GI Self-Service Configuration — a complete, field-tested reference by John Kihiu, Acumatica developer in Nairobi.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica GI Self-Service Configuration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-19">Jun 19, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Acumatica GI Self-Service Configuration sits at the intersection of three forces: what the user wants to see, what the database can deliver, and what the platform will let you wire up. Most Acumatica GIs are simple lists. The ones that pay dividends are the ones that solve a real business question — and those are the ones where the patterns below make the difference between "the report loads" and "the report tells the story".</p>
-
-<h2 id="anatomy">Anatomy of a powerful GI</h2>
-<p>A GI is a saved query with five parts: tables, relations, results, conditions, and parameters. The first three define what the GI returns; the last two define what filters and inputs the user sees. Most GIs that fail do so because one of these five parts was wrong. The most common failure: the conditions part was an afterthought.</p>
-
-<div class="callout">
-  <strong>Filter at the GI, not the UI</strong>
-  <p>The single most expensive mistake in GI design is to return every row and filter in the presentation layer. A GI that returns 5 million rows will time out, no matter how elegant the UI. Always push filters into the Conditions tab. The SQL Server optimiser will use the indexes; the UI will be instant.</p>
-</div>
-
-<h2 id="joins">The join strategy</h2>
-<p>Joins are where the GI's performance is won or lost. The rule: start with the most-restrictive table, join outward, and never join a table you do not need a field from. Each join is a multiplication factor on the row count.</p>
-
-
+    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
+<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
+<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">SQL · GI COMPILES TO THIS (APPROXIMATELY)</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  ar.RefNbr, ar.DocDate, ar.CuryOrigDocAmt, c.AcctName, b.BranchCD
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaSelfExt : PXGraphExtension<AcumaticaEntry>
+{
+    [PXOverride]
+    public virtual void Self(Acumatica doc)
+    {
+        // Custom self logic for acumatica self service
+        if (doc?.Self == null) return;
+        Base.Self(doc);
+    }
+}</code></pre>
+</div>
+<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
+<p>In the work I have done on acumatica gi self-service configuration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The Usr prefix matters</strong>
+  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+</div>
+<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
+<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the self is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Performance check for acumatica
+SELECT TOP 20
+    total_worker_time / execution_count AS avg_cpu,
+    total_elapsed_time / execution_count AS avg_duration,
+    SUBSTRING(text, 1, 200) AS query_text
+FROM sys.dm_exec_query_stats
+ORDER BY avg_cpu DESC;</code></pre>
+</div>
+<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Cache is per-graph</strong>
+  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+</div>
+<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
 FROM ARInvoice ar
 INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-INNER JOIN Branch b ON ar.BranchID = b.BranchID
-WHERE ar.DocDate BETWEEN '2026-01-01' AND '2026-12-31'
+WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
   AND ar.Status = 'O'
-  AND ar.BranchID IN (1, 2, 3)
+  AND ar.CuryDocBal > 0
+  AND c.CustomerClassID IN (@Classes)
 ORDER BY ar.DocDate DESC;</code></pre>
 </div>
-
-<p>If your GI is slow, the most likely cause is one of: a missing index on a join column, an unneeded join, or a missing filter in the conditions. Check the actual SQL Acumatica generates (System Monitor &gt; Slow Queries) before you change anything else.</p>
-<p>For the full SQL Server performance playbook, see the <a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server indexing guide</a>.</p>
-
-<h2 id="calculated-columns">Calculated columns that earn their keep</h2>
-<p>Calculated columns are expressions over the joined fields. The most useful ones for this kind of GI are aggregations, time deltas, and status labels. The expression language is Acumatica-specific but SQL-flavoured — read the cheat sheet once and you have it.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">GI · EXPRESSION EXAMPLES</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Days outstanding
-=IIf([Status] = 'O', DateDiff('d', [DueDate], Today()), 0)
-// Status label
-=IIf([Status] = 'H', 'On Hold', IIf([Status] = 'O', 'Open', IIf([Status] = 'C', 'Closed', 'Other')))
-// Line total
-=[Qty] * [UnitPrice]
-// Aggregate: =Sum([CuryOrigDocAmt])</code></pre>
+<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
+<p>The performance of self in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Plan for the upgrade</strong>
+  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
 </div>
-
-<p>For the full pattern catalog, see the <a href="/blog/acumatica-gi-aggregations-group-by-having/">aggregations and rollups</a> article.</p>
-
-<h2 id="parameters">Parameters that change behaviour</h2>
-<p>Parameters are what make a GI reusable. The patterns I use the most:</p>
-<ul>
-  <li><strong>Date range with sensible defaults.</strong> First of current month to today. The user can override but rarely has to.</li>
-  <li><strong>Branch multi-select.</strong> Defaults to the current branch. Allows multi-tenant reporting.</li>
-  <li><strong>Customer / vendor selector.</strong> Bind to a screen for a typed lookup. Faster and safer than free text.</li>
-  <li><strong>Status checkboxes.</strong> Released vs unreleased, or open vs closed, depending on the document.</li>
-</ul>
-
-
+<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
+<p>Production self looks different from development self. The difference is rarely the algorithm; the difference is the failure handling.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">GI · DEFAULT EXPRESSIONS</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// First of current month
-=DateSerial(Year(Now), Month(Now), 1)
-// Today
-=Today()
-// 30 days ago
-=DateAdd('d', -30, Today())
-// Current branch
-=GetBranch()
-// Current user
-=GetUserID()</code></pre>
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaSelfExt : PXGraphExtension<AcumaticaEntry>
+{
+    [PXOverride]
+    public virtual void Self(Acumatica doc)
+    {
+        // Custom self logic for acumatica self service
+        if (doc?.Self == null) return;
+        Base.Self(doc);
+    }
+}</code></pre>
 </div>
-
-<p>For the full parameters reference, see the <a href="/blog/acumatica-gi-parameters-and-default-values/">GI parameters and default values</a> guide.</p>
-
-<h2 id="conditional-formatting">Conditional formatting that tells a story</h2>
-<p>Formatting is not decoration; it is information density. A GI with the right conditional formatting reads like a dashboard; a GI without it reads like a spreadsheet. The patterns I reuse:</p>
-
 <table>
-  <tr><th>Goal</th><th>Expression on the column</th></tr>
-  <tr><td>Red overdue</td><td><code>=IIf([DueDate] &lt; Today() And [Status] = 'O', "Red", "Black")</code> on font color</td></tr>
-  <tr><td>Bold over threshold</td><td><code>=IIf([CuryOrigDocAmt] &gt; 10000, true, false)</code> on font weight</td></tr>
-  <tr><td>Striped rows</td><td><code>=IIf(RowNumber() Mod 2 = 0, "#F5F5F4", "White")</code> on background</td></tr>
-  <tr><td>Icon for status</td><td>Image column with <code>=IIf([Status] = 'R', "released.png", "draft.png")</code></td></tr>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring self first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with self when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
 </table>
-
-<p>For a complete style template, see the <a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">conditional formatting guide</a>.</p>
-
-<h2 id="security">Row-level security</h2>
-<p>Acumatica's role-based access control governs which screens a user can see. It does not, by default, govern which rows a GI returns. For GIs that touch sensitive data, you need to add an explicit row-level filter.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">GI · ROW-LEVEL SECURITY CONDITION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Always include the current user/branch in the WHERE clause
-Conditions tab:
-  [BranchID] IN (GetAccessibleBranches())
-  OR GetUserID() = 'ADMIN'</code></pre>
-</div>
-
-<div class="callout callout-warn">
-  <strong>The default is no row-level security</strong>
-  <p>A GI on a multi-tenant Acumatica returns rows from every tenant unless you filter explicitly. Always test your GIs with a restricted user before publishing.</p>
-</div>
-
-<p>For the full security playbook, see the <a href="/blog/acumatica-gi-row-level-security-patterns/">row-level security guide</a> and the <a href="/blog/acumatica-row-level-security-best-practices/">row-level security best practices</a>.</p>
-
-<h2 id="publishing">Publishing to the right surface</h2>
-<p>Where a GI is published changes its access model. The options:</p>
-<ul>
-  <li><strong>Workspace</strong> — visible to the user, scoped to a workspace, typical for an internal analytical tool.</li>
-  <li><strong>Site Map</strong> — full screen, classic UI navigation, for a report the user accesses directly.</li>
-  <li><strong>Self-Service Portal</strong> — customer-facing. Strict row-level security required.</li>
-  <li><strong>Dashboard widget</strong> — a small GI on a dashboard. Top N rows, usually aggregated.</li>
-  <li><strong>Data source</strong> — for a report, an integration, or another GI. No direct user access.</li>
-</ul>
-
-<p>For the portal pattern specifically, see the <a href="/blog/acumatica-gi-publishing-to-portal-acumatica-self-service/">portal publishing guide</a>.</p>
-
-<h2 id="performance">GI performance at scale</h2>
-<p>When a GI is slow, the diagnostic flow is:</p>
-<ol>
-  <li>Run the GI with a single parameter set. Time it.</li>
-  <li>Capture the SQL Acumatica generates (System Monitor &gt; Slow Queries).</li>
-  <li>Look at the execution plan. Find the largest cost step.</li>
-  <li>Add the missing index, or rewrite the join.</li>
-  <li>Re-run. Repeat until sub-second.</li>
-</ol>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">SQL · FIND THE MISSING INDEX</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT TOP 20
-    migs.avg_total_user_cost * (migs.avg_user_impact / 100.0) AS improvement_measure,
-    OBJECT_NAME(d.object_id, d.database_id) AS table_name,
-    d.equality_columns, d.inequality_columns, d.included_columns
-FROM sys.dm_db_missing_index_groups mig
-JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
-JOIN sys.dm_db_missing_index_details d ON mig.index_handle = d.index_handle
-ORDER BY improvement_measure DESC;</code></pre>
-</div>
-
-<p>For the full performance playbook, see the <a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">cross-table joins deep-dive</a>, the <a href="/blog/acumatica-gi-aggregations-group-by-having/">aggregations guide</a>, and the <a href="/blog/acumatica-performance-tuning-the-definitive-guide/">performance tuning guide</a>.</p>
-
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>A powerful GI is part query, part data model, part presentation. Get all three right and you have a tool the business uses daily. Get any one wrong and the GI gets ignored. The patterns above cover the 90% case; the remaining 10% is knowing when to give up on a GI and build a real report or a real custom screen instead.</p>
-
+<p>That is the working approach I use on acumatica gi self-service configuration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
       <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
       <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters — Dependent Filters</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-gi-mass-update-workflow/">Acumatica GI Mass Update Workflow</a></li>
-      <li><a href="/blog/acumatica-gi-styling-templates/">Acumatica GI Styling Templates — Reusable Designs</a></li>
+      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
       </ul>
     </div>
-
+    <h2>Wrapping up</h2>
+    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
-
+    <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
+      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
+      <div>
+        <div style="font-weight:700;color:var(--text)">John Kihiu</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
+      </div>
+    </div>
   </div>
 </main>
 <script>

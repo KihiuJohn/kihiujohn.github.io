@@ -21,7 +21,7 @@
 <meta property="article:tag" content="patterns">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"API Gateway Patterns — A Field Guide","description": "API Gateway Patterns — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.","image":"https://kihiujohn.github.io/assets/og/api-gateway-patterns.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/api-gateway-patterns/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"API Gateway Patterns — A Field Guide","description":"API Gateway Patterns — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.","image":"https://kihiujohn.github.io/assets/og/api-gateway-patterns.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/api-gateway-patterns/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"API Gateway Patterns — A Field Guide","item":"https://kihiujohn.github.io/blog/api-gateway-patterns/"}]}
@@ -85,141 +85,107 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">API Gateway Patterns — A Field Guide</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">Acumatica · Gateway</span>
     <h1>API Gateway Patterns — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">API Gateway Patterns — A Field Guide — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">API Gateway Patterns — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>API Gateway Patterns — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether the integration succeeds or fails. This guide is the field-tested pattern for API Gateway in a production context.</p>
-
-<h2 id="rest">REST patterns</h2>
-<p>REST is still the default. The patterns that work:</p>
-
-<ul>
-  <li><strong>Resource-oriented URLs.</strong> <code>/customers/{id}/orders</code>, not <code>/getCustomerOrders?id=123</code>.</li>
-  <li><strong>HTTP verbs.</strong> GET (read), POST (create), PUT/PATCH (update), DELETE (remove).</li>
-  <li><strong>Status codes.</strong> 200 (OK), 201 (Created), 204 (No Content), 400 (Bad Request), 404 (Not Found), 500 (Server Error).</li>
-  <li><strong>Content negotiation.</strong> <code>Accept: application/json</code>.</li>
-  <li><strong>Versioning.</strong> URL versioning (<code>/v1/</code>) or header versioning (<code>Accept: application/vnd.api+json;version=1</code>).</li>
-</ul>
-
-<div class="callout">
-  <strong>The OpenAPI drift</strong>
-  <p>The OpenAPI spec drifts from the implementation within a week of every release. The only fix is generation, not maintenance. Generate the spec from the routes, the validation rules, and the response schemas.</p>
+    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
+<h2 id="the-version-of-api-that-works">The version of api that works</h2>
+<p>The version of api that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ApiGatewayExt : PXGraphExtension<ApiEntry>
+{
+    [PXOverride]
+    public virtual void Gateway(Api doc)
+    {
+        // Custom gateway logic for api gateway patterns
+        if (doc?.Gateway == null) return;
+        Base.Gateway(doc);
+    }
+}</code></pre>
 </div>
-
-<p>For the broader REST patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a>.</p>
-
-<h2 id="graphql">GraphQL patterns</h2>
-<p>GraphQL is the right tool when the client has many views of the same data and the network is the bottleneck. The patterns:</p>
-
-<ul>
-  <li><strong>Schema-first design.</strong> Define the schema first; resolve against it.</li>
-  <li><strong>DataLoader for N+1.</strong> Batch fetches across resolvers.</li>
-  <li><strong>Persisted queries.</strong> Pre-register common queries; reject the rest.</li>
-  <li><strong>Subscriptions for real-time.</strong> WebSocket-based subscriptions over the same schema.</li>
-</ul>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">GRAPHQL · SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type Query {
-  customer(id: ID!): Customer
-  customers(filter: CustomerFilter): [Customer!]!
-}
-
-type Mutation {
-  createCustomer(input: CustomerInput!): Customer!
-  updateCustomer(id: ID!, input: CustomerInput!): Customer!
-}
-
-type Subscription {
-  orderStatus(orderId: ID!): OrderStatus!
-}
-
-type Customer {
-  id: ID!
-  name: String!
-  email: String!
-  orders(filter: OrderFilter): [Order!]!
-}</code></pre>
-</div> 
-
-<h2 id="grpc">gRPC and protocol buffers</h2>
-<p>gRPC is the right tool for service-to-service communication. The patterns:</p>
-
-<ul>
-  <li><strong>Strong typing.</strong> Protocol buffers define the contract.</li>
-  <li><strong>Streaming.</strong> Server, client, and bidirectional streaming.</li>
-  <li><strong>Code generation.</strong> Generated clients in 11+ languages.</li>
-  <li><strong>HTTP/2.</strong> Multiplexing, header compression.</li>
-</ul>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PROTO · SERVICE DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>syntax = "proto3";
-
-package ar.v1;
-
-service ARService {
-  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse);
-  rpc CreateInvoice(CreateInvoiceRequest) returns (Invoice);
-  rpc StreamInvoices(StreamInvoicesRequest) returns (stream Invoice);
-}
-
-message Invoice {
-  string refnbr = 1;
-  string customer_id = 2;
-  string docdate = 3;
-  double curyorigdocamt = 4;
-  string status = 5;
-}</code></pre>
-</div> 
-
-<h2 id="webhooks">Webhooks for event-driven APIs</h2>
-<p>Webhooks are the right tool when the consumer wants to be notified about events. The patterns:</p>
-
-<ul>
-  <li><strong>Signature verification.</strong> Every webhook includes a signature header; the consumer verifies it.</li>
-  <li><strong>At-least-once delivery.</strong> Webhooks are retried; the consumer must be idempotent.</li>
-  <li><strong>Quick ack.</strong> The consumer returns 200 fast; processes async.</li>
-  <li><strong>Dead-letter queue.</strong> Failed deliveries go to a DLQ; replay later.</li>
-</ul>
-
-<p>For the broader webhook patterns, see the <a href="/blog/acumatica-webhooks-vs-rest-polling/">webhooks vs polling guide</a>.</p>
-
-<h2 id="contract-testing">Contract testing</h2>
-<p>The consumer-producer contract must be tested. The patterns:</p>
-<ul>
-  <li><strong>Pact</strong> (consumer-driven). The consumer defines the contract; the producer verifies.</li>
-  <li><strong>Schema validation</strong> (OpenAPI, JSON Schema). The producer publishes the schema; the consumer validates responses against it.</li>
-  <li><strong>Mock servers</strong> (Prism, Postman mocks). The consumer mocks the producer for local dev.</li>
-</ul>
-
+<h2 id="why-api-gateway-patterns-a-field-guide-matters-in-production">Why API Gateway Patterns — A Field Guide matters in production</h2>
+<p>In the work I have done on api gateway patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The schema that is not tested is a lie</strong>
-  <p>An OpenAPI spec is a contract. A contract that is not tested is a lie. Run the contract test in CI for both the consumer and the producer. A failing contract test is a release blocker.</p>
+  <strong>The Usr prefix matters</strong>
+  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
 </div>
-
+<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
+<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the gateway is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Performance check for api
+SELECT TOP 20
+    total_worker_time / execution_count AS avg_cpu,
+    total_elapsed_time / execution_count AS avg_duration,
+    SUBSTRING(text, 1, 200) AS query_text
+FROM sys.dm_exec_query_stats
+ORDER BY avg_cpu DESC;</code></pre>
+</div>
+<h2 id="api-implementation-walkthrough">Api implementation walkthrough</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Cache is per-graph</strong>
+  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+</div>
+<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
+FROM ARInvoice ar
+INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
+WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
+  AND ar.Status = 'O'
+  AND ar.CuryDocBal > 0
+  AND c.CustomerClassID IN (@Classes)
+ORDER BY ar.DocDate DESC;</code></pre>
+</div>
+<h2 id="performance-and-observability-for-api">Performance and observability for api</h2>
+<p>The performance of gateway in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Plan for the upgrade</strong>
+  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
+</div>
+<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
+<p>Production gateway looks different from development gateway. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ApiGatewayExt : PXGraphExtension<ApiEntry>
+{
+    [PXOverride]
+    public virtual void Gateway(Api doc)
+    {
+        // Custom gateway logic for api gateway patterns
+        if (doc?.Gateway == null) return;
+        Base.Gateway(doc);
+    }
+}</code></pre>
+</div>
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring gateway first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with gateway when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>REST for general use, GraphQL when the client has many views, gRPC for service-to-service, webhooks for events. The contract is the API; the contract test is the proof. Get the contract right and the integration works. Get the contract test right and the integration stays right.</p>
-
+<p>That is the working approach I use on api gateway patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/api-throttling-patterns/">API Throttling Patterns</a></li>
+      <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
       <li><a href="/blog/api-monetisation/">API Monetisation Patterns — A Field Guide</a></li>
-      <li><a href="/blog/rest-api-design-2026/">REST API Design 2026 — A Complete Guide</a></li>
-      <li><a href="/blog/rest-api-versioning/">REST API Versioning — A Field Guide</a></li>
-      <li><a href="/blog/rest-api-pagination/">REST API Pagination Patterns</a></li>
+      <li><a href="/blog/api-throttling-patterns/">API Throttling Patterns</a></li>
+      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-business-events-patterns/">Acumatica Business Events Patterns — A Field Guide</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     

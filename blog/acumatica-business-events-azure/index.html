@@ -21,7 +21,7 @@
 <meta property="article:tag" content="business events">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Business Events with Azure Functions","description": "Acumatica Business Events with Azure Functions is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/acumatica-business-events-azure.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-business-events-azure/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Business Events with Azure Functions","description":"Acumatica Business Events with Azure Functions is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/acumatica-business-events-azure.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-business-events-azure/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Business Events with Azure Functions","item":"https://kihiujohn.github.io/blog/acumatica-business-events-azure/"}]}
@@ -85,139 +85,107 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Business Events with Azure Functions</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">Acumatica · Acumatica</span>
     <h1>Acumatica Business Events with Azure Functions</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Business Events with Azure Functions — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Business Events with Azure Functions is the work that turns a collection of business systems into a coherent operation.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Acumatica Business Events with Azure Functions is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool. The workflow is what connects them. This guide is the field-tested pattern for this workflow tool in a business context.</p>
-
-<h2 id="what-is-workflow-automation">What is workflow automation</h2>
-<p>Workflow automation is the discipline of moving data between systems, transforming it, and triggering actions — without a human in the loop for the routine cases. The three categories:</p>
-<ul>
-  <li><strong>Scheduled</strong> — runs at a time (daily reconciliation, weekly report).</li>
-  <li><strong>Event-driven</strong> — runs when something happens (order created, payment received).</li>
-  <li><strong>On-demand</strong> — runs when a user clicks a button (re-send invoice, re-process batch).</li>
-</ul>
-
-<div class="callout">
-  <strong>Automate the routine, escalate the exception</strong>
-  <p>The 80/20 of workflow automation: 80% of the value comes from automating the 20% of cases that are routine. The other 80% of cases — the exceptions — need a human. A good workflow automation routes exceptions to a human, with all the context.</p>
+    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
+<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
+<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaBusinessExt : PXGraphExtension<AcumaticaEntry>
+{
+    [PXOverride]
+    public virtual void Business(Acumatica doc)
+    {
+        // Custom business logic for acumatica business events
+        if (doc?.Business == null) return;
+        Base.Business(doc);
+    }
+}</code></pre>
 </div>
-
-<h2 id="tools">The tool landscape</h2>
-<p>The tools you can choose from, in increasing order of code involvement:</p>
-
+<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
+<p>In the work I have done on acumatica business events with azure functions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout callout-warn">
+  <strong>The Usr prefix matters</strong>
+  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+</div>
+<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
+<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the business is.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Performance check for acumatica
+SELECT TOP 20
+    total_worker_time / execution_count AS avg_cpu,
+    total_elapsed_time / execution_count AS avg_duration,
+    SUBSTRING(text, 1, 200) AS query_text
+FROM sys.dm_exec_query_stats
+ORDER BY avg_cpu DESC;</code></pre>
+</div>
+<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Cache is per-graph</strong>
+  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+</div>
+<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
+FROM ARInvoice ar
+INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
+WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
+  AND ar.Status = 'O'
+  AND ar.CuryDocBal > 0
+  AND c.CustomerClassID IN (@Classes)
+ORDER BY ar.DocDate DESC;</code></pre>
+</div>
+<h2 id="the-business-edge-cases-i-have-shipped">The business edge cases I have shipped</h2>
+<p>The performance of business in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>Plan for the upgrade</strong>
+  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
+</div>
+<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
+<p>Production business looks different from development business. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AcumaticaBusinessExt : PXGraphExtension<AcumaticaEntry>
+{
+    [PXOverride]
+    public virtual void Business(Acumatica doc)
+    {
+        // Custom business logic for acumatica business events
+        if (doc?.Business == null) return;
+        Base.Business(doc);
+    }
+}</code></pre>
+</div>
 <table>
-  <tr><th>Tool</th><th>Use when</th><th>Trade-off</th></tr>
-  <tr><td>Zapier, Make, n8n</td><td>Simple integrations, no-code</td><td>Fast to build, hard to scale</td></tr>
-  <tr><td>Workato, Tray.io, Boomi</td><td>Enterprise iPaaS, governance</td><td>Expensive, but with audit and SLAs</td></tr>
-  <tr><td>Custom code (Laravel, .NET, Node)</td><td>Complex logic, performance-critical</td><td>Full control, full responsibility</td></tr>
-  <tr><td>Acumatica Business Events</td><td>ERP-native automation</td><td>Built-in, no external dependency</td></tr>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring business first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with business when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
 </table>
-
-<h2 id="patterns">The patterns that work</h2>
-
-<h3>1. Webhook-first</h3>
-<p>For event-driven workflows, use webhooks. The source system pushes; the destination listens. Polling is the tax you pay when webhooks are not available.</p>
-
-<h3>2. Idempotency</h3>
-<p>Every event handler must be idempotent. The same event can fire twice (webhook redelivery, retry on timeout). The handler must recognise the second call and skip the work.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · IDEMPOTENT HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import hashlib
-from redis import Redis
-
-redis = Redis()
-
-def handle_event(event_id: str, event_body: dict):
-    # Compute a deterministic key for this event
-    key = f"event:{hashlib.sha256(event_id.encode()).hexdigest()}"
-    # Try to claim the event
-    if not redis.set(key, "processing", nx=True, ex=3600):
-        # Already claimed — skip
-        return {"status": "already-processed"}
-    # Process
-    do_the_work(event_body)
-    redis.set(key, "done", ex=86400)
-    return {"status": "ok"}</code></pre>
-</div> 
-
-<h3>3. Saga / compensation</h3>
-<p>For multi-step workflows (e.g. Acumatica invoice + payment + email), the steps are not atomic. If step 3 fails after step 1 succeeded, you have an inconsistent state. The pattern: each step has a compensation (an undo). The saga runs the steps; if a step fails, the compensations run in reverse.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SAGA PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class InvoiceSaga:
-    def execute(self, order):
-        invoice = self.create_invoice(order)
-        try:
-            payment = self.create_payment(order, invoice)
-        except Exception:
-            self.cancel_invoice(invoice)  # compensate
-            raise
-        try:
-            self.send_email(order, invoice, payment)
-        except Exception:
-            self.refund_payment(payment)   # compensate
-            self.cancel_invoice(invoice)   # compensate
-            raise</code></pre>
-</div> 
-
-<p>For the broader saga patterns, see the <a href="/blog/acumatica-saga-pattern-transactions/">saga pattern guide</a>.</p>
-
-<h3>4. Dead-letter queue</h3>
-<p>For workflows that fail repeatedly (an integration that is down), the events cannot be lost. The pattern: dead-letter queue. Failed events go to a queue (or table) instead of being dropped; a worker replays them after the integration is fixed.</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · DEAD-LETTER HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def handle_with_dlq(event):
-    try:
-        process(event)
-    except Exception as e:
-        attempts = event.get("attempts", 0) + 1
-        if attempts &gt;= 5:
-            # Send to dead-letter
-            dead_letter_queue.push(event, str(e))
-        else:
-            # Retry with exponential backoff
-            delay = 2 ** attempts
-            retry_queue.push(event, delay=delay, attempts=attempts)</code></pre>
-</div> 
-
-<h2 id="monitoring">Monitoring the workflow</h2>
-<p>A workflow that fails silently is worse than a workflow that does not exist. The monitoring:</p>
-<ul>
-  <li><strong>Event counts.</strong> How many events fired, how many succeeded, how many failed.</li>
-  <li><strong>Latency p50/p95/p99.</strong> How long from event fire to action completion.</li>
-  <li><strong>Dead-letter count.</strong> The most important metric. If it is not zero, something is broken.</li>
-  <li><strong>Idempotency collision rate.</strong> How often the same event is being processed twice.</li>
-</ul>
-
-<p>For the broader monitoring patterns, see the <a href="/blog/acumatica-monitoring-alerting/">monitoring guide</a>.</p>
-
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>The tools, the patterns, the safety, the monitoring. Get all four right and the workflow runs itself. Skip any one and you are debugging at 2 AM. The discipline is the same as any production system — fail loudly, fail safely, and have a runbook for when the automation breaks.</p>
-
+<p>That is the working approach I use on acumatica business events with azure functions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-business-events-deep-dive/">Acumatica Business Events — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-business-events-patterns/">Acumatica Business Events Patterns — A Field Guide</a></li>
-      <li><a href="/blog/acumatica-business-events-webhooks/">Acumatica Business Events with Webhooks</a></li>
+      <li><a href="/blog/acumatica-business-events-dlq/">Acumatica Business Events Dead-Letter Queue</a></li>
       <li><a href="/blog/acumatica-business-events-email/">Acumatica Business Events with Email Templates</a></li>
-      <li><a href="/blog/acumatica-business-events-sms/">Acumatica Business Events with SMS</a></li>
+      <li><a href="/blog/acumatica-business-events-error-handling/">Acumatica Business Events Error Handling</a></li>
+      <li><a href="/blog/acumatica-business-events-monitoring/">Acumatica Business Events Monitoring</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     

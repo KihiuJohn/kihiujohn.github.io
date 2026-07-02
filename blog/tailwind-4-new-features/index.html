@@ -15,13 +15,13 @@
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/tailwind-4-new-features.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/tailwind-4-new-features/">
 <meta property="article:author" content="John Kihiu">
-<meta property="article:section" content="acumatica">
+<meta property="article:section" content="ai">
 <meta property="article:tag" content="tailwind">
 <meta property="article:tag" content="css">
 <meta property="article:tag" content="framework">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Tailwind CSS 4 New Features","description": "Tailwind CSS 4 New Features is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/tailwind-4-new-features.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/tailwind-4-new-features/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Tailwind CSS 4 New Features","description":"Tailwind CSS 4 New Features is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/tailwind-4-new-features.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/tailwind-4-new-features/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Tailwind CSS 4 New Features","item":"https://kihiujohn.github.io/blog/tailwind-4-new-features/"}]}
@@ -85,146 +85,116 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Tailwind CSS 4 New Features</span></nav>
-    <span class="tag"> · </span>
+    <span class="tag">AI Agents · Tailwind</span>
     <h1>Tailwind CSS 4 New Features</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Tailwind CSS 4 New Features — a complete, field-tested reference by John Kihiu.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Tailwind CSS 4 New Features is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-17">Jun 17, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    
-<p>Tailwind CSS 4 New Features is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web development is the boring application of these patterns. This guide is the field-tested walkthrough of this technology in a production context.</p>
+    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
+<h2 id="prompt-patterns-that-work-for-css">Prompt patterns that work for css</h2>
+<p>Prompt patterns that work for css is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from langchain.agents import initialize_agent, Tool
+from langchain.llms import OpenAI
+import requests
 
-<h2 id="the-stack">The stack today</h2>
-<p>The default web stack in 2026 has stabilised around:</p>
+def list_tailwind(query: str) -> str:
+    """List tailwind matching the query."""
+    response = requests.get(
+        f"https://api.example.com/tailwind",
+        params={"q": query}
+    )
+    return response.json()
 
-<ul>
-  <li><strong>Backend:</strong> Laravel 11/12 (PHP), .NET 8/9 (C#), Node.js 22 (TypeScript), Go 1.22, Python 3.13 + FastAPI.</li>
-  <li><strong>Frontend:</strong> Vue 3, React 19, Svelte 5, Inertia.js (server-driven SPA), Livewire (server-driven reactivity).</li>
-  <li><strong>Real-time:</strong> WebSockets, Server-Sent Events, Laravel Reverb, Soketi.</li>
-  <li><strong>Data:</strong> PostgreSQL 16, MySQL 8.4, SQLite (small apps), Redis 7, ClickHouse (analytics).</li>
-  <li><strong>Infrastructure:</strong> Kubernetes 1.30, Docker 26, GitHub Actions, GitLab CI, Terraform 1.8.</li>
-</ul>
-
-<div class="callout">
-  <strong>The framework matters less than the discipline</strong>
-  <p>A well-structured Laravel app beats a poorly-structured Next.js app. A team that writes tests beats a team that does not. The framework is the tool; the discipline is what makes the tool useful.</p>
+tools = [Tool(name="tailwind", func=list_tailwind, description="...")]
+agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
 </div>
-
-<h2 id="laravel">Laravel patterns</h2>
-<p>Laravel is the most productive web framework in 2026 for the typical SaaS application. The patterns that work:</p>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PHP · LARAVEL ACTION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class CreateInvoiceAction
-{
-    public function execute(Quote $quote): Invoice
-    {
-        return DB::transaction(function () use ($quote) {
-            $invoice = Invoice::create([
-                "customer_id" =&gt; $quote-&gt;customer_id,
-                "quote_id" =&gt; $quote-&gt;id,
-                "total" =&gt; $quote-&gt;total,
-            ]);
-            foreach ($quote-&gt;lines as $line) {
-                $invoice-&gt;lines()-&gt;create($line-&gt;toArray());
-            }
-            event(new InvoiceCreated($invoice));
-            return $invoice;
-        });
-    }
-}</code></pre>
-</div> 
-
-<p>For the broader Acumatica integration patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a>.</p>
-
-<h2 id="realtime">Real-time patterns</h2>
-<p>Real-time is a first-class requirement in modern SaaS. The patterns:</p>
-
-<table>
-  <tr><th>Pattern</th><th>Use when</th><th>Tool</th></tr>
-  <tr><td>Server-Sent Events</td><td>One-way server-to-client, simple</td><td>Native browser, Laravel Reverb</td></tr>
-  <tr><td>WebSockets</td><td>Bidirectional, real-time chat</td><td>Soketi, Laravel Reverb, Pusher</td></tr>
-  <tr><td>Long polling</td><td>Fallback for restrictive networks</td><td>Native</td></tr>
-  <tr><td>Polling</td><td>Last resort</td><td>Native, but accept the tax</td></tr>
-</table>
-
-
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">LARAVEL · REVERB BROADCASTING</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In a controller
-broadcast(new OrderStatusChanged($order))->toOthers();
-
-// In a frontend component
-var orderChannel = Echo.channel('orders.' + orderId);
-orderChannel.listen(".order.status.changed", (e) => {
-    order.value.status = e.status;
-    toast.success("Order updated");
-});</code></pre>
-</div> 
-
-<h2 id="api">API design</h2>
-<p>Modern APIs are REST (or GraphQL). The patterns:</p>
-
-<ul>
-  <li><strong>Versioned.</strong> <code>/api/v1/</code>, <code>/api/v2/</code> — never break a version.</li>
-  <li><strong>Stateless.</strong> No session on the server; the JWT or session token is the only state.</li>
-  <li><strong>Paginated.</strong> Cursor-based pagination for large sets; offset for small.</li>
-  <li><strong>Documented.</strong> OpenAPI spec generated from the code, not maintained by hand.</li>
-</ul>
-
+<h2 id="how-to-evaluate-tailwind-in-production">How to evaluate tailwind in production</h2>
+<p>In the work I have done on tailwind css 4 new features, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The OpenAPI drift</strong>
-  <p>The OpenAPI spec drifts from the implementation within a week of every release. The only fix is generation, not maintenance. Generate the spec from the routes, the validation rules, and the response schemas.</p>
+  <strong>Tools matter more than prompts</strong>
+  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
 </div>
-
-<p>For the broader API design patterns, see the <a href="/blog/acumatica-rest-api-the-definitive-guide/">REST API definitive guide</a> and the <a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">OpenAPI generation guide</a>.</p>
-
-<h2 id="deployment">Deployment</h2>
-<p>The deployment story in 2026:</p>
-<ol>
-  <li>Code in Git.</li>
-  <li>CI builds, tests, and packages.</li>
-  <li>Container is built and pushed to a registry.</li>
-  <li>CD deploys to staging, runs smoke tests, deploys to production.</li>
-  <li>Observability tracks the deployment; rollback is automated.</li>
-</ol>
-
-
+<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
+<p>When the work moves from design to production, the questions change. The tailwind is not the question; the failure mode of the css is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">GITHUB ACTIONS · DEPLOY</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Deploy
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:${ github.sha } } .
-      - run: docker push registry.example.com/app:${ github.sha } }
-      - run: kubectl set image deployment/app app=registry.example.com/app:${ github.sha } }</code></pre>
-</div> 
+  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from anthropic import Anthropic
+client = Anthropic()
+message = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "..."}]
+)</code></pre>
+</div>
+<h2 id="the-role-of-css-in-the-agent-loop">The role of css in the agent loop</h2>
+<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<div class="callout">
+  <strong>Latency compounds</strong>
+  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+</div>
+<h2 id="what-tailwind-css-4-new-features-actually-does">What Tailwind CSS 4 New Features actually does</h2>
+<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import openai
+response = openai.ChatCompletion.create(
+    model="gpt-4o",
+    messages=[
+        {"role": "system", "content": "..."},
+        {"role": "user", "content": "..."}
+    ],
+    tools=[{"type": "function", "function": {...}}]
+)</code></pre>
+</div>
+<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
+<p>The performance of css in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<div class="callout">
+  <strong>The deterministic layer</strong>
+  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
+</div>
+<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
+<p>Production css looks different from development css. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from langchain.agents import initialize_agent, Tool
+from langchain.llms import OpenAI
+import requests
 
-<p>For the broader DevOps patterns, see the <a href="/blog/acumatica-cicd-github-actions-for-acumatica/">CI/CD guide</a> and the <a href="/blog/acumatica-cicd-pipeline-design/">pipeline design guide</a>.</p>
+def list_tailwind(query: str) -> str:
+    """List tailwind matching the query."""
+    response = requests.get(
+        f"https://api.example.com/tailwind",
+        params={"q": query}
+    )
+    return response.json()
 
+tools = [Tool(name="tailwind", func=list_tailwind, description="...")]
+agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+</div>
+<table>
+  <tr><th>Pattern</th><th>When to use it</th></tr>
+  <tr><td>Boring css first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
+  <tr><td>Add tailwind on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
+  <tr><td>Replace with css when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
+  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>The stack, the patterns, the real-time, the API design, the deployment. Get all five right and the modern web app is a product. The framework matters less than the discipline; the discipline is what makes the framework useful.</p>
-
+<p>That is the working approach I use on tailwind css 4 new features. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/container-queries-2026/">Container Queries 2026 — A Field Guide</a></li>
+      <li><a href="/blog/css-2026-features/">CSS 2026 New Features — A Field Guide</a></li>
+      <li><a href="/blog/data-governance-framework/">Data Governance Framework</a></li>
       <li><a href="/blog/laravel-11-new-features/">Laravel 11 New Features — A Complete Guide</a></li>
       <li><a href="/blog/laravel-12-new-features/">Laravel 12 New Features — A Complete Guide</a></li>
-      <li><a href="/blog/react-19-new-features/">React 19 New Features — A Complete Guide</a></li>
-      <li><a href="/blog/nextjs-15-new-features/">Next.js 15 New Features — A Complete Guide</a></li>
-      <li><a href="/blog/svelte-5-runes/">Svelte 5 Runes — A Complete Guide</a></li>
       </ul>
     </div>
-
     <h2>Wrapping up</h2>
     <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     
