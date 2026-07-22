@@ -93,96 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Vertical SaaS metrics that matter is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every construction ERP conversation eventually turns into a conversation about commitments versus change orders, because that is where the money actually moves and where I see the most confused configurations. Getting this distinction right in Acumatica Construction Edition is not academic — it is the difference between a project manager who trusts the "committed cost" number on their dashboard and one who keeps a shadow spreadsheet because the system's number is wrong.</p>
+
+<h2 id="commitments-vs-contracts">Commitments are not the contract, they are what you owe against it</h2>
+<p>A construction contract in Acumatica represents the agreement — original scope, schedule of values, retainage terms. Commitments (subcontracts and purchase orders tied to the project) are separate records that represent what you have actually obligated to pay against that contract's budget. The commitments feature exists specifically to prevent cost overruns by tracking committed-but-not-yet-invoiced amounts against budget lines in real time, which is the number a PM actually needs when deciding whether to approve another subcontractor invoice.</p>
+<p>The mistake I see most often: teams enter subcontractor invoices directly against the budget without ever creating the commitment record first. The invoice posts fine, the job cost report looks fine, but the "committed" column — the number meant to catch overruns before they happen, not after — stays empty. You get an accurate history and a useless forecast.</p>
+
+<h2 id="change-orders-flow-through">Change orders have to flow through the commitment, not around it</h2>
+<p>A change order that adds scope to a subcontract needs to update that subcontract's commitment value, not just the project budget. Approved change orders update the schedule of values automatically, which is what keeps the pay application correct — but that automation only works if the change order is entered against the actual commitment record, with the right cost code, rather than as a generic budget revision.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ConstructionExt : PXCacheExtension<Contract>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · TYPICAL COMMITMENT-TO-CO WIRING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Project Budget (cost code 03-300, Concrete)
+  └─ Commitment: Subcontract SC-00042 (ABC Concrete LLC)
+       └─ Original value:      $180,000
+       └─ Change Order CO-004: +$12,500  (additional footings, owner-directed)
+       └─ Revised commitment:  $192,500
+       └─ Invoiced to date:    $140,000
+       └─ Open commitment:     $52,500   &lt;- this is the number that should
+                                            drive your "money left to spend" view</code></pre>
 </div>
-<h2 id="what-construction-contract-management-on-acumatica-is-for">What Construction Contract Management on Acumatica is for</h2>
-<p>In the work I have done on construction contract management on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>When the work moves from design to production, the questions change. The construction is not the question; the failure mode of the contract is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'construction'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Cost codes are the join key everywhere</strong>
+  <p>Commitments, change orders, and the schedule of values only reconcile cleanly if they all reference the same cost code structure. If a change order is coded to a different cost code than the original commitment line, Acumatica will not silently merge them for you — you will get two lines that both look partially right. Standardize the cost code list at project template setup, before the first subcontract is written, not after the second one is wrong.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM construction
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The performance of contract in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Production contract looks different from development contract. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ConstructionExt : PXCacheExtension<Contract>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring contract first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add construction on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with contract when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on construction contract management on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Contracts, commitments, and change orders are three distinct record types that have to be entered in the right order and coded consistently to produce a trustworthy job cost report. Most of the "Acumatica's numbers don't match reality" complaints I get called in to fix trace back to a commitment that was skipped or a change order coded off-structure — not to a platform limitation.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/saas-contracts-templates/">SaaS Contract Templates — A Field Guide</a></li>
-      <li><a href="/blog/vertical-saas-civil-engineering-acumatica/">Civil Engineering Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Rental Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Costing on Acumatica</a></li>
+      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule Extensions</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress and Milestone</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Acumatica DAC Cross-Field Validation Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

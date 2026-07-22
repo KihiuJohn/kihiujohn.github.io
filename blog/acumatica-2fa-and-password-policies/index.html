@@ -93,89 +93,58 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFaExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Fa(Acumatica doc)
-    {
-        // Custom fa logic for acumatica 2fa password
-        if (doc?.Fa == null) return;
-        Base.Fa(doc);
-    }
-}</code></pre>
+    <p>Two-factor authentication and password policy in Acumatica are configured entirely from the user-security screens — there is no code to write for the common cases. The work is in choosing sensible settings, understanding how they interact with SSO and the mobile app, and communicating the trade-offs to users who will feel every one of them at login time.</p>
+
+<h2 id="where-the-settings-live">Where the settings live</h2>
+<p>Password complexity, expiration, and lockout are set per user type on <strong>User Types (EP202500)</strong> and enforced through the security preferences on <strong>Security Preferences (SM201060)</strong>. Two-factor authentication is enabled per user on the <strong>Users (SM201010)</strong> screen and globally gated by the identity settings. The important mental model: a <em>user type</em> carries a password policy, every user is assigned a type, and the strictest applicable policy wins. If you tighten complexity globally but a user type overrides it, the override is what the user experiences.</p>
+
+<h2 id="password-complexity-and-expiration">Password complexity and expiration</h2>
+<p>On Security Preferences you control minimum length, whether mixed case and digits are required, how many previous passwords are remembered (to block reuse), and the maximum age before a forced change. The two settings people get wrong are expiration and history depth. Aggressive expiration — 30 days — reliably produces <code>Password1!</code>, <code>Password2!</code>, <code>Password3!</code>, because users optimise for what they can remember under pressure. Current guidance (NIST 800-63B and most auditors that have caught up to it) is to drop scheduled expiration entirely and rely on length plus breach detection instead. If your compliance regime still mandates rotation, pair a longer interval with a deep password history so the incremental-digit trick stops working.</p>
+<div class="callout">
+  <strong>Minimum length beats character classes</strong>
+  <p>A 14-character passphrase resists guessing far better than an 8-character string forced through four character-class rules. If you can only push one dial, push minimum length and leave the special-character requirement moderate — it is the setting that costs users the least and helps them the most.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica 2fa and password policies, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="enabling-two-factor-authentication">Enabling two-factor authentication</h2>
+<p>Acumatica's built-in 2FA is TOTP-based: the user pairs an authenticator app (Google Authenticator, Microsoft Authenticator, Authy) by scanning a QR code, and thereafter enters a rotating six-digit code after their password. You enable it per user on the Users screen by setting the <strong>Two-Factor Authentication</strong> option, and you can require it for a whole group by making it part of the user type or by scripting the flag across users. The first login after enabling walks the user through pairing; keep in mind the code is time-based, so the server and the user's device clock both need to be reasonably in sync.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Have a recovery path before you enforce</strong>
+  <p>If a user loses their paired device, they cannot generate a code. Decide in advance who can reset the 2FA pairing (an administrator clearing the flag on the Users screen) and document it. Rolling out mandatory 2FA without a reset runbook guarantees a lockout ticket on day one.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the fa is.</p>
+
+<h2 id="lockout-policy">Account lockout policy</h2>
+<p>Lockout is your defence against online password guessing. On the security settings you set the number of failed attempts before an account locks and how long the lock lasts. A common balance is a handful of attempts (enough to survive a fat-fingered password) with a lockout measured in minutes rather than a permanent lock that needs an admin to clear. A permanent lock is more secure on paper but converts every mistyped password into a help-desk call, and help desks under load are themselves a social-engineering surface. Temporary lockouts of increasing duration give you most of the protection with far less operational cost.</p>
+
+<h2 id="sso-and-external-identity">SSO and external identity providers</h2>
+<p>The moment you integrate an external identity provider — Azure AD / Entra ID, Google, or any OpenID Connect source — the picture changes. Password policy and 2FA then live with the <em>identity provider</em>, not with Acumatica. Configuring Acumatica's local password complexity is pointless for users who authenticate through Entra ID, because they never present a local password. Decide where authentication actually happens and put your controls there. A frequent misconfiguration is enforcing strict local 2FA <em>and</em> IdP 2FA, double-prompting users for no additional security.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · SETTINGS CHECKLIST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Local accounts (Acumatica-managed password)
+  Security Preferences: min length 12+, disable scheduled expiration
+  Password history: 5+ remembered
+  Lockout: 5 attempts, 15-minute temporary lock
+  Users: enable TOTP 2FA for admin + finance roles
+
+Federated accounts (Entra ID / OIDC)
+  Enforce password + MFA at the identity provider
+  Do NOT double-enforce local 2FA
+  Local password policy is inert — do not rely on it</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-fa-edge-cases-i-have-shipped">The fa edge cases I have shipped</h2>
-<p>The performance of fa in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production fa looks different from development fa. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFaExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Fa(Acumatica doc)
-    {
-        // Custom fa logic for acumatica 2fa password
-        if (doc?.Fa == null) return;
-        Base.Fa(doc);
-    }
-}</code></pre>
-</div>
+
+<h2 id="rolling-it-out">Rolling it out without a flood of tickets</h2>
+<p>Sequence matters. Turn on password complexity first and let it take effect on the next password change rather than forcing an immediate reset. Introduce 2FA to a pilot group — typically administrators and finance, the highest-value accounts — before the whole tenant. Publish a one-page guide with screenshots of the pairing flow, and make sure the help desk knows how to reset a lost authenticator <em>before</em> the rollout, not after. Every security control here trades user friction for reduced risk; the job is to spend that friction where the risk is highest and skip it where an external IdP already covers you.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring 2fa first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with 2fa when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Control</th><th>Protects against</th><th>User cost</th></tr>
+  <tr><td>Minimum length 12+</td><td>Offline/brute-force guessing</td><td>Low — set once</td></tr>
+  <tr><td>Scheduled expiration</td><td>Little, in practice</td><td>High — breeds weak variants</td></tr>
+  <tr><td>Account lockout</td><td>Online guessing</td><td>Medium — mistyped passwords</td></tr>
+  <tr><td>TOTP 2FA</td><td>Stolen/phished passwords</td><td>Medium — needs a device</td></tr>
+  <tr><td>IdP-enforced MFA</td><td>Same, centrally managed</td><td>Low if SSO already in place</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica 2fa and password policies. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of this needs custom code — it needs deliberate choices. Favour length over rotation, prefer temporary lockouts over permanent ones, require TOTP 2FA on the accounts that can move money, and if you run SSO, enforce at the identity provider and stop configuring inert local policy. Get the recovery runbook written before you flip the switch, and the rollout stays quiet.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -186,9 +155,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

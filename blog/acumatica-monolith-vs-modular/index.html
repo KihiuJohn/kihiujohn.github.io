@@ -92,107 +92,65 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A client's CTO asked me last year, fairly bluntly, why we were "adding more code to the monolith" instead of building his new commission-calculation engine as a separate service. It's a fair question, and the honest answer required explaining that Acumatica isn't a monolith in the pejorative sense the term usually carries - it's a modular monolith, and that distinction changes the calculus on almost every "should this be a separate service" decision you'll face on an Acumatica project.</p>
+
+<h2 id="modular-monolith-not-big-ball-of-mud">Acumatica is a modular monolith, and that's a real architecture, not a compromise</h2>
+<p>Deployed, Acumatica is one process (or a small process family - web tier, optional app server tier) sharing one database. That's the monolith part. But internally it's sharply modularized: AR, AP, GL, SO, PO, CA, IN each own their own DACs, their own graphs, and communicate through defined integration points rather than reaching into each other's tables directly. This is precisely the "modular monolith" pattern that's had a resurgence in software architecture writing over the last several years, as a reaction against premature microservices decomposition. Acumatica got there first, by necessity - a single-tenant-per-database SaaS platform serving thousands of customers cannot afford the operational overhead of forty independently-deployed services per customer instance.</p>
+
+<h2 id="when-a-customization-should-stay-in-process">The default: keep customizations in-process</h2>
+<p>Most customizations I write should live inside the same process as everything else, as a graph extension or a new graph in the same customization project. The reasons are concrete, not just convenience: you get the transaction boundary for free (your custom logic rolls back with the rest of the save if anything fails), you get PXCache's dirty-tracking for free (no separate change-detection mechanism to build), and you get the event pipeline's ordering guarantees for free (RowPersisting fires inside the same transaction as everything else touching that document). Pulling logic out of process means rebuilding all three yourself, badly, because you don't have access to the internals that make them work.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMonolithExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · in-process is the default</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class APInvoiceEntry_CommissionCalc : PXGraphExtension&lt;APInvoiceEntry&gt;
 {
-    [PXOverride]
-    public virtual void Monolith(Acumatica doc)
+    public static bool IsActive() =&gt; true;
+
+    // Runs inside the same transaction as the bill's own persist.
+    // If this throws, the whole save rolls back - no distributed
+    // transaction, no compensating action, no eventual consistency
+    // to reason about.
+    protected virtual void _(Events.RowPersisting&lt;APInvoice&gt; e)
     {
-        // Custom monolith logic for acumatica monolith modular
-        if (doc?.Monolith == null) return;
-        Base.Monolith(doc);
+        if (e.Row == null) return;
+        var ext = e.Row.GetExtension&lt;APInvoiceExt&gt;();
+        ext.UsrCommissionAmount = CalculateCommission(e.Row);
     }
 }</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica monolith vs modular, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="when-to-actually-break-out">When breaking out of the process is worth the cost</h2>
+<p>There are real reasons to pull logic out of Acumatica's process, and I've done it on several projects, but the bar is higher than "this feels like it should be its own service." The cases that have actually justified it for me:</p>
+<ul>
+<li><strong>Genuinely long-running work.</strong> A commission engine that needs to crunch a year of transaction history against a complex tiered ruleset for month-end close can run for minutes; that does not belong inside a screen's save cycle or a synchronous business event handler blocking a user's UI thread.</li>
+<li><strong>Different scaling shape.</strong> A high-volume webhook receiver validating and queuing thousands of e-commerce orders per hour has a completely different load profile than the ERP itself, and coupling its scaling to Acumatica's app pool recycling and session-stateful graphs is a bad fit.</li>
+<li><strong>Independent release cadence genuinely needed.</strong> If a piece of logic changes weekly in response to a fast-moving external API (a carrier rate shopping integration, say) and everything else on the instance changes quarterly, decoupling the release cycles has real value.</li>
+<li><strong>Technology mismatch.</strong> Machine-learning inference, heavy PDF generation, or anything better served by a runtime Acumatica's customization model doesn't support well.</li>
+</ul>
+<p>None of these apply to "this logic feels conceptually separate." Conceptual separateness is what module boundaries and well-organized customization projects are for; it doesn't require a network hop.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Every process boundary you add, you now own the failure modes of</strong>
+  <p>The CTO's instinct - separate service, separate deployability - is not wrong in the abstract. What it misses is that Acumatica's Business Events, webhooks, and REST API already give you a clean integration seam for the cases that genuinely warrant it, without hand-rolling a distributed system. The moment logic leaves the process, you've signed up for retry policies, idempotency, monitoring a second deployable, and reasoning about what happens when the external service is down during month-end close. I've seen that trade-off pay off exactly when the four bullet points above apply, and cost more than it saved every other time.</p>
 </div>
-<h2 id="the-monolith-edge-cases-i-have-shipped">The monolith edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the monolith is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="how-to-debug-monolith-in-production">How to debug monolith in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of monolith in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-monolith-vs-modular-matters-in-production">Why Acumatica Monolith vs Modular matters in production</h2>
-<p>Production monolith looks different from development monolith. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMonolithExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Monolith(Acumatica doc)
-    {
-        // Custom monolith logic for acumatica monolith modular
-        if (doc?.Monolith == null) return;
-        Base.Monolith(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring monolith first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with monolith when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica monolith vs modular. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica's monolith is modular by design, not an accident you need to architect your way around. Default to keeping customizations in-process as graph extensions, where you get transactional consistency and the event pipeline for free. Reach for a separate service only when the work is genuinely long-running, has a different scaling shape, needs an independent release cadence, or needs a runtime Acumatica can't provide - and when you do, use Business Events, webhooks, or the REST API as the seam, not a direct database connection into Acumatica's schema from an external process.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-branch-vs-company-vs-tenant/">Acumatica Branch vs Company vs Tenant</a></li>
-      <li><a href="/blog/acumatica-clean-architecture/">Acumatica Clean Architecture</a></li>
-      <li><a href="/blog/acumatica-cqrs-pattern/">Acumatica CQRS Pattern — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-domain-driven-design/">Acumatica Domain-Driven Design</a></li>
-      <li><a href="/blog/acumatica-n-tier-vs-n-layer/">Acumatica N-Tier vs N-Layer — Architecture Explained</a></li>
+      <li><a href="/blog/acumatica-architecture-for-new-developers/">Acumatica Architecture — A Primer for New Developers</a></li>
+      <li><a href="/blog/acumatica-microservices-bridge/">Acumatica Microservices Bridge Pattern</a></li>
+      <li><a href="/blog/acumatica-strangler-fig-pattern/">Acumatica Strangler Fig Pattern</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-multi-tenant-customization-considerations/">Acumatica Multi-Tenant Customization Considerations</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

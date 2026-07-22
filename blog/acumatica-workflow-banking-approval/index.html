@@ -93,112 +93,80 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation is mostly about how to handle the cases that don't show up in the happy path. this is one of the patterns that handles them. The pattern that works is to push the workflow towards being deterministic, testable, and observable. This article is that pattern.</p>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>Testing workflow automations: patterns is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Banking approval covers two genuinely different things clients ask for under the same name, and conflating them produces the wrong workflow: approving <em>payments</em> (a cash outflow, usually a check or EFT batch on Payments and Applications, AP302000, or a Payment Batch) versus approving a <em>change to bank account details</em> (the vendor or employee's banking information itself, on the Vendor or Employee screen). Banking-fraud prevention actually depends on getting both right, and they need entirely separate workflows.</p>
+
+<h2 id="payment-release-approval">Payment release approval — the cash-outflow control</h2>
+<p>This is closest in shape to bill approval, but the trigger point matters more here: gating at bill entry doesn't stop a fraudulent payment if someone can still create and release a Payment directly. The control needs to sit on the Payments and Applications graph (<code>APPayment</code> DAC), gating the <code>Release</code> action itself, independent of whether the underlying bill was already approved:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public static void Configure(WorkflowContext&lt;APPaymentEntry, APPayment&gt; context)
+{
+    var graph = context.Graph;
+    graph.WithTransitions(transitions => transitions
+        .AddGroupFrom&lt;APPayment.status.Balanced&gt;(g => g
+            .Add(t => t
+                .To&lt;APPayment.status.PendingApproval&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                .When(APPayment.curyOrigDocAmt.IsGreaterEqual(10000m)
+                      | APPayment.paymentMethodID.IsEqual("WIRE")))  // wires always reviewed
+            .Add(t => t
+                .To&lt;APPayment.status.Open&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                .When(APPayment.curyOrigDocAmt.IsLess(10000m)
+                      &amp; APPayment.paymentMethodID.IsNotEqual("WIRE")))));
+}
+</code></pre>
 </div>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>In the work I have done on acumatica workflow — banking transaction approval, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
+<p>Note the payment method condition alongside amount — wire transfers are irreversible in a way checks and even EFT batches often aren't, and clients doing banking approval properly nearly always want every wire reviewed regardless of amount, not just large ones.</p>
+
+<h2 id="bank-detail-change-approval">Bank detail change approval — the actual fraud vector</h2>
+<p>This is the control that matters more and gets built less often: a change to a vendor's or employee's bank account number is the classic business-email-compromise fraud pattern (an attacker impersonates a vendor, requests a "routine" bank detail update, then the next legitimate-looking payment goes to the fraudster's account). This isn't a document workflow at all — it's a workflow on the Vendor or Employee master's banking sub-tab, and it needs to freeze payment eligibility until a human independently verifies the change out-of-band:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void VendorBankAccount_RowUpdated(PXCache cache,
+    PXRowUpdatedEventArgs e)
+{
+    var bankAcct = (VendorBankAccount)e.Row;
+    var oldAcct = (VendorBankAccount)e.OldRow;
+    if (bankAcct?.AccountNbr != oldAcct?.AccountNbr)
+    {
+        var vendor = Base.BAccount.Current;
+        vendor.Status = VendorStatus.Hold;   // freeze until verified
+        Base.BAccount.Update(vendor);
+        // fire a workflow transition / notification to AP management
+        // requiring callback verification before Hold is lifted
     }
-}</code></pre>
+}
+</code></pre>
 </div>
-<h2 id="what-acumatica-workflow-banking-transaction-approval-is-for">What Acumatica Workflow — Banking Transaction Approval is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+
+<div class="callout-warn callout">
+  <strong>This is the control most implementations skip entirely</strong>
+  <p>I ask about this explicitly on every AP-heavy engagement because it's rarely in the original requirements — clients think about approving spend, not about approving changes to where the spend gets sent. If a vendor's bank details can change and the vendor's payment-eligibility status doesn't react to that change, you have a gap that has cost real companies real money. Bring it up even if it isn't asked for.</p>
 </div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="who-approves-banking-changes">Segregation of duties applies even harder here</h2>
+<p>The person who processes AP data entry should not be the person who can clear a bank-detail-change hold — this is the same segregation-of-duties concern as vendor approval, but the stakes are higher because the failure mode is a completed wire transfer, not a mis-entered invoice. I set the clearing action's role restriction independently from general AP data-entry roles, and log the verification method (phone callback to a known number, not the number on the change request itself) as a required note before the hold can be lifted.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — banking transaction approval. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>"Banking approval" is really two workflows: payment release approval (amount- and method-sensitive, similar in shape to bill approval) and bank-detail-change approval (a master-data freeze triggered by any change to payment routing information, verified out-of-band). The second one is the actual fraud control and the one most implementations never build unless someone specifically asks — ask.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-      <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
-      <li><a href="/blog/acumatica-cash-transaction-screen/">Acumatica Cash Transaction Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-gl-period-end-close-checklist/">Acumatica GL Period-End Close — A Reliable Checklist</a></li>
-      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-workflow-vendor-approval/">Acumatica Workflow — Vendor Approval</a></li>
+      <li><a href="/blog/acumatica-cash-management-extension/">Acumatica Cash Management Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-cash-transaction-screen/">Acumatica Cash Transaction Screen</a></li>
+      <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

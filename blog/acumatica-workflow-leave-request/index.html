@@ -93,112 +93,63 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The workflow tools in 2026 (n8n, Zapier, Make, Acumatica Business Events) are all capable. The difference between a workflow that survives and one that doesn't is the error handling. this is the part of the error handling that matters most.</p>
-<h2 id="what-acumatica-workflow-leave-request-patterns-is-for">What Acumatica Workflow — Leave Request Patterns is for</h2>
-<p>What Acumatica Workflow — Leave Request Patterns is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Leave request approval (Employee Self-Service, screen EP305500, graph <code>EmployeeTimeCardMaint</code>/the time-off request entity depending on your build) is the workflow non-finance stakeholders actually interact with the most, which means the UX expectations are different from AP or PO approval — employees expect near-instant feedback, and managers approve from a phone as often as a desktop. The technical requirements this drives are worth calling out specifically.</p>
+
+<h2 id="balance-validation-before-workflow">Balance validation has to happen before the transition, not as part of it</h2>
+<p>A leave request for more days than the employee has accrued shouldn't reach a manager's queue at all — it should be rejected at entry, before workflow routing even begins. This is a validation concern, not a workflow condition: I check accrued balance in a <code>RowPersisting</code> handler (or via the Time and Expenses balance API if leave balances are tracked in a connected module) and throw a <code>PXSetPropertyException</code> if the request exceeds balance, rather than letting the request enter <code>PendingApproval</code> and relying on the manager to notice and reject it. Managers rubber-stamp; balance checks should not depend on them catching a math error.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void EPLeaveRequest_RowPersisting(PXCache cache,
+    PXRowPersistingEventArgs e)
+{
+    var request = (EPLeaveRequest)e.Row;
+    if (request == null) return;
+
+    decimal available = GetAccruedBalance(request.EmployeeID, request.LeaveType);
+    if (request.RequestedDays > available)
+    {
+        cache.RaiseExceptionHandling&lt;EPLeaveRequest.requestedDays&gt;(request,
+            request.RequestedDays,
+            new PXSetPropertyException(
+                "Requested {0} days exceeds available balance of {1}.",
+                PXErrorLevel.Error, request.RequestedDays, available));
     }
-}</code></pre>
+}
+</code></pre>
 </div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>In the work I have done on acumatica workflow — leave request patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="manager-chain-assignment">Direct-manager assignment is the default case this workflow gets right for free</h2>
+<p>Unlike the conditional-assignment scenarios I've built for POs or vendors, leave request approval maps almost perfectly onto the stock "by condition, resolve manager via Report-To" assignment rule — this is the one workflow in this series where the out-of-box condition-based rule genuinely is the whole requirement, with no graph extension needed. The complexity clients actually ask for is what happens when the manager is <em>also</em> on leave — skip-level escalation — which the stock delegation feature (set on the manager's own Employee Preferences, effective-dated) handles natively if configured, so this is a configuration conversation with the client's HR team, not a development task.</p>
+
+<h2 id="calendar-conflicts">Calendar conflicts: a check the workflow can gate on, but shouldn't decide</h2>
+<p>Some clients want "don't let more than N people from the same team be on leave simultaneously" enforced automatically. I push back on making this a hard workflow gate — team coverage judgment calls belong with the manager, not a formula — and instead surface the conflict as information in the approval notification (a computed count of overlapping approved leave in the same workgroup for the requested date range) so the manager approves or rejects with full context, rather than the system silently blocking a request the manager would have actually wanted to approve (someone covering, a quiet period, whatever context the system doesn't have).</p>
+
 <div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+  <strong>Resist over-automating human judgment calls</strong>
+  <p>Leave request workflows are the ones most likely to get over-engineered with hard business rules that don't survive contact with real team dynamics. Compute the useful number (accrued balance, team overlap) and let the human decide; reserve hard gates for things that are genuinely non-negotiable, like balance never going negative.</p>
 </div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="mobile-and-response-time">Design for the approval happening on a phone, days later than ideal</h2>
+<p>Because leave approval routes to managers who are often themselves traveling or on leave, response time matters more here than in AP workflows where someone is at a desk daily. I make sure the approval email/notification includes enough context to approve directly from the notification (via Acumatica's mobile app deep link or an action link in the email) rather than requiring a full desktop login — and set a sensible reminder/escalation interval (2-3 days, not the default which is sometimes much longer) so a request doesn't silently sit past the employee's intended leave start date.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — leave request patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Leave request approval is refreshingly close to a stock configuration exercise — validate balance before the workflow ever sees the request, lean on the built-in manager-chain assignment rule, and resist the urge to hard-code team-coverage rules that belong with human judgment. The real engineering effort goes into notification design and response-time tuning, not into the <code>Configure</code> method.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount Thresholds</a></li>
-      <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval Patterns</a></li>
+      <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica EP Employee Self-Service</a></li>
+      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen Deep Dive</a></li>
       <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
-      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-parallel-approvals/">Acumatica Workflow — Parallel Approvals</a></li>
+      <li><a href="/blog/acumatica-workflow-engine-the-definitive-guide/">Acumatica Workflow Engine — The Definitive Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

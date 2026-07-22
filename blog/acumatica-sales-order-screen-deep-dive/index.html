@@ -93,107 +93,70 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Sales Orders (SO301000) is probably the single most customized screen in a typical Acumatica implementation, and for good reason — it's the point where most companies' actual quirks (custom approval thresholds, unusual discounting, allocation rules that don't match any of Acumatica's stock behavior) have to live somewhere. The graph is <code>SOOrderEntry</code>; header is <code>SOOrder</code>, lines are <code>SOLine</code>. As with Purchase Orders, almost everything about how the screen behaves is governed by <code>SOOrderType</code>.</p>
+
+<h2 id="order-type-is-the-real-configuration-surface">Order type is the real configuration surface</h2>
+<p>Before writing a graph extension, check whether Order Type Maintenance (SO201000) already covers the requirement — it controls whether an order requires shipment before invoicing, whether it allocates inventory automatically, credit-limit hold behavior, and which document actions are available. A surprising number of "customization requests" for this screen are actually order-type configuration questions, and treating them as code changes creates maintenance debt that a five-minute configuration change would have avoided.</p>
+
+<h2 id="key-tabs">Key tabs</h2>
+<ul>
+<li><strong>Details</strong> — the SOLine grid: item, quantity, price (subject to the discount engine), and allocation status.</li>
+<li><strong>Financial</strong> — customer terms, currency, and the linked AR customer's credit status.</li>
+<li><strong>Shipping</strong> — warehouse, ship-via, and the shipment schedule for orders that ship in multiple parts.</li>
+<li><strong>Commissions</strong> — salesperson splits, relevant if commission calculation is in scope for a customization.</li>
+</ul>
+
+<h2 id="extending-soorderentry">Extending SOOrderEntry</h2>
+<p>The discount engine is the part of this screen most teams eventually need to extend or override — group and line discounts, sourced from Sales Price/Discount tables, don't always match a company's actual pricing rules (tiered pricing by customer attribute, contract-specific overrides). Rather than fighting the built-in engine, most durable customizations add a post-calculation adjustment step that runs after the standard pricing has been applied.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSalesExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_Extension : PXGraphExtension&lt;SOOrderEntry&gt;
 {
-    [PXOverride]
-    public virtual void Sales(Acumatica doc)
+    protected virtual void SOLine_CuryUnitPrice_FieldUpdated(PXCache cache,
+        PXFieldUpdatedEventArgs e)
     {
-        // Custom sales logic for acumatica sales order
-        if (doc?.Sales == null) return;
-        Base.Sales(doc);
+        var line = (SOLine)e.Row;
+        if (line == null) return;
+
+        decimal? contractPrice = GetContractPrice(line.CustomerID, line.InventoryID);
+        if (contractPrice.HasValue &amp;&amp; contractPrice.Value &lt; line.CuryUnitPrice)
+            cache.SetValue&lt;SOLine.curyUnitPrice&gt;(line, contractPrice.Value);
     }
 }</code></pre>
 </div>
-<h2 id="the-sales-edge-cases-i-have-shipped">The sales edge cases I have shipped</h2>
-<p>In the work I have done on acumatica sales order screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sales is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-sales-in-production">How to debug sales in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to SOLine is routine; the wrinkle is that SOLine data flows forward into Shipment and Invoice lines via the built-in field-mapping between screens, so a custom field meant to survive that chain needs its own mapping entries (or explicit copy logic in a graph extension) — it won't propagate automatically just because it exists on the source screen.</p>
+
+<h2 id="common-use-cases">Common validation and event-handler use cases</h2>
+<p>Beyond pricing overrides: enforcing a custom approval step for orders discounted below a margin threshold, blocking orders for customers on a custom hold status distinct from the standard credit hold, and validating that a required custom attribute (a project code, a promo code) is present before the order can be completed. All of these hang off <code>RowPersisting</code>/<code>FieldUpdated</code> on the graph extension.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<p>Inventory allocation happens as soon as an order is confirmed for most order types — a customization that assumes stock isn't committed until shipment will misreport available-to-promise quantities. Order type changes mid-lifecycle (converting a quote to a confirmed order, for instance) can reset fields that a customization assumed were stable once set. And the credit limit check reads the customer's current balance at validation time, not at order creation — a customer who goes over their limit due to an unrelated invoice can suddenly block an in-progress order that was fine an hour earlier, which looks like a bug but is the intended behavior.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Check Order Type Maintenance before writing code</strong>
+  <p>A large share of "Sales Order customizations" are configuration changes to SO201000 in disguise — required fields, action availability, and hold behavior are all data-driven per order type. Confirm the built-in options don't cover the request before reaching for a graph extension.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-sales-order-screen-a-deep-dive-matters-in-production">Why Acumatica Sales Order Screen — A Deep Dive matters in production</h2>
-<p>The performance of sales in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production sales looks different from development sales. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSalesExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sales(Acumatica doc)
-    {
-        // Custom sales logic for acumatica sales order
-        if (doc?.Sales == null) return;
-        Base.Sales(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sales first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sales when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sales order screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Sales Orders rewards customizations that work with the discount engine and order-type framework rather than around them. Extend pricing after the standard calculation, map custom fields explicitly to downstream shipment and invoice lines, and check configuration options before reaching for code.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-back-to-back-order-workflow/">Acumatica Back-to-Back Order Workflow</a></li>
-      <li><a href="/blog/acumatica-crm-lead-to-cash-process/">Acumatica CRM — Lead to Cash Process</a></li>
+      <li><a href="/blog/acumatica-so-module-extension-patterns/">Acumatica SO Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-shipment-screen-deep-dive/">Acumatica Shipment Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-customer-screen-deep-dive/">Acumatica Customer Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-drop-ship-process-flow/">Acumatica Drop Ship Process Flow</a></li>
-      <li><a href="/blog/acumatica-lead-screen-deep-dive/">Acumatica Lead Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-ar-invoice-screen-deep-dive/">Acumatica AR Invoice Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-opportunity-screen-deep-dive/">Acumatica Opportunity Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

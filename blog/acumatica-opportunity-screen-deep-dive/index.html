@@ -93,107 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Opportunities (CR304000) is where a qualified Lead becomes a tracked, forecastable deal, built on <code>OpportunityMaint</code> over <code>CROpportunity</code> for the header and <code>CROpportunityProducts</code> for the line-item product/service detail that feeds the forecast amount. Unlike Lead, an Opportunity is always tied to a Business Account and Contact — it assumes the qualification step already happened.</p>
+
+<h2 id="stages-and-probability">Stages and probability drive forecasting</h2>
+<p>Each stage in the sales pipeline (configured via Sales Stages under CRM setup) carries a default probability percentage, which multiplies against the opportunity's amount to produce the weighted forecast value used in pipeline reports. Moving an opportunity between stages is the main lifecycle event on this screen, and it's the most common thing customizations hook into — logging stage-change history, requiring a note before regression to an earlier stage, or triggering stage-specific tasks automatically.</p>
+
+<h2 id="key-tabs">Key tabs</h2>
+<ul>
+<li><strong>Details</strong> — account, contact, stage, close date, and the resulting probability-weighted amount.</li>
+<li><strong>Products</strong> — the CROpportunityProducts grid, which is what actually drives the total opportunity amount rather than a single header-level field.</li>
+<li><strong>Activities</strong> — shared CRM activity tracking, same structure as Leads and Cases.</li>
+</ul>
+
+<h2 id="extending-opportunitymaint">Extending OpportunityMaint</h2>
+<p>A frequent request is converting an Opportunity directly into a Sales Order once it's marked Won — Acumatica supports creating a quote/order from opportunity products, but mapping custom product attributes or pricing rules through that conversion often needs a graph extension override, similar in shape to the Lead conversion pattern.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOpportunityExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class OpportunityMaint_Extension : PXGraphExtension&lt;OpportunityMaint&gt;
 {
-    [PXOverride]
-    public virtual void Opportunity(Acumatica doc)
+    protected virtual void CROpportunity_Stage_FieldUpdated(PXCache cache,
+        PXFieldUpdatedEventArgs e)
     {
-        // Custom opportunity logic for acumatica opportunity screen
-        if (doc?.Opportunity == null) return;
-        Base.Opportunity(doc);
+        var row = (CROpportunity)e.Row;
+        string oldStage = (string)e.OldValue;
+        if (row?.Stage != oldStage)
+            LogStageChange(row.OpportunityID, oldStage, row.Stage);
     }
 }</code></pre>
 </div>
-<h2 id="why-acumatica-opportunity-screen-a-deep-dive-matters-in-production">Why Acumatica Opportunity Screen — A Deep Dive matters in production</h2>
-<p>In the work I have done on acumatica opportunity screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to Details is standard. Because the opportunity's real value calculation depends on the Products grid, a custom field meant to influence forecast amount (a risk-adjustment factor, say) usually needs to hook into the amount calculation on CROpportunity or CROpportunityProducts directly rather than existing as an isolated display-only field.</p>
+
+<h2 id="common-use-cases">Common validation and event-handler use cases</h2>
+<p>Beyond stage-change logging and SO conversion: enforcing that Close Date can't be pushed back more than a set number of times without manager approval (a common sales-discipline request), validating that Products lines reference active price lists rather than stale ones, and syncing won/lost opportunities to an external BI or commission system through a subscriber or scheduled export.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<p>The weighted-forecast amount is a derived calculation, not a stored field a customization can simply overwrite and expect to persist correctly across stage changes — recalculating it needs to go through the same probability logic the base screen uses, or reports relying on it will drift from what the screen displays. Multi-currency opportunities carry both the opportunity's currency and the base-currency equivalent, the same double-amount pattern seen on AR/AP documents — code that reads only one will misreport for foreign-currency deals. And converting Won opportunities to Sales Orders more than once (a common mistake when a rep re-runs the action) can create duplicate orders if the customization doesn't check for an existing linked order first.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Don't hardcode probability percentages</strong>
+  <p>Stage probabilities are configuration (Sales Stages), not constants. A customization that hardcodes "Proposal = 50%" instead of reading the configured value will silently diverge the moment someone adjusts the pipeline configuration.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the opportunity is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of opportunity in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production opportunity looks different from development opportunity. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOpportunityExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Opportunity(Acumatica doc)
-    {
-        // Custom opportunity logic for acumatica opportunity screen
-        if (doc?.Opportunity == null) return;
-        Base.Opportunity(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring opportunity first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with opportunity when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica opportunity screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Opportunities is fundamentally a forecasting tool wrapped around a CRM record, and its customizations succeed when they respect that the amount and probability are calculated, configuration-driven values rather than static fields to be freely overwritten.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-crm-lead-to-cash-process/">Acumatica CRM — Lead to Cash Process</a></li>
-      <li><a href="/blog/acumatica-customer-screen-deep-dive/">Acumatica Customer Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-lead-screen-deep-dive/">Acumatica Lead Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-back-to-back-order-workflow/">Acumatica Back-to-Back Order Workflow</a></li>
+      <li><a href="/blog/acumatica-sales-order-screen-deep-dive/">Acumatica Sales Order Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-customer-screen-deep-dive/">Acumatica Customer Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-case-screen-deep-dive/">Acumatica Case Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-so-module-extension-patterns/">Acumatica SO Module — Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

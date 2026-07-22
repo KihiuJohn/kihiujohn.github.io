@@ -92,107 +92,75 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Stock Items (IN202500) is the master data screen every inventory transaction ultimately depends on. The graph is <code>InventoryItemMaint</code>, and the DAC is <code>InventoryItem</code> — the same DAC used for non-stock items, distinguished by <code>ItemType</code>. Most of a stock item's default behavior is inherited from its assigned Item Class at creation time, following the same one-time-inheritance pattern seen on Customer and Vendor classes.</p>
+
+<h2 id="item-class-defaults">Item class sets the defaults, once</h2>
+<p>Posting class (which drives GL account defaults for inventory, COGS, and variance), valuation method, and UOM defaults all come from the Item Class when a new stock item is created. Changing the Item Class's settings afterward does not retroactively update existing items — a customization or a well-intentioned admin "fixing" the item class configuration will not fix items already created against the old settings.</p>
+
+<h2 id="key-tabs">Key tabs</h2>
+<ul>
+<li><strong>General</strong> — identity, item class, and the base UOM.</li>
+<li><strong>Price/Cost</strong> — valuation method (FIFO, Average, Standard, Specific), default price, and last cost.</li>
+<li><strong>Warehouse</strong> — per-warehouse replenishment settings (min/max, reorder point), which can differ from the item's global defaults.</li>
+<li><strong>Vendor</strong> — preferred vendor and vendor-specific pricing/lead time, feeding PO defaults.</li>
+<li><strong>GL Accounts</strong> — overrides to the posting-class-derived accounts, when an item needs different GL treatment than its class.</li>
+<li><strong>Attributes</strong> — the free-form classification framework, frequently extended in customizations that need structured item metadata beyond what ships out of the box.</li>
+</ul>
+
+<h2 id="extending-inventoryitemmaint">Extending InventoryItemMaint</h2>
+<p>Cost method is effectively locked in once transactions post against an item — changing it after the fact requires careful data migration, not a screen edit, so a common and legitimate customization is blocking the cost-method field from being changed at all once any transaction history exists, catching what the base screen might otherwise allow through a warning alone.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaStockExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class InventoryItemMaint_Extension : PXGraphExtension&lt;InventoryItemMaint&gt;
 {
-    [PXOverride]
-    public virtual void Stock(Acumatica doc)
+    protected virtual void InventoryItem_ValMethod_FieldVerifying(PXCache cache,
+        PXFieldVerifyingEventArgs e)
     {
-        // Custom stock logic for acumatica stock item
-        if (doc?.Stock == null) return;
-        Base.Stock(doc);
+        var row = (InventoryItem)e.Row;
+        if (row?.InventoryID == null) return;
+
+        bool hasHistory = PXSelect&lt;INTran,
+            Where&lt;INTran.inventoryID, Equal&lt;Required&lt;INTran.inventoryID&gt;&gt;&gt;&gt;
+            .Select(Base, row.InventoryID).Any();
+
+        if (hasHistory)
+            throw new PXSetPropertyException("Valuation method cannot change once transactions exist for this item.");
     }
 }</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica stock item screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to General or Attributes is routine. A new tab (a "Compliance" tab for regulated goods, for instance) is common on this screen because item master data frequently needs to carry structured information no built-in tab covers — implemented as a related DAC keyed on <code>InventoryID</code> with its own PXTab in the graph extension.</p>
+
+<h2 id="common-use-cases">Common validation and event-handler use cases</h2>
+<p>Beyond cost-method locking: enforcing that a UOM conversion factor exists before an item can be used on a Sales Order in a non-base unit, defaulting warehouse-specific reorder points from a formula rather than manual entry, and validating that items in a regulated product category have required attributes populated before they can be marked Active.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<p>UOM conversions defined incorrectly (or missing) don't fail loudly until someone tries to transact in the affected unit, at which point the error surfaces on a Sales Order or Receipt screen far from where the actual problem lives on the item master. Warehouse-level overrides on the Warehouse tab take precedence over item-level defaults, which a customization reading only the item-level fields will miss. And because InventoryItem is shared between stock and non-stock items, a customization that assumes every InventoryItem row has valuation/costing fields populated will misbehave when it encounters a non-stock or service item mixed into the same report or process.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Cost method changes need data migration, not a field edit</strong>
+  <p>Switching an item's valuation method after transactions exist doesn't just change a setting going forward — historical cost layers were built under the old method's assumptions. Treat this as a data project, and consider blocking the field outright once history exists.</p>
 </div>
-<h2 id="the-stock-edge-cases-i-have-shipped">The stock edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the stock is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="how-to-debug-stock-in-production">How to debug stock in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of stock in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-stock-item-screen-a-deep-dive-matters-in-production">Why Acumatica Stock Item Screen — A Deep Dive matters in production</h2>
-<p>Production stock looks different from development stock. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaStockExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Stock(Acumatica doc)
-    {
-        // Custom stock logic for acumatica stock item
-        if (doc?.Stock == null) return;
-        Base.Stock(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring stock first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with stock when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica stock item screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Stock Items is master data in the truest sense — its class-driven defaults and cost-method rigidity mean the safest customizations reinforce those constraints rather than work around them. Lock down what shouldn't change after the fact, and remember every InventoryItem-based customization has to coexist with the non-stock items sharing the same table.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-non-stock-item-screen/">Acumatica Non-Stock Item Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
       <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing — FIFO, Average, and Beyond</a></li>
-      <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts — Extensions</a></li>
-      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-receipt-screen-deep-dive/">Acumatica Receipt Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

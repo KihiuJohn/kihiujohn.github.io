@@ -93,107 +93,69 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The Bills and Adjustments screen (AP301000) is where every payable in an Acumatica instance ultimately lands, whether it was typed in by an AP clerk or generated automatically by a three-way match against a Purchase Receipt. Underneath the UI it's a fairly conventional header/detail pair — <code>APInvoice</code> for the document header, <code>APTran</code> for the line items — but the graph behind it, <code>APInvoiceEntry</code>, carries a lot of business logic: tax calculation, GL distribution, retainage, and approval routing all hang off this one screen.</p>
+
+<h2 id="where-it-sits-in-the-process">Where it sits in the process</h2>
+<p>A bill can arrive three ways: manual entry against a vendor, conversion from a Purchase Receipt (PO302000) via "Enter Bill," or import through an integration. Regardless of origin, the document moves through the same lifecycle — Balanced, then On Hold or Pending Approval, then Open once approved, then Closed once fully paid. The Financial Details tab is where branch, currency, and terms live; the Approval tab only appears when an approval map is assigned to the vendor's class or the document type. Release posts the batch to GL through <code>APInvoice.Released</code> and generates the corresponding <code>GLTran</code> rows behind the scenes — you don't see that batch directly from this screen, only its reference number.</p>
+
+<h2 id="key-tabs-and-what-drives-them">Key tabs and what drives them</h2>
+<ul>
+<li><strong>Document Details</strong> — the <code>APTran</code> grid. Lines can be GL-account lines, PO-linked lines (populated from a receipt), or project/task lines when the Projects module is active.</li>
+<li><strong>Financial Details</strong> — terms, due date calculation, and the cash discount date, all driven by the vendor's Terms ID unless overridden per document.</li>
+<li><strong>Taxes</strong> — populated by the tax engine based on the vendor's tax zone/category combination; manual overrides here are a common source of tax report discrepancies later.</li>
+<li><strong>Approval</strong> — only rendered when an Assignment/Approval Map applies; the underlying field is <code>APInvoice.Approved</code> plus rows in <code>EPApprovalHistory</code>.</li>
+</ul>
+
+<h2 id="extending-the-graph">Extending the graph</h2>
+<p>Most AP Bill customizations are graph extensions against <code>APInvoiceEntry</code> rather than DAC-only changes, because the interesting behavior is almost always "do something extra when a bill is saved or released." A typical pattern: validate a custom field on <code>APInvoice</code> during <code>Persisting</code>, or hook <code>APInvoice_RowPersisting</code> to block a save when a required custom attribute is blank for a given vendor class.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaBillExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class APInvoiceEntry_Extension : PXGraphExtension&lt;APInvoiceEntry&gt;
 {
     [PXOverride]
-    public virtual void Bill(Acumatica doc)
+    public void Persist(Action baseMethod)
     {
-        // Custom bill logic for acumatica bill screen
-        if (doc?.Bill == null) return;
-        Base.Bill(doc);
+        APInvoice row = Base.Document.Current;
+        if (row != null &amp;&amp; row.DocType == APDocType.Invoice &amp;&amp; row.UsrCostCenter == null)
+            throw new PXSetPropertyException("Cost Center is required before this bill can be saved.");
+
+        baseMethod();
     }
 }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica ap bill screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to the Financial Details tab is a standard DAC extension on <code>APInvoice</code> plus a placeholder in the ASPX (or, on modern screens, a JSON layout) — the Customization Project Editor's "Add Field" wizard handles both in one pass if you point it at the page. A whole new tab is a bigger ask: it usually means a related DAC (keyed to <code>RefNbr</code>/<code>DocType</code>) and a new PXTab bound to a data view on the graph extension, which is more work than most teams expect from what looks like a UI-only change.</p>
+
+<h2 id="common-validation-and-event-handler-use-cases">Common validation and event-handler use cases</h2>
+<p>The recurring requests on this screen are: enforcing a custom approval threshold beyond what the built-in approval maps support, defaulting a subaccount segment based on a custom vendor attribute, and blocking release when a linked receipt hasn't been fully matched. All three are handled the same way — override or extend <code>RowPersisting</code>/<code>RowSelected</code> on <code>APInvoice</code>, or add a <code>PXAction</code> that runs before the standard Release action rather than trying to fight the release process itself.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Don't fight the release process</strong>
+  <p>Release on this screen isn't just a status flip — it's a chain that posts to GL, updates vendor balances, and (for PO-linked bills) reconciles quantities against the receipt. Custom logic that needs to stop a bad bill from posting belongs before release fires, in validation, not layered on top of the release action itself.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the bill is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-bill-edge-cases-i-have-shipped">The bill edge cases I have shipped</h2>
-<p>The performance of bill in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production bill looks different from development bill. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaBillExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Bill(Acumatica doc)
-    {
-        // Custom bill logic for acumatica bill screen
-        if (doc?.Bill == null) return;
-        Base.Bill(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring bill first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with bill when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="gotchas">Gotchas worth knowing before you customize this screen</h2>
+<p>Tax overrides entered directly on the Taxes tab don't retroactively recalculate if you change the tax zone afterward — clear and re-trigger the calculation instead of editing amounts by hand. Retainage, when enabled on the vendor or document, changes which fields on <code>APTran</code> actually flow to GL versus staying on the retainage sub-ledger, which trips up custom GL-distribution logic that assumes every line posts in full. And a bill created from a receipt inherits its branch and project from the receipt — overriding branch on the bill screen after the fact can silently break the three-way match reporting that finance relies on at month end.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica ap bill screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The AP Bill screen rewards restraint: most legitimate customizations are additive fields plus a validation rule or two, not a rewrite of how bills move through approval and release. Understand the <code>APInvoice</code>/<code>APTran</code> split, respect the release pipeline, and the screen stays maintainable across upgrades.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-      <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
-      <li><a href="/blog/acumatica-ar-invoice-screen-deep-dive/">Acumatica AR Invoice Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
-      <li><a href="/blog/acumatica-cash-management-extension/">Acumatica Cash Management — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-vendor-screen-deep-dive/">Acumatica Vendor Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-receipt-screen-deep-dive/">Acumatica Receipt Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-gl-journal-transaction-screen/">Acumatica GL Journal Transaction Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-business-events-deep-dive/">Acumatica Business Events — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

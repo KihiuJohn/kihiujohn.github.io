@@ -93,107 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-acumatica-sales-by-period-report-tuning-guide-matters-in-production">Why Acumatica Sales by Period Report — Tuning Guide matters in production</h2>
-<p>Why Acumatica Sales by Period Report — Tuning Guide matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A sales-by-period report is the report every sales manager wants sliced a different way — by rep, by territory, by product line, by month versus quarter versus rolling twelve — and that flexibility demand is exactly what makes it slow if you build it the naive way: one wide query joining everything, filtered and grouped differently on every run. The fix isn't a faster query, it's picking the right grain to pre-aggregate at.</p>
+
+<h2 id="pick-the-grain-pre-aggregate-there">Pre-aggregate at the finest grain anyone actually asks for, not finer</h2>
+<p>If the finest slice anyone requests is "by rep, by product class, by month," there's no reason for the report's base query to join down to individual order lines every time — aggregate once to that grain (a projection or a scheduled summary table refreshed nightly) and have the report query the pre-aggregated set, rolling up further (by quarter, by territory) in the report's own grouping rather than re-querying transaction detail for every possible cut. The mistake I see most is a report that joins <code>SOOrder</code> to <code>SOLine</code> fresh on every run regardless of whether the requested grouping needed line-level detail at all — a rep/month summary doesn't need to touch line-level rows if a pre-aggregated table already has rep/month/product-class totals.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSalesExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sales(Acumatica doc)
-    {
-        // Custom sales logic for acumatica sales period
-        if (doc?.Sales == null) return;
-        Base.Sales(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SCHEMA — REPORT QUERIES A PRE-AGGREGATED SUMMARY, NOT LIVE LINE DETAIL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Nightly job populates:  KGSalesSummary (SalesPersonID, ProductClassID, FinPeriodID, Amount, Qty)
+Report base:            KGSalesSummary   -- not SOOrder JOIN SOLine
+Filter:                 FinPeriodID BETWEEN @FromPeriod AND @ToPeriod
+Group (report layer):   further rolled up to quarter/territory as requested</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica sales by period report — tuning guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="period-vs-date-filtering">FinPeriodID filtering, again, and why it matters even more here</h2>
+<p>Sales-by-period reports are inherently period-comparison reports — this month vs last, this quarter vs same quarter last year — which means the filter predicate is almost always expressed in period terms even when users think of it as a date range. Filtering by <code>FinPeriodID</code> against a summary table keyed by period is both more correct (avoids date-boundary ambiguity around period-end cutover) and faster (string equality/range on an indexed key column) than converting user-entered dates into a period lookup on every run.</p>
+
+<h2 id="live-vs-summary-lag">Decide how stale "current period" data is allowed to be</h2>
+<p>If the report reads from a nightly-refreshed summary table, today's orders won't appear until tomorrow's refresh — fine for a monthly management pack, not fine for a sales manager checking today's numbers at 4pm. Build two paths deliberately: closed/prior periods always read the fast summary table, and the current, still-open period reads live from <code>SOOrder</code>/<code>SOLine</code> directly (a much smaller, recent-only dataset, so the live join is cheap precisely because it's bounded to one open period). A report that tries to serve both needs from one always-live query pays full cost on every run for a need that's mostly about historical trend, not today's number.</p>
+<div class="callout-warn callout">
+  <strong>Backdated orders break a naive nightly refresh</strong>
+  <p>If sales orders can be entered with a document date in a prior, already-closed period (common with delayed order entry or corrections), a summary table refreshed only for "yesterday's activity" will miss it — the order lands in a period the nightly job already considered final. Either re-run the summary refresh for the affected period when a backdated order posts, or window the refresh to re-aggregate the trailing few periods every night, not just the most recent one.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sales is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of sales in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production sales looks different from development sales. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSalesExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sales(Acumatica doc)
-    {
-        // Custom sales logic for acumatica sales period
-        if (doc?.Sales == null) return;
-        Base.Sales(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sales first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sales when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sales by period report — tuning guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Pre-aggregate to the finest grain anyone actually requests and let the report roll up further from there instead of re-querying line detail on every run. Filter and key by financial period rather than raw dates, split closed-period reporting (fast, from a summary table) from current-period reporting (live, but cheap because it's bounded to one open period), and make sure your refresh job re-touches recent periods, not just the newest one, so backdated orders don't silently vanish from the numbers.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
-      <li><a href="/blog/acumatica-report-aged-payables-tuning/">Acumatica Aged Payables Report — Tuning Guide</a></li>
-      <li><a href="/blog/acumatica-report-aged-receivables-tuning/">Acumatica Aged Receivables Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-report-margins-by-product/">Acumatica Margins by Product Report</a></li>
+      <li><a href="/blog/acumatica-report-customer-profitability/">Acumatica Customer Profitability Report</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
+      <li><a href="/blog/acumatica-gl-period-end-close-checklist/">Acumatica GL Period-End Close Checklist</a></li>
+      <li><a href="/blog/acumatica-so-module-extension-patterns/">Acumatica SO Module Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

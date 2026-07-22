@@ -93,107 +93,74 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="how-to-debug-fedex-in-production">How to debug fedex in production</h2>
-<p>How to debug fedex in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>FedEx migrated its developer platform from the legacy SOAP-based Web Services to the modern FedEx REST API a few years back, and every FedEx integration I inherit from a client's previous developer is still running against the old SOAP endpoints, quietly accumulating deprecation risk. If you're building this fresh, start on the REST API, the OAuth flow alone is worth the switch.</p>
+
+<h2 id="oauth-setup">OAuth client credentials, scoped per environment</h2>
+<p>FedEx's REST API uses OAuth 2.0 client credentials grant, no user context, just a client ID and secret tied to your FedEx developer account, exchanged for a bearer token good for about an hour:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFedexExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · FedEx OAuth token</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var req = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/oauth/token")
 {
-    [PXOverride]
-    public virtual void Fedex(Acumatica doc)
+    Content = new FormUrlEncodedContent(new Dictionary&lt;string, string&gt;
     {
-        // Custom fedex logic for acumatica fedex tracking
-        if (doc?.Fedex == null) return;
-        Base.Fedex(doc);
-    }
+        ["grant_type"] = "client_credentials",
+        ["client_id"] = _settings.ClientId,
+        ["client_secret"] = _settings.ClientSecret,
+    })
+};
+var resp = await _httpClient.SendAsync(req);
+var token = JsonSerializer.Deserialize&lt;FedExTokenResponse&gt;(await resp.Content.ReadAsStringAsync());
+// token.expires_in is seconds, cache and refresh proactively, not on 401
+</code></pre>
+</div>
+
+<p>FedEx has separate sandbox and production base URLs with entirely separate credentials, a mistake I see constantly is a client's staging Acumatica instance accidentally pointed at production FedEx credentials during testing, which creates real tracking numbers and, worse, can trigger real label charges if the integration also does label generation.</p>
+
+<h2 id="where-tracking-fits">Where a tracking number lands on the Shipment DAC</h2>
+<p>I attach FedEx integration at the point a Shipment is confirmed in Acumatica, using a <code>RowPersisted</code> handler on <code>SOShipment</code> gated on the carrier field, rather than trying to call FedEx synchronously inside <code>RowPersisting</code>, an external HTTP call inside a persisting handler risks the whole save failing or timing out because of a slow third-party response, which is exactly the kind of coupling you don't want on your core shipment save path.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowPersisted&lt;SOShipment&gt; e)
+{
+    if (e.Row == null || e.TranStatus != PXTranStatus.Completed) return;
+    if (e.Row.UsrCarrier != "FEDEX" || !string.IsNullOrEmpty(e.Row.UsrTrackingNbr)) return;
+
+    // Queue, don't call inline, a scheduled process or PXLongOperation
+    // picks this up and calls FedEx's Ship API asynchronously
+    PXLongOperation.StartOperation(Base, () =&gt; FedExShipmentService.CreateShipment(e.Row.ShipmentNbr));
 }</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>In the work I have done on acumatica fedex tracking integration — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="tracking-updates">Pulling tracking status: webhooks exist, but polling is the fallback that actually ships</h2>
+<p>FedEx offers tracking event notifications via its Track API's subscription mechanism, but in my experience the setup friction (a public HTTPS endpoint, FedEx-side subscription approval, payload signature verification) means most mid-size Acumatica clients end up polling the Track API on a schedule instead, every 30-60 minutes for active shipments, tapering off once a shipment reaches "Delivered." I keep a small custom DAC tracking which shipments are still "in flight" so the scheduled process only polls active ones rather than re-querying delivered shipments from three months ago forever.</p>
+
+<div class="callout-warn callout">
+  <strong>Rate limits bite on large batch polls</strong>
+  <p>FedEx's Track API enforces per-minute rate limits that are easy to hit if you loop through hundreds of open shipments naively. Batch tracking numbers into the multi-tracking-number request the API supports (up to 30 per call) instead of one HTTP call per shipment. This alone took one client's nightly tracking sync from a 45-minute run that occasionally got throttled mid-batch down to under five minutes.</p>
 </div>
-<h2 id="why-acumatica-fedex-tracking-integration-a-complete-guide-matters-in-production">Why Acumatica FedEx Tracking Integration — A Complete Guide matters in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the fedex is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of fedex in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Production fedex looks different from development fedex. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFedexExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Fedex(Acumatica doc)
-    {
-        // Custom fedex logic for acumatica fedex tracking
-        if (doc?.Fedex == null) return;
-        Base.Fedex(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring fedex first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with fedex when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="mapping-status">Mapping FedEx status codes to something Acumatica users understand</h2>
+<p>FedEx's tracking events use their own status code vocabulary (<code>OC</code>, <code>PU</code>, <code>IT</code>, <code>DL</code>, and dozens more) that means nothing to a customer service rep looking at a Sales Order. I maintain a lookup DAC mapping FedEx's derived status codes to a small internal enum (Booked, In Transit, Out for Delivery, Delivered, Exception) and surface only that internal enum on the Sales Order screen, keeping the raw carrier payload available in a related detail view for anyone who needs to dig deeper on a support call.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica fedex tracking integration — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A solid FedEx integration for Acumatica means moving to the REST API if you haven't already, keeping the shipment creation call asynchronous and off the RowPersisting save path, polling tracking in efficient multi-number batches rather than one call per shipment, and translating FedEx's own status vocabulary into something your operations team can actually read at a glance. None of it is exotic engineering, it's mostly discipline about where the external call sits relative to Acumatica's transaction boundary.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-dhl-tracking-integration/">Acumatica DHL Tracking Integration — A Complete Guide</a></li>
       <li><a href="/blog/acumatica-ups-tracking-integration/">Acumatica UPS Tracking Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-currencycloud-fx-integration/">Acumatica Currencycloud FX Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-dropbox-integration/">Acumatica Dropbox Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-dhl-tracking-integration/">Acumatica DHL Tracking Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
+      <li><a href="/blog/acumatica-webhooks-vs-rest-polling/">Acumatica Webhooks vs REST Polling — When to Use Which</a></li>
+      <li><a href="/blog/acumatica-business-events-retry/">Acumatica Business Events Retry Strategies</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

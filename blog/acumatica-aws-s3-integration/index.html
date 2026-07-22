@@ -93,116 +93,106 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="prompt-patterns-that-work-for-aws">Prompt patterns that work for aws</h2>
-<p>Prompt patterns that work for aws is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica stores every attachment — the signed delivery notes, the scanned supplier invoices, the fifteen-megapixel photos your field team insists on taking — in the <code>UploadFile</code> tables inside the application database. On a young instance nobody notices. Three years in, the database is 200 GB, 170 of that is files, backups take hours, and your SaaS tier or your DBA is complaining. That's the moment someone asks about S3. There are two genuinely different integrations hiding under "Acumatica S3 integration", and it's worth being clear which one you're building.</p>
+
+<h2 id="two-problems">Two different problems</h2>
+<ol>
+  <li><strong>Getting files out of the database</strong> — archiving or offloading attachments to object storage to keep the DB lean.</li>
+  <li><strong>Getting external files into Acumatica</strong> — documents that land in S3 from other systems (EDI, scanners, a mobile app) and need to appear attached to the right ERP record.</li>
+</ol>
+<p>Both lean on the same two Acumatica capabilities: the contract-based REST API's file endpoints, and business events as change triggers. Let's take them in turn.</p>
+
+<h2 id="files-api">The REST file API in ninety seconds</h2>
+<p>Attachments hang off records via <code>NoteID</code>. Through the contract-based API, a GET on an entity returns a <code>files</code> array (when you ask for it) with metadata and an href per file; you download by following that href, and you attach by PUTting bytes to the record's files URL:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">HTTP · ATTACH A FILE TO A SALES ORDER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>PUT /entity/Default/24.200.001/SalesOrder/SO/SO006721/files/pod-SO006721.pdf HTTP/1.1
+Host: erp.example.com
+Authorization: Bearer eyJ...
+Content-Type: application/pdf
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+%PDF-1.7 ... (raw bytes)</code></pre>
 </div>
-<h2 id="how-to-evaluate-acumatica-in-production">How to evaluate acumatica in production</h2>
-<p>In the work I have done on acumatica aws s3 integration — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<p>Downloads are the mirror image: <code>GET .../SalesOrder/SO/SO006721?$expand=files</code> to list, then GET each file href. That's the whole vocabulary the sync service needs.</p>
+
+<h2 id="archiving">Problem 1: archiving attachments out to S3</h2>
+<p>My standard build is a small worker service (usually .NET, sometimes Laravel where the client's stack is PHP) that runs on a schedule and does this loop:</p>
+
+<ol>
+  <li>Query a Generic Inquiry exposed via OData — the GI joins <code>UploadFile</code>/<code>UploadFileRevision</code> metadata with the parent record type so the worker can build a meaningful S3 key. Something like <code>customer-docs/AR/INV-004521/pod.pdf</code> beats a flat bucket of GUIDs forever.</li>
+  <li>Download each file over the REST API, stream it to <code>PutObject</code> with SSE enabled, and verify the ETag/checksum.</li>
+  <li>Record the mapping — NoteID, file revision ID, S3 key — in a small state table owned by the worker. This ledger is the actual asset; treat it as production data.</li>
+  <li>Only after a verified upload, delete or truncate the source file in Acumatica (there are maintenance screens and APIs for file cleanup — and take a DB backup before your first bulk run, obviously).</li>
+</ol>
+
+<p>The deletion step is where you decide policy, not code: most of my clients keep the last 12 months of files hot in Acumatica and archive older revisions. Users overwhelmingly open recent attachments; the 2019 delivery notes can live in S3 Glacier Instant Retrieval at a fraction of the cost.</p>
+
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Archived files vanish from the paperclip</strong>
+  <p>Once you delete a file from Acumatica, it's gone from the record's attachment list — users won't magically see S3. Plan the retrieval story before you archive: mine is a custom "Archived Documents" tab (a grid over the mapping table) with a button that generates a presigned S3 GET URL, valid for 15 minutes, and opens it. Presigned URLs mean the browser talks to S3 directly and no AWS credentials ever touch the client.</p>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the aws is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-role-of-aws-in-the-agent-loop">The role of aws in the agent loop</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="what-acumatica-aws-s3-integration-a-complete-guide-actually-does">What Acumatica AWS S3 Integration — A Complete Guide actually does</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The performance of aws in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>Production aws looks different from development aws. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="inbound">Problem 2: S3 as an inbound document channel</h2>
+<p>The reverse flow is event-driven and pleasantly clean: S3 raises an event notification on <code>ObjectCreated</code>, which triggers a Lambda, which pushes the file into Acumatica over REST. The only design work is the correlation rule — how does a dropped file know which record it belongs to? Options that have worked for me, in order of preference: a key convention (<code>inbound/SO/SO006721/photo1.jpg</code> — the path <em>is</em> the address), object metadata tags set by the producing system, or a manifest JSON dropped alongside a batch. Whatever you choose, make the Lambda idempotent: S3 events are at-least-once, and attaching the same POD twice looks unprofessional on a customer-facing record.</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · LAMBDA: S3 EVENT TO ACUMATICA ATTACHMENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public async Task Handle(S3Event evt)
+{
+    foreach (var rec in evt.Records)
+    {
+        var key = rec.S3.Object.Key;                 // inbound/SO/SO006721/pod.pdf
+        var parts = key.Split('/');
+        if (parts.Length != 4 || parts[0] != "inbound") continue;
+
+        var (docType, orderNbr, fileName) = (parts[1], parts[2], parts[3]);
+
+        using var obj = await _s3.GetObjectAsync(rec.S3.Bucket.Name, key);
+        var url = _erp + "/entity/Default/24.200.001/SalesOrder/" +
+                  docType + "/" + orderNbr + "/files/" + fileName;
+
+        var put = new HttpRequestMessage(HttpMethod.Put, url)
+        { Content = new StreamContent(obj.ResponseStream) };
+        put.Headers.Authorization = await _auth.BearerAsync();
+
+        var resp = await _http.SendAsync(put);
+        if (resp.StatusCode == HttpStatusCode.NotFound)
+            await _dlq.SendAsync(key, "order not found");   // park it, don't crash
+        else
+            resp.EnsureSuccessStatusCode();
+        // move processed object out of inbound/ so replays are visible
+        await _s3.CopyAsync(rec.S3.Bucket.Name, key, _processedPrefix + key);
+        await _s3.DeleteAsync(rec.S3.Bucket.Name, key);
+    }
+}</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring aws first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with aws when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="operational-notes">Operational notes</h2>
+<ul>
+  <li><strong>Login churn kills you.</strong> If your worker uses the cookie-based auth, reuse the session across the batch and log out once; if OAuth, cache the token. Acumatica licenses cap concurrent API users, and a worker that logs in per file will exhaust them and lock out the EDI integration nobody remembered was sharing the user.</li>
+  <li><strong>Throttle the archive worker.</strong> Bulk file downloads compete with interactive users for app-server resources. I run archive jobs off-hours and cap concurrency at 2&ndash;4 parallel transfers.</li>
+  <li><strong>Bucket hygiene:</strong> versioning on, public access blocked, SSE-S3 at minimum, lifecycle rules to Glacier tiers by age. This is boilerplate — the point is that it's <em>your</em> boilerplate now, not the DBA's backup problem.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica aws s3 integration — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>S3 integration with Acumatica is two projects wearing one name. The archive direction is a scheduled worker with a mapping ledger and a retrieval UI — measured in database gigabytes saved. The inbound direction is an event-driven Lambda with a key convention and idempotent attaches — measured in manual filing eliminated. Both stand on the REST file API and both live or die on the boring parts: the state ledger, idempotency, and not exhausting your API user licenses. Build those first and the AWS SDK calls are the easy afternoon.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-azure-blob-storage-integration/">Acumatica Azure Blob Storage Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-dropbox-integration/">Acumatica Dropbox Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-aws-vs-azure-vs-on-prem/">Acumatica — AWS vs Azure vs On-Prem</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-azure-blob-storage-integration/">Acumatica Azure Blob Storage Integration</a></li>
+      <li><a href="/blog/acumatica-dropbox-integration/">Acumatica Dropbox Integration</a></li>
+      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-business-events-lambda/">Acumatica Business Events with AWS Lambda</a></li>
+      <li><a href="/blog/acumatica-rest-api-rate-limiting-and-retry/">Acumatica REST API — Rate Limiting and Retry</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

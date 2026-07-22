@@ -93,96 +93,62 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A food distributor's inventory problem is rarely "how much do we have" — it is "how much do we have, in which lot, expiring when, and can I promise a customer 4 weeks of shelf life on delivery." That last clause is the one generic Distribution Edition training glosses over, and it is the one that determines whether the implementation actually works for a food business.</p>
+
+<h2 id="distribution-edition-fit">Distribution Edition is the right base</h2>
+<p>Unlike a bakery or a beverage producer, a pure food distributor usually is not manufacturing anything — cases come in, cases go out, sometimes repacked into smaller units. Acumatica's Distribution Edition (inventory, purchasing, sales order management, warehouse management) is the correct edition, not Manufacturing Edition, unless there is genuine repacking/kitting happening, in which case Kit Assembly (not full BOM/routing) usually covers it.</p>
+
+<h2 id="fefo-and-guaranteed-shelf-life">FEFO picking plus a shelf-life guarantee on the sales order</h2>
+<p>Base Acumatica supports lot expiration tracking and FEFO-based issue at the item class level, which covers "pick the oldest-expiring stock first." What it does not give you out of the box is a guaranteed-remaining-shelf-life check at order confirmation — many food distribution contracts specify "customer will not accept product with less than 60% of shelf life remaining." That is a validation you add, not a checkbox you tick:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class FoodExt : PXCacheExtension<Distribution>
+  <div class="code-header"><span class="code-lang">C# · SHELF-LIFE GUARANTEE CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void SOLine_RowSelected(PXCache cache, PXRowSelectedEventArgs e)
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    var line = (SOLine)e.Row;
+    if (line == null || line.InventoryID == null) return;
+
+    var lot = INLotSerStatus.PK.Find(Base, line.InventoryID, line.LotSerialNbr);
+    if (lot?.ExpireDate == null) return;
+
+    var totalShelfDays = GetShelfLifeDays(line.InventoryID);
+    var remainingDays = (lot.ExpireDate.Value - Accessinfo.BusinessDate.Value).Days;
+    var remainingPct = (decimal)remainingDays / totalShelfDays;
+
+    if (remainingPct &lt; 0.60m)
+        cache.RaiseExceptionHandling&lt;SOLine.lotSerialNbr&gt;(line,
+            line.LotSerialNbr,
+            new PXSetPropertyException("Lot has less than 60% shelf life remaining — customer contract requires 60% minimum.", PXErrorLevel.Warning));
 }</code></pre>
 </div>
-<h2 id="why-food-on-a-horizontal-platform-beats-from-scratch">Why food on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on food distribution vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="channel-partner-programs-for-distribution">Channel partner programs for distribution</h2>
-<p>When the work moves from design to production, the questions change. The food is not the question; the failure mode of the distribution is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'food'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-food">Marketplace listing for food</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>I make this a warning rather than a hard block by default — some customers waive the requirement for a discount, and the business needs the option to override with a documented reason, not a wall.</p>
+
+<h2 id="catch-weight">Catch weight items — the other common gap</h2>
+<p>Products sold and priced by actual weight (a case of chicken sold nominally as "40lb" but actually weighing 38.6lb on receipt) need catch-weight handling: two quantities per transaction, an ordered/nominal quantity and an actual/catch quantity, with pricing keyed to the actual. Acumatica does not have a native catch-weight UOM concept baked into the base sales order screen the way some food-specific ERPs do; the workable pattern is a custom field pair (Catch Weight Actual) on SOLine/POLine plus a costing/pricing extension that prices off the actual field instead of the ordered quantity. This is a real customization, not configuration — say so plainly during scoping if the client sells catch-weight product, because it changes the estimate meaningfully.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Do not confuse catch weight with unit conversion</strong>
+  <p>Acumatica's standard unit-of-measure conversions (case to each, kg to lb) are fine for fixed, known ratios. Catch weight is fundamentally different — the actual quantity is not knowable until the item is weighed, and it varies per lot. Trying to force it into UOM conversion tables produces silently wrong invoices.</p>
 </div>
-<h2 id="soc-2-and-iso-27001-for-distribution">SOC 2 and ISO 27001 for distribution</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM food
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of distribution in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-food-distribution-vertical-on-acumatica-is-for">What Food Distribution Vertical on Acumatica is for</h2>
-<p>Production distribution looks different from development distribution. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class FoodExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring distribution first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add food on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with distribution when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on food distribution vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Food distribution is a Distribution Edition build at its core, with two additions that are commonly assumed to be standard and are not: a guaranteed-shelf-life validation at order time, and catch-weight support if the product line calls for it. Both are buildable on the platform, but scope them explicitly — they are the two things that make a food distributor's implementation feel purpose-built instead of generic.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-bakery-acumatica/">Bakery and Patisserie Vertical on Acumatica</a></li>
       <li><a href="/blog/vertical-saas-beverage-distribution-acumatica/">Beverage Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-catering-acumatica/">Catering Business Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electrical-distribution-acumatica/">Electrical Distribution Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-food-manufacturing-acumatica/">Food and Beverage Manufacturing Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen</a></li>
+      <li><a href="/blog/acumatica-gi-export-large-datasets/">Acumatica GI — Exporting Large Datasets</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

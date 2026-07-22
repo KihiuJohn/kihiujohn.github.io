@@ -92,107 +92,65 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="why-acumatica-secure-coding-checklist-matters-in-production">Why Acumatica Secure Coding Checklist matters in production</h2>
-<p>Why Acumatica Secure Coding Checklist matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSecureExt : PXGraphExtension<AcumaticaEntry>
+    <p>I review a fair amount of other developers' Acumatica customizations before they go into production on client instances, and the same handful of mistakes show up across completely unrelated projects. None of them are exotic. They're the ordinary web application security basics that get skipped because Acumatica's framework does so much for you by default that it's easy to forget the few places it doesn't, and assume everything is covered.</p>
+
+<h2 id="bql-not-string-concat">BQL parameterizes for you - don't defeat it with string concatenation</h2>
+<p>BQL queries are parameterized by construction; the injection risk essentially disappears as long as you use BQL as intended. The vulnerability shows up specifically when a developer drops down to raw SQL via <code>PXDatabase.SelectMultiple</code> or a direct <code>SqlCommand</code> and builds the query with string concatenation, usually to work around a BQL limitation they didn't fully understand:</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">C# · The exact pattern to grep for in review</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Never do this - classic SQL injection, and I still find it in the wild
+string sql = "SELECT * FROM ARInvoice WHERE CustomerID = '" + custId + "'";
+
+// If raw SQL is genuinely unavoidable, parameterize it explicitly
+var cmd = new PXSPParameter[] { new PXSPParameter("@custId", PXDbType.NVarChar, custId) };
+</code></pre></div>
+<p>Almost every case I've found this in turned out to have a perfectly good BQL equivalent the original developer just hadn't discovered - a dynamic condition built with <code>PXSelectBuilder</code> or a <code>PXFilterable</code> attribute instead of string-building SQL by hand.</p>
+
+<h2 id="permissions-not-just-hidden-buttons">Hiding a button is not access control</h2>
+<p>A pattern I flag constantly: an action that's dangerous (voiding a payment, deleting a record, overriding an approval) is hidden from unauthorized users in the UI via a RowSelected visibility check, with no corresponding server-side check in the action's own implementation. Anyone who can construct the right REST call or reach the graph another way - a different screen sharing the same graph, an automation script - bypasses the hidden button entirely:</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">C# · Enforce it where the action executes, not just where it's shown</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual IEnumerable voidPayment(PXAdapter adapter)
 {
-    [PXOverride]
-    public virtual void Secure(Acumatica doc)
-    {
-        // Custom secure logic for acumatica secure coding
-        if (doc?.Secure == null) return;
-        Base.Secure(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica secure coding checklist, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    if (!PXAccess.HasPermission("AP.VoidPayment"))
+        throw new PXException("You do not have permission to void payments.");
+    // ... actual void logic
+    return adapter.Get();
+}</code></pre></div>
+
+<h2 id="input-validation-at-the-boundary">Validate at FieldVerifying or RowPersisting, not only client-side</h2>
+<p>Client-side validation (required-field markers, format masks) is UX, not security - it runs in the browser and is trivially bypassed by anyone calling the API directly. Any invariant that must actually hold (an amount that must be positive, a status transition that must follow a defined sequence) needs server-side enforcement in <code>FieldVerifying</code> or <code>RowPersisting</code>, which run regardless of entry point.</p>
+
+<h2 id="sensitive-data-in-logs">Don't let PXTrace or exception messages leak sensitive data</h2>
+<p>I've caught API keys, full credit card numbers, and customer PII in <code>PXTrace.WriteInformation</code> calls left in from debugging, shipped to production, and readable by anyone with access to the trace log. The same risk applies to exception messages surfaced to the UI - a caught exception from an external payment API that gets rethrown with its full response body embedded can leak more than intended to an end user's screen.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Trace logs and exception details are not a secure channel</strong>
+  <p>Treat anything written to PXTrace, the exception log, or a user-facing error message as something a support agent, another developer, or eventually a client's own staff will read. Log identifiers and outcomes, not raw payloads containing card numbers, tokens, or full API request/response bodies.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the secure is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of secure in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production secure looks different from development secure. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSecureExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Secure(Acumatica doc)
-    {
-        // Custom secure logic for acumatica secure coding
-        if (doc?.Secure == null) return;
-        Base.Secure(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring secure first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with secure when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="the-checklist">The checklist I actually run before sign-off</h2>
+<ul>
+<li>Any raw SQL anywhere? If yes, is it fully parameterized - no string concatenation of user input, ever.</li>
+<li>Every dangerous action checked server-side with <code>PXAccess.HasPermission</code>, not just hidden in the UI.</li>
+<li>Every invariant that matters enforced in FieldVerifying/RowPersisting, not only client-side.</li>
+<li>No secrets, tokens, or full PII payloads in PXTrace calls or exception messages.</li>
+<li>File upload handlers (attachments, import screens) validate file type and size server-side, not by trusting the browser's reported MIME type.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica secure coding checklist. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of this is Acumatica-specific wisdom - it's ordinary web application security, applied to a framework that handles more of it automatically than most, which is exactly why the remaining gaps get overlooked. BQL, PXAccess, and server-side event validation cover the platform's part; the developer's part is not routing around them with string-concatenated SQL, UI-only permission checks, or verbose logging that leaks what it shouldn't.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-penetration-testing/">Acumatica Penetration Testing — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-vulnerability-management/">Acumatica Vulnerability Management</a></li>
       <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-gi-row-level-security-patterns/">Acumatica GI Row-Level Security — Patterns That Work</a></li>
-      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security — Best Practices</a></li>
-      <li><a href="/blog/acumatica-rowlevelsecurity-with-graph-extensions/">Row-Level Security with Acumatica Graph Extensions</a></li>
-      <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

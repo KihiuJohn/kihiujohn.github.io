@@ -93,107 +93,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Billing rules are the most underrated piece of Acumatica's Projects module. Most implementations copy the demo T&amp;M rule, attach it to every task, and then handle every non-trivial billing arrangement manually with credit memos and apologies. That's a waste, because the billing rule engine — steps, filters, formulas, rate tables — can express almost any commercial arrangement I've met: time and material, fixed price on progress, milestones, cost-plus with caps, and combinations per task. Here's how the pieces fit and the patterns I actually deploy.</p>
+
+<h2 id="how-a-billing-rule-executes">How a billing rule executes</h2>
+<p>A billing rule (PM207000) is a set of <strong>steps</strong>. Each step is one of two types: <strong>Time and Material</strong> steps read unbilled PM transactions filtered by account group and turn them into invoice lines; <strong>Budget</strong> steps read the project budget (revenue budget lines) and bill an amount — typically pending invoice amounts you set through progress or a formula. When you run Project Billing (PM503000 or the Bill button on the project), each task's assigned rule executes step by step, and the output is a pro-forma invoice (if enabled) or a draft AR invoice.</p>
+<p>Because the rule attaches <em>per task</em>, one project can mix arrangements: task 010 fixed-price on milestones, task 020 T&amp;M for change orders, task 030 rebillable expenses at cost plus 10%. That per-task composition is the design insight most people miss.</p>
+
+<h2 id="t-and-m-steps-the-workhorse">T&amp;M steps: the workhorse</h2>
+<p>A T&amp;M step's essentials: the account group filter (which PM transactions it consumes — typically LABOR and a rebillable expense group), the <strong>rate type</strong>, and the invoice description formula. Rates deserve attention. Rate tables (PM206000) resolve a price from a sequence of criteria — rate type, then rate code sequences matching project, task, employee, labor item — and the first matching sequence wins. My advice: keep the sequence hierarchy shallow (project-specific overrides, then a standard rate by labor item) and document it, because debugging "why did this hour bill at the wrong rate" through a five-level rate table is genuinely painful.</p>
+<p>Formulas on the step control line aggregation and descriptions. A description formula like this keeps invoices readable:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaProjectExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Project(Acumatica doc)
-    {
-        // Custom project logic for acumatica project billing
-        if (doc?.Project == null) return;
-        Base.Project(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">Formula</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>=[PMTran.Date] + ' - ' + [EPEmployee.AcctName]
+  + ' - ' + [PMTran.Description]</code></pre>
 </div>
-<h2 id="how-to-debug-project-in-production">How to debug project in production</h2>
-<p>In the work I have done on acumatica project billing rules — progress, milestone, and more, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the project is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-project-billing-rules-progress-milestone-and-more-matters-in-production">Why Acumatica Project Billing Rules — Progress, Milestone, and More matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>Aggregate by employee and date for professional-services invoices; itemize per transaction for audit-heavy clients. It's a checkbox-level change with a big effect on how many invoice disputes you field.</p>
+
+<h2 id="progress-billing">Progress billing (fixed price)</h2>
+<p>Budget steps bill from the revenue budget. The standard fixed-price pattern: put the contract value on revenue budget lines, and each period the PM enters <strong>completed %</strong> (or a pending invoice amount directly) on the project's revenue budget tab. The budget step picks up the pending amount and invoices it. Two operational notes:</p>
+<ul>
+<li>Completion percentage is a manual judgment unless you wire it to something. For clients who want cost-driven progress, a small customization sets pending % from actual cost ÷ cost budget — but cap it, because overruns would otherwise happily bill 130% of contract.</li>
+<li>The pro-forma invoice step is where the PM trims or defers lines <em>without</em> corrupting project data — amounts removed on the pro-forma stay unbilled and return next cycle. Skipping pro-formas to "save a step" removes the only safe adjustment point in the flow.</li>
+</ul>
+
+<h2 id="milestone-billing">Milestone billing</h2>
+<p>Milestones are progress billing with discipline. Model each milestone as its own revenue budget line (or its own task, if deliverables need separate cost tracking): "Milestone 1 — Design sign-off, 30,000." When the milestone is achieved, set that line's pending amount to 100% and bill. The reason to prefer lines-per-milestone over one line with creeping percentages is auditability — the invoice shows the milestone by name, and an argument with the customer becomes "was this delivered," not "is 47% fair."</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Retainage lives here too</strong>
+  <p>Construction-style contracts holding 10% until completion: enable retainage on the project and the billing rule's steps can carry a retainage percentage per line. Release retainage as its own billing event at the end. Don't simulate retainage with manual credit memos — unwinding that at project close is horrible.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of project in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production project looks different from development project. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaProjectExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Project(Acumatica doc)
-    {
-        // Custom project logic for acumatica project billing
-        if (doc?.Project == null) return;
-        Base.Project(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring project first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with project when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="cost-plus-and-caps">Cost-plus and caps</h2>
+<p>Cost-plus is a T&amp;M step over cost account groups with a markup formula (multiply the amount, or use the rate table with a % markup rate type). Contract caps — "T&amp;M not to exceed 50,000" — use the <strong>limits</strong> feature: set a maximum amount tied to the revenue budget, and billing stops at the cap while the excess stays as unbilled WIP for the uncomfortable conversation it deserves.</p>
+
+<h2 id="testing-a-billing-rule">Testing a billing rule</h2>
+<p>Before attaching a rule to live projects, I build one sandbox project per arrangement and run a full cycle: post known time/expenses, run billing, verify the pro-forma line by line, release, check AR and the project's billed-to-date. Billing rules fail quietly — a wrong account group filter doesn't error, it just silently bills nothing — so the test isn't "does it run," it's "does every transaction I expected appear, and nothing else."</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica project billing rules — progress, milestone, and more. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Compose per task: T&amp;M steps for effort, budget steps for fixed-price and milestones, rate tables kept shallow, pro-formas always on, limits for caps and retainage where the contract demands it. The engine can express the contract you actually signed — the work is mapping the commercial terms onto steps deliberately instead of forcing everything through one copied T&amp;M rule.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
-      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica Projects Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-project-screen-deep-dive/">Acumatica Project Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-project-task-screen/">Acumatica Project Task Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule Extension</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica PM Projects Extension</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Report — Project Status</a></li>
+      <li><a href="/blog/acumatica-project-screen-deep-dive/">Acumatica Project Screen — Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

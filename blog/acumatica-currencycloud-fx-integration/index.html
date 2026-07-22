@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Currencycloud FX Integration — A Complete Guide | John Kihiu</title>
-<meta name="description" content="Acumatica Currencycloud FX Integration — A Complete Guide is the kind of integration that pays for itself the first time it runs without intervention.">
+<meta name="description" content="Pulling live FX rates from Currencycloud into Acumatica's Currency Rates means mapping their API to a rate type, writing rates idempotently, and never letting a failed pull leave a stale rate in place silently.">
 <meta name="keywords" content="Acumatica integration, Acumatica api, Acumatica finance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-currencycloud-fx-integration/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Currencycloud FX Integration — A Complete Guide">
-<meta property="og:description" content="Acumatica Currencycloud FX Integration — A Complete Guide is the kind of integration that pays for itself the first time it runs without intervention.">
+<meta property="og:description" content="Pulling live FX rates from Currencycloud into Acumatica's Currency Rates means mapping their API to a rate type, writing rates idempotently, and never letting a failed pull leave a stale rate in place silently.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-currencycloud-fx-integration.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-currencycloud-fx-integration/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="finance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Currencycloud FX Integration — A Complete Guide","description":"Acumatica Currencycloud FX Integration — A Complete Guide is the kind of integration that pays for itself the first time it runs without intervention.","image":"https://kihiujohn.github.io/assets/og/acumatica-currencycloud-fx-integration.svg","datePublished":"2026-06-12","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-currencycloud-fx-integration/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Currencycloud FX Integration — A Complete Guide","description":"Pulling live FX rates from Currencycloud into Acumatica's Currency Rates means mapping their API to a rate type, writing rates idempotently, and never letting a failed pull leave a stale rate in place silently.","image":"https://kihiujohn.github.io/assets/og/acumatica-currencycloud-fx-integration.svg","datePublished":"2026-06-12","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-currencycloud-fx-integration/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Currencycloud FX Integration — A Complete Guide","item":"https://kihiujohn.github.io/blog/acumatica-currencycloud-fx-integration/"}]}
@@ -87,95 +87,112 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Currencycloud FX Integration — A Complete Guide</span></nav>
     <span class="tag">Acumatica · Integration</span>
     <h1>Acumatica Currencycloud FX Integration — A Complete Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Currencycloud FX Integration — A Complete Guide is the kind of integration that pays for itself the first time it runs without intervention.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Pulling live FX rates from Currencycloud into Acumatica's Currency Rates means mapping their API to a rate type, writing rates idempotently, and never letting a failed pull leave a stale rate in place silently.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-12">Jun 12, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica already knows how to do multi-currency accounting — it has Currency Rates, rate types, and the whole revaluation machinery. What it does not have is a live feed. Someone types today's rates in by hand, or they go stale. Wiring Currencycloud (or any FX provider) into the Currency Rates table is a small integration with a few sharp edges: mapping their quote to Acumatica's rate direction, writing rates idempotently so a re-run does not create duplicates, and making a failed pull loud instead of silently leaving yesterday's rate in place. This is how I build that pull.</p>
+
+<h2 id="how-acumatica-stores-rates">How Acumatica stores a rate</h2>
+<p>Currency rates live in the <code>CurrencyRate</code> DAC, keyed by from-currency, to-currency, a rate type (<code>CurrencyRateType</code> — e.g. SPOT, or your own), and an effective date. The two fields that trip people up are <code>CuryRate</code> and <code>RateReciprocal</code>: Acumatica stores the rate in one direction and the reciprocal for the other, and it applies them according to the rate type's configuration. If you write the rate the wrong way round, everything reconciles to a mirror-image number and nobody notices until a month-end revaluation looks wrong. Decide, per rate type, exactly which direction the provider quotes and which direction Acumatica expects, and pin it down before writing a single row.</p>
+<div class="callout">
+  <strong>Define a dedicated rate type</strong>
+  <p>Create a rate type like <code>CCLOUD</code> in Currency Rate Types rather than overwriting <code>SPOT</code>. It keeps machine-fed rates auditable and separate from anything a controller entered by hand, and it lets you point specific customers or GL processes at the feed deliberately.</p>
+</div>
+
+<h2 id="fetching-from-currencycloud">Fetching from Currencycloud</h2>
+<p>Currencycloud's REST API uses a login-token model: you authenticate with a login ID and API key to get a short-lived auth token, then pass it as a header on subsequent calls. Rates come from their rates endpoint for a currency pair. Wrap it in a small typed client; do not scatter <code>HttpClient</code> calls through your graph.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCurrencycloudExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · FX PROVIDER CLIENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public sealed class CurrencycloudClient
 {
-    [PXOverride]
-    public virtual void Currencycloud(Acumatica doc)
+    private readonly HttpClient _http;
+    private string _authToken;
+
+    public CurrencycloudClient(HttpClient http) =&gt; _http = http;
+
+    public async Task AuthenticateAsync(string loginId, string apiKey)
     {
-        // Custom currencycloud logic for acumatica currencycloud integration
-        if (doc?.Currencycloud == null) return;
-        Base.Currencycloud(doc);
+        var resp = await _http.PostAsync("/v2/authenticate/api",
+            new FormUrlEncodedContent(new Dictionary&lt;string, string&gt;
+            {
+                ["login_id"] = loginId,
+                ["api_key"] = apiKey,
+            }));
+        resp.EnsureSuccessStatusCode();
+        var json = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        _authToken = json.RootElement.GetProperty("auth_token").GetString();
+    }
+
+    // Returns the mid rate for BUY/SELL of the pair, e.g. "USDKES"
+    public async Task&lt;decimal&gt; GetRateAsync(string pair)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get,
+            $"/v2/rates/find?currency_pair={pair}");
+        req.Headers.Add("X-Auth-Token", _authToken);
+        var resp = await _http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        var json = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        // rates node holds [bid, offer]; take the mid for a book rate
+        var rates = json.RootElement.GetProperty("rates")
+                        .GetProperty(pair);
+        var bid = rates[0].GetDecimal();
+        var offer = rates[1].GetDecimal();
+        return (bid + offer) / 2m;
     }
 }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica currencycloud fx integration — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Whether you book the mid, the bid, or the offer is a business decision, not a technical one — confirm it with finance. What matters technically is that you extract a single, well-defined number per pair and know which side of the quote it is.</p>
+
+<h2 id="writing-rates-idempotently">Writing the rate idempotently</h2>
+<p>The pull runs on a schedule and will re-run — after a transient failure, on a manual retry, or because someone triggers it twice. Writing must be idempotent: one rate per pair per rate type per effective date, updated in place, never duplicated. Locate the existing row first and update it; only insert when none exists.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · UPSERT INTO CurrencyRate</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public void UpsertRate(PXGraph graph, string fromCury, string toCury,
+    string rateTypeId, DateTime effDate, decimal rate)
+{
+    var existing = PXSelect&lt;CurrencyRate,
+        Where&lt;CurrencyRate.fromCuryID,   Equal&lt;Required&lt;CurrencyRate.fromCuryID&gt;&gt;,
+          And&lt;CurrencyRate.toCuryID,     Equal&lt;Required&lt;CurrencyRate.toCuryID&gt;&gt;,
+          And&lt;CurrencyRate.curyRateType, Equal&lt;Required&lt;CurrencyRate.curyRateType&gt;&gt;,
+          And&lt;CurrencyRate.curyEffDate,  Equal&lt;Required&lt;CurrencyRate.curyEffDate&gt;&gt;&gt;&gt;&gt;&gt;
+        .Select(graph, fromCury, toCury, rateTypeId, effDate)
+        .FirstOrDefault()?.GetItem&lt;CurrencyRate&gt;();
+
+    var cache = graph.Caches[typeof(CurrencyRate)];
+    var row = existing ?? new CurrencyRate
+    {
+        FromCuryID   = fromCury,
+        ToCuryID     = toCury,
+        CuryRateType = rateTypeId,
+        CuryEffDate  = effDate,
+    };
+    row.CuryRate       = rate;
+    row.RateReciprocal = Math.Round(1m / rate, 8);
+
+    cache.Update(existing == null ? cache.Insert(row) : row);
+    graph.Actions.PressSave();
+}</code></pre>
+</div>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Never write reciprocal as a stored constant</strong>
+  <p>Compute <code>RateReciprocal</code> from the rate every time rather than pulling a separate reciprocal quote from the provider. If the two come from different fetches they can disagree by rounding, and a self-inconsistent rate row produces revaluation differences that are almost impossible to trace back.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the currencycloud is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+
+<h2 id="scheduling-and-failure">Scheduling and failing loudly</h2>
+<p>Run the pull as an Acumatica processing screen backed by a scheduled Automation Schedule, or from an external worker hitting the REST endpoint — either is fine. The rule that matters is the failure behavior: a stale rate is worse than an obvious error, because it silently mis-prices every foreign-currency transaction booked that day. If the provider is unreachable or returns a rate outside a sanity band, do not write anything and raise a visible failure — a failed schedule, an email, a Business Event — so a human knows to enter rates manually.</p>
+<div class="callout callout-warn">
+  <strong>Sanity-bound every rate before you trust it</strong>
+  <p>An FX API can return a zero, a mis-decimalled value, or an inverted pair during an incident. Reject anything that deviates from yesterday's rate beyond a threshold you agree with finance (say 10 percent) and fail the run instead of booking it. One bad rate written to <code>CurrencyRate</code> can silently corrupt a day of postings.</p>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-currencycloud-edge-cases-i-have-shipped">The currencycloud edge cases I have shipped</h2>
-<p>The performance of currencycloud in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production currencycloud looks different from development currencycloud. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCurrencycloudExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Currencycloud(Acumatica doc)
-    {
-        // Custom currencycloud logic for acumatica currencycloud integration
-        if (doc?.Currencycloud == null) return;
-        Base.Currencycloud(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring currencycloud first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with currencycloud when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="testing-without-the-live-api">Testing without the live API</h2>
+<p>The two failure modes worth automated coverage are direction and idempotency, and neither needs the real provider. Put the client behind an interface, feed a canned quote, and assert two things: the rate lands in the correct direction with a consistent reciprocal, and running the upsert twice for the same pair/date leaves exactly one row with the same value. Those two tests catch the bugs that actually reach production — everything else is standard HTTP plumbing.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica currencycloud fx integration — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>An FX feed into Acumatica is a small integration whose whole value is that it runs unattended and correctly. Give the machine feed its own rate type, extract one well-defined number per pair, write it idempotently with a computed reciprocal, sanity-bound it, and make failure loud. Get those right and month-end revaluation stops being a place where mystery differences appear.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -186,9 +203,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-egypt-eta-integration/">Acumatica Egypt ETA Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

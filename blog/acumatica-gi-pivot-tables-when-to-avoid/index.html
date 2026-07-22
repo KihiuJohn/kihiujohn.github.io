@@ -94,107 +94,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPivotExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Pivot(Acumatica doc)
-    {
-        // Custom pivot logic for acumatica pivot tables
-        if (doc?.Pivot == null) return;
-        Base.Pivot(doc);
-    }
-}</code></pre>
+    <p>Acumatica's GI results grid supports a pivot view directly in the browser — group rows, pivot a column into headers, drop a measure in the middle — and it looks, for the first five minutes of a demo, like it eliminates the need for anyone to touch Excel again. It does not, and knowing when to stop building the pivot in the GI and export instead saves a predictable amount of client frustration.</p>
+
+<h2 id="what-the-built-in-pivot-is-actually-for">What the in-grid pivot is good at</h2>
+<p>The results grid's pivot mode is a client-side reshape of whatever rows the GI already returned — it is genuinely useful for quick, ad hoc "let me see this by region instead of by month" exploration on a moderate result set, and it requires zero extra GI design work since it operates on the existing columns. For a manager poking at a few hundred or low thousands of rows interactively, it is a legitimately nice feature and I point clients at it constantly instead of building bespoke summary GIs for every slicing they might want.</p>
+
+<h2 id="where-it-breaks-down">Where it breaks down</h2>
+<ul>
+<li><strong>Row count.</strong> The pivot operates on rows already fetched to the browser — it is not pushing the pivot operation down to SQL. A pivot over tens of thousands of rows means tens of thousands of rows crossed the wire first, which defeats the entire point of server-side aggregation covered in the GROUP BY/HAVING pattern. If the honest need is "give me totals by region and month", build that as an aggregated GI with the grouping baked into the query — it will be faster and correct at any scale, and doesn't depend on the browser doing the summing.</li>
+<li><strong>Persistence and sharing.</strong> A pivot arrangement configured interactively in the grid is a personal, session-level view in most workflows — it is not automatically the thing a dashboard tile shows, and it is not what a second user sees when they open the same GI unless you have explicitly saved and shared that configuration where the platform allows it. Do not promise a client "the pivot view" as if it is a permanent artifact everyone gets by default.</li>
+<li><strong>Complex measures.</strong> The in-grid pivot handles simple aggregate functions on existing columns. It cannot compute a ratio between two pivoted measures, a weighted average, or anything requiring calculation across the pivoted structure itself — that class of requirement belongs in Excel (export and pivot there, where formula-driven calculated fields are native) or in Power BI for anything recurring.</li>
+<li><strong>Printing and distribution.</strong> There is no clean "print this pivot as a formatted report" path from the grid. If the deliverable is a formatted document someone emails monthly, that is a Report Designer job, not a GI pivot.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>Do not use the in-grid pivot as a substitute for a real aggregated GI</strong>
+  <p>The temptation is to build one broad, unaggregated GI and tell every user "just pivot it yourself" instead of designing purpose-built summary GIs. This pushes both the performance cost and the design work onto end users, who will not do either well. If a pivoted view is a recurring, shared need, build the aggregation into the GI itself — it is not meaningfully more work than the pivot configuration users would otherwise redo every session.</p>
 </div>
-<h2 id="why-acumatica-gi-pivot-tables-when-to-use-and-when-to-avoid-matters-in-production">Why Acumatica GI Pivot Tables — When to Use and When to Avoid matters in production</h2>
-<p>In the work I have done on acumatica gi pivot tables — when to use and when to avoid, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the pivot is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of pivot in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production pivot looks different from development pivot. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPivotExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Pivot(Acumatica doc)
-    {
-        // Custom pivot logic for acumatica pivot tables
-        if (doc?.Pivot == null) return;
-        Base.Pivot(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pivot first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pivot when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="the-decision-rule">A simple decision rule</h2>
+<p>Ad hoc, one-off, small result set, single user exploring: use the in-grid pivot, it is free and fast to reach for. Recurring, shared, large result set, or needs calculated measures: build a real aggregated GI (or move to Power BI / Excel export) instead of relying on the browser pivot. The failure pattern I clean up most often is a client who started in the first bucket and never noticed they had drifted into the second as their data grew.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi pivot tables — when to use and when to avoid. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The GI grid's pivot view is a client-side convenience for ad hoc exploration on modest result sets — it does not push aggregation to SQL, does not reliably persist or share configurations, and cannot compute cross-measure calculations. The moment a pivoted view becomes recurring, shared, or large, replace it with a properly aggregated GI or move the analysis to a tool actually built for it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
-      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-gi-parameters-and-default-values/">Acumatica GI Parameters and Default Values</a></li>
+      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — GROUP BY and HAVING</a></li>
+      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins Deep Dive</a></li>
+      <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector Setup</a></li>
+      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting with Style Templates</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

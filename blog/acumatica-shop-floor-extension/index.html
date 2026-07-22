@@ -93,107 +93,80 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-acumatica-shop-floor-extension-patterns-matters-in-production">Why Acumatica Shop Floor — Extension Patterns matters in production</h2>
-<p>Why Acumatica Shop Floor — Extension Patterns matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaShopExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Shop(Acumatica doc)
-    {
-        // Custom shop logic for acumatica shop floor
-        if (doc?.Shop == null) return;
-        Base.Shop(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica shop floor — extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Shop floor data collection is where manufacturing customization meets the physical plant — barcode scanners, time clocks, and operators who need a fast, constrained interface, not a full ERP screen. Extension work here is as much about the data collection surface as it is about the underlying production DACs.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p>Labor and time transactions against a production operation typically write to an operation transaction DAC alongside <code>AMProdOper</code>, often through a dedicated shop floor time/clock screen distinct from the full production order entry screen — designed to be used at a shared terminal or handheld device rather than a desk. Material consumption at the shop floor level ties back to <code>AMMTran</code> and, if backflushing is configured, may not require a manual entry at all.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>Shop floor customizations are frequently about the data capture interface: adding a barcode-scannable field, simplifying the screen to fewer required inputs for a specific operation type, or adding a scrap/rework quantity capture that the stock clock screen doesn't separate out clearly. These are usually graph extensions on the shop floor time entry graph plus layout changes, rather than changes to the underlying production DACs themselves.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Barcode input needs validation the same as any manual entry</strong>
+  <p>A barcode scan is just a fast way to populate a field — it doesn't validate itself. A customization that trusts scanned input without the same field-level validation a manual entry would get (valid operation ID, valid employee ID, item still open on the order) will happily record a scrap transaction against a closed order or a mis-scanned item, and it'll do it fast, which is worse than a slow, correct mistake.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the shop is.</p>
+
+<h2 id="a-realistic-scenario-scrap-and-rework-capture">A realistic scenario: scrap and rework capture</h2>
+<p>A frequent shop floor customization: the stock clock-in/clock-out screen tracks good quantity completed but doesn't cleanly separate scrap from rework, and the client needs both tracked distinctly for yield reporting.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of shop in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production shop looks different from development shop. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaShopExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · SHOP FLOOR ENTRY EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ShopFloorEntry_ScrapRework_Extension : PXGraphExtension&lt;ShopFloorTimeEntry&gt;
 {
-    [PXOverride]
-    public virtual void Shop(Acumatica doc)
+    #region AMProdOperExt
+    public class AMProdOperExt : PXCacheExtension&lt;AMProdOper&gt;
     {
-        // Custom shop logic for acumatica shop floor
-        if (doc?.Shop == null) return;
-        Base.Shop(doc);
+        [PXDBQuantity]
+        [PXUIField(DisplayName = "Scrap Qty")]
+        public decimal? ScrapQty { get; set; }
+        public abstract class scrapQty : PX.Data.BQL.BqlDecimal.Field&lt;scrapQty&gt; { }
+
+        [PXDBQuantity]
+        [PXUIField(DisplayName = "Rework Qty")]
+        public decimal? ReworkQty { get; set; }
+        public abstract class reworkQty : PX.Data.BQL.BqlDecimal.Field&lt;reworkQty&gt; { }
+    }
+    #endregion
+
+    protected virtual void AMProdOper_RowPersisting(PXCache sender, PXRowPersistingEventArgs e)
+    {
+        var oper = (AMProdOper)e.Row;
+        var ext = sender.GetExtension&lt;AMProdOperExt&gt;(oper);
+        decimal scrap = ext?.ScrapQty ?? 0;
+        decimal rework = ext?.ReworkQty ?? 0;
+
+        if (scrap &lt; 0 || rework &lt; 0)
+        {
+            sender.RaiseExceptionHandling&lt;AMProdOper.completeQty&gt;(oper, oper.CompleteQty,
+                new PXSetPropertyException("Scrap and rework quantities cannot be negative.", PXErrorLevel.Error));
+        }
     }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring shop first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with shop when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>As with the earlier manufacturing post, exact DAC and graph names for shop floor entry vary meaningfully across Acumatica versions and manufacturing edition history — this sketches the pattern (extend the operation record, validate before persisting, keep scrap and rework distinguishable) rather than a guaranteed drop-in against any specific version.</p>
+
+<h2 id="terminal-and-kiosk-mode-considerations">Terminal and kiosk-mode considerations</h2>
+<p>Shop floor screens are frequently run in a kiosk or shared-terminal mode where the logged-in user isn't necessarily the person performing the transaction — if a customization needs to attribute a transaction to a specific operator rather than the terminal's login, that has to be captured explicitly (badge scan, PIN entry) as part of the transaction, not inferred from session identity.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test on the actual device or terminal configuration used on the floor, not just a desktop browser — barcode scanner input often behaves like fast keyboard entry with a trailing character (like Enter) that can interact unexpectedly with grid navigation or field validation timing that doesn't show up when typing manually.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica shop floor — extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Shop floor extensions live where operational speed and data integrity are in tension — validate scanned input as rigorously as manual input, capture operator identity explicitly in shared-terminal setups, and test on the real hardware before trusting a customization that only ran clean on a developer's desktop browser.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-mobile-app-customization/">Acumatica Mobile App Customization</a></li>
+      <li><a href="/blog/acumatica-time-entry-customisation/">Acumatica Time Entry — Customisation Patterns</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

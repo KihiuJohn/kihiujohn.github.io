@@ -93,107 +93,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Acumatica implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Clients ask me to build an "audit trail GI" more often than they ask for almost anything else in the reporting space, and the request usually conflates two very different things: a GI that <em>shows</em> Acumatica's built-in audit history, and a GI that functions as an audit log for the GI system itself — who changed a customer-facing inquiry and when. Both are legitimate; they use completely different data.</p>
+
+<h2 id="surfacing-platform-audit-history">Surfacing Acumatica's own change history</h2>
+<p>Field-level auditing, when enabled on a DAC via the Audit History screen (SM202020), writes to <code>PXAudit</code>-backed tables that you can query in a GI just like any other data source. The relevant tables are <code>Audit</code> (the change batch — user, screen, timestamp) joined to <code>AuditDetail</code> or similar structures depending on version, which hold field-by-field old/new values serialized. In practice, building a readable GI over this is finicky because the detail values are often stored generically rather than as typed columns, so a straight GI join gives you technical field names, not business labels.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAuditExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Audit(Acumatica doc)
-    {
-        // Custom audit logic for acumatica audit trail
-        if (doc?.Audit == null) return;
-        Base.Audit(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">GI RELATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Primary table:  Audit
+Join:           InnerJoin AuditDetail On AuditDetail.AuditID = Audit.AuditID
+Condition:      Audit.TableName Equals 'ARInvoice'
+Sort:           Audit.LogDate Descending</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on acumatica gi audit trail — who ran what when, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<p>For anything customer- or manager-facing, I do not expose the raw audit tables directly. I build a small graph action or a scheduled job that reads audit records for the tables that matter (customer credit limit changes, GL account edits) and writes them into a purpose-built table with human labels, then GI over that. It is more work up front, but the raw audit feed is unreadable to anyone outside engineering.</p>
+
+<h2 id="auditing-the-gis-themselves">Who changed the Generic Inquiry — not the data</h2>
+<p>The second meaning — tracking edits to GI definitions — is not something the GI Designer screen exposes at all. GI definitions live as customization metadata (<code>SiteMap</code>, <code>PXObject</code>/schema tables depending on build), and casual edits made directly in a live GI designer session are not versioned by default. This is the gap that causes the "who changed the sales GI and broke the dashboard" fire drill.</p>
+
+<div class="callout-warn callout">
+  <strong>Direct GI edits are not source-controlled by default</strong>
+  <p>A GI edited live in SM208000 outside a customization project changes immediately and leaves no diff, no approval step, and no easy rollback. The only real audit trail for GI definitions is discipline: always export/edit GIs inside a customization project, keep that project under source control, and treat the published GI as a deployment artifact, not a thing anyone free-edits in production.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the audit is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of audit in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-audit-edge-cases-i-have-shipped">The audit edge cases I have shipped</h2>
-<p>Production audit looks different from development audit. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAuditExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Audit(Acumatica doc)
-    {
-        // Custom audit logic for acumatica audit trail
-        if (doc?.Audit == null) return;
-        Base.Audit(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring audit first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with audit when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Practically, I set this up two ways depending on client maturity. For teams with a CI pipeline, GI definitions ship as part of the customization package, and <code>git log</code> on the exported package XML is the audit trail — genuinely complete, with author and timestamp from source control. For smaller clients without that discipline, I add a lightweight convention: every GI's Description field carries a one-line changelog ("2026-06-02 JK: added branch filter"), which is crude but beats nothing and takes ten seconds to maintain.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi audit trail — who ran what when. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>"Audit trail" GIs split into surfacing Acumatica's built-in field auditing (query <code>Audit</code>/<code>AuditDetail</code>, but expect to need a translation layer for readability) and tracking who changed the GI definitions themselves, which the platform does not audit natively — that has to come from disciplined customization-project source control, not a GI query.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
+      <li><a href="/blog/acumatica-gi-versioned-templates/">Acumatica GI Versioned Templates</a></li>
       <li><a href="/blog/acumatica-gi-row-level-security-patterns/">Acumatica GI Row-Level Security — Patterns That Work</a></li>
-      <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI Realtime vs Snapshot</a></li>
+      <li><a href="/blog/acumatica-business-events-monitoring/">Acumatica Business Events Monitoring</a></li>
+      <li><a href="/blog/acumatica-gi-cross-tenant-patterns/">Acumatica GI Cross-Tenant Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

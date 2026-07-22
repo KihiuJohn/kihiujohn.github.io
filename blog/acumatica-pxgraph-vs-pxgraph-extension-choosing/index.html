@@ -93,107 +93,77 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Do I extend the existing graph or write a new one?" comes up on almost every scoping call, and it's a more consequential decision than it first looks — get it wrong and you either end up fighting an unrelated screen's existing behavior, or you duplicate a pile of logic Acumatica already gives you for free. Here's the decision framework I actually use, with the reasoning behind each branch rather than just a rule of thumb.</p>
+
+<h2 id="the-core-question">The question underneath the question</h2>
+<p>Every version of this decision reduces to one thing: does the requirement modify behavior on a screen/workflow that should continue existing as Acumatica shipped it, or does it need a genuinely new workflow that happens to reuse some existing data? The first is a <code>PXGraphExtension&lt;T&gt;</code>. The second is a new <code>PXGraph</code>, possibly reusing existing DACs and even existing graph's data views by composition, but with its own identity, its own screen, its own lifecycle.</p>
+
+<h2 id="extend-when">Reach for PXGraphExtension when...</h2>
+<ul>
+<li><strong>The base screen's overall purpose is unchanged.</strong> Adding approval logic to Sales Order Entry — it's still Sales Order Entry, just with an extra rule.</li>
+<li><strong>You need to react to or block existing events</strong> — <code>RowPersisting</code> validation, <code>FieldUpdated</code> cascades, additional actions alongside the base screen's existing ones.</li>
+<li><strong>Upgrade safety matters more than flexibility</strong> — extensions ride along with base graph improvements automatically; a duplicated graph does not inherit fixes Acumatica ships to the original.</li>
+<li><strong>The client's users already know the screen</strong> and the requirement is additive, not a different workflow — no retraining, no new sitemap entry, no navigation change.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PxgraphPxgraphextensionExt : PXGraphExtension<PxgraphEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Right call: adding a rule to an existing, still-relevant screen
+public class SOOrderEntry_CreditCheck : PXGraphExtension&lt;SOOrderEntry&gt;
 {
-    [PXOverride]
-    public virtual void Pxgraphextension(Pxgraph doc)
-    {
-        // Custom pxgraphextension logic for pxgraph pxgraphextension choosing
-        if (doc?.Pxgraphextension == null) return;
-        Base.Pxgraphextension(doc);
-    }
+    public static bool IsActive() =&gt; true;
+    protected virtual void _(Events.RowPersisting&lt;SOOrder&gt; e) { /* ... */ }
 }</code></pre>
 </div>
-<h2 id="pxgraph-implementation-walkthrough">Pxgraph implementation walkthrough</h2>
-<p>In the work I have done on pxgraph vs pxgraphextension — choosing the right tool, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>When the work moves from design to production, the questions change. The pxgraph is not the question; the failure mode of the pxgraphextension is.</p>
+
+<h2 id="subclass-when">Reach for a new PXGraph when...</h2>
+<ul>
+<li><strong>The workflow is genuinely different</strong>, even if the underlying data overlaps heavily — a specialized "Bulk Price Override" screen that touches <code>SOOrder</code> data but has a completely different UI shape, action set, and use pattern than Sales Order Entry itself.</li>
+<li><strong>You need a distinct screen identity</strong> — its own sitemap entry, its own access rights entry, its own mobile/API surface — because the requirement is "give this specific role a purpose-built tool," not "change how everyone uses the existing screen."</li>
+<li><strong>The base graph's existing behavior would actively get in the way</strong> — dozens of base event handlers firing for a workflow that doesn't need most of them, adding overhead and risk of unintended interactions for functionality you don't want.</li>
+<li><strong>You're building something Acumatica has no equivalent screen for at all</strong> — the straightforward case, and usually the easiest of the four to recognize.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for pxgraph
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-pxgraph">Performance and observability for pxgraph</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The performance of pxgraphextension in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Production pxgraphextension looks different from development pxgraphextension. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PxgraphPxgraphextensionExt : PXGraphExtension<PxgraphEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Right call: a purpose-built bulk tool, not a modification
+// of Sales Order Entry's own behavior
+public class BulkPriceOverrideEntry : PXGraph&lt;BulkPriceOverrideEntry&gt;
 {
-    [PXOverride]
-    public virtual void Pxgraphextension(Pxgraph doc)
-    {
-        // Custom pxgraphextension logic for pxgraph pxgraphextension choosing
-        if (doc?.Pxgraphextension == null) return;
-        Base.Pxgraphextension(doc);
-    }
+    public PXSelect&lt;SOOrder,
+        Where&lt;SOOrder.status, Equal&lt;SOOrderStatus.open&gt;&gt;&gt; CandidateOrders;
+    // its own action set, its own screen, its own sitemap entry
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pxgraphextension first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pxgraph on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pxgraphextension when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="composition-not-duplication">A new graph doesn't mean duplicating logic — reuse via composition or shared methods</h2>
+<p>Choosing a new graph doesn't mean re-writing validation logic the base graph already has. Acumatica graphs can instantiate and delegate to other graphs (<code>PXGraph.CreateInstance&lt;T&gt;()</code>), and shared business logic is often better factored into a plain static or instance helper class both graphs call, rather than duplicated. The new-graph decision is about screen/workflow identity, not a license to copy-paste validation rules that already exist elsewhere.</p>
+
+<div class="callout-warn callout">
+  <strong>The anti-pattern I actually see most often: extending an unrelated screen because it's "close enough"</strong>
+  <p>The mistake I catch most in code review isn't picking a new graph when an extension would do — it's the opposite: cramming a genuinely different workflow into an extension of an existing graph because it saves the work of setting up a new screen. The result is a screen that behaves inconsistently depending on entry point, with event handlers that only make sense for one of the two use cases silently firing for both. If you're writing <code>if (isSpecialWorkflow) { ... } else { ... }</code> branches inside a graph extension's event handlers, that's usually a sign the special workflow wanted to be its own graph from the start.</p>
+</div>
+
+<h2 id="a-quick-test">A quick test that resolves most ambiguous cases</h2>
+<p>Ask: "if I described this new workflow to an end user in one sentence, would they say it's the same screen with an extra button, or a different tool"? If it's "the same screen, one more thing it does," extend. If it's "a different tool that happens to touch the same data," write a new graph. This framing catches the cases that feel technically ambiguous but are actually clear once you think about it from the user's mental model rather than the code's.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pxgraph vs pxgraphextension — choosing the right tool. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>PXGraphExtension for modifying behavior on a screen that should keep being that screen; a new PXGraph for a genuinely distinct workflow, even one built heavily on the same underlying data. Reuse logic through composition and shared helpers regardless of which you choose — the decision is about screen and workflow identity, not a reason to duplicate validation rules. And watch for the more common real-world mistake: forcing a distinct workflow into an existing graph's extension because it's the path of least short-term effort.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code-Side Patterns</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-modern-ui-screen-from-scratch/">Building an Acumatica Modern UI Screen From Scratch</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

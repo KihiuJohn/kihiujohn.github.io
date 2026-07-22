@@ -92,107 +92,80 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Half the polish in a good Acumatica document layout is things <em>not</em> printing: the "CREDIT MEMO" banner that only appears on credit memos, the discount column that vanishes when no line has a discount, the second address block suppressed when billing and shipping match. All of this is conditional visibility, and the Report Designer gives you three distinct mechanisms for it — <code>VisibleExpr</code> on controls, visibility on whole sections, and conditional styles. Knowing which one to use where is most of the craft.</p>
+
+<h2 id="visibleexpr-basics">VisibleExpr on controls</h2>
+<p>Every control — TextBox, PictureBox, Line, Panel — has a <code>VisibleExpr</code> property that takes an expression returning true or false. The expression language is the same one used everywhere in the designer: fields in square brackets, parameters with <code>@</code>, VB-flavoured functions.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">VISIBLEEXPR EXAMPLES</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- show a PAID stamp only when balance is zero on a released doc
+=[ARInvoice.Released] = True And [ARInvoice.CuryDocBal] = 0
+
+-- print the discount column only when the parameter asks for it
+=[@ShowDiscounts] = True
+
+-- suppress a label when the field is empty
+=IsNull([SOOrder.CustomerOrderNbr], '') &lt;&gt; ''
+
+-- credit memo banner
+=[ARInvoice.DocType] = 'CRM'</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on acumatica report designer conditional visibility, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<p>Two habits that save debugging time. First, be explicit about null: <code>[Field] &lt;&gt; ''</code> is false-ish when the field is null in ways that surprise people, so wrap with <code>IsNull(...)</code>. Second, remember string comparisons against DAC values use the <em>stored</em> value, not the UI label — a document type is <code>'CRM'</code>, not <code>'Credit Memo'</code>. Check the DAC's list attribute values when in doubt.</p>
+
+<h2 id="hiding-vs-collapsing">Hidden is not collapsed: the whitespace problem</h2>
+<p>Setting a control invisible leaves its space behind — you get a gap where the discount column was. Whether that is acceptable depends on the layout:</p>
+<ul>
+<li>For <strong>stacked blocks</strong> (address lines, remittance advice), put the controls in their own <em>section</em> and hide the section. A hidden section collapses vertically; hidden controls inside a visible section do not.</li>
+<li>For <strong>columns</strong>, the band model has no reflow — hiding a column's TextBoxes leaves a blank stripe. If a column must truly come and go, the honest options are two report variants, or laying out the "optional" column at the right edge where its absence reads as margin rather than a hole.</li>
+<li>For <strong>single lines within a block</strong>, a one-line section per optional line is heavy-handed but works; I use it for things like "VAT Exemption Reason" that print on maybe 5% of invoices.</li>
+</ul>
+
+<h2 id="section-visibility">Section-level visibility and group tricks</h2>
+<p>Sections (page header, group headers/footers, details) accept a <code>VisibleExpr</code> too, and this is where the structural conditional logic lives. Patterns I use constantly:</p>
+<ul>
+<li><strong>Suppress an empty group.</strong> Group footer with <code>=Count([SOLine.LineNbr]) &gt; 0</code> — though usually the better fix is filtering the rows in the schema.</li>
+<li><strong>First-page-only blocks.</strong> Terms and conditions on page one only: <code>=[PageOf] = 1</code> style expressions vary by build; the reliable pattern is a group on a constant with its header's <em>Print On</em> behaviour set appropriately, or placing the block in the report header rather than the page header.</li>
+<li><strong>Different layouts per document type.</strong> One report serving invoices and credit memos: duplicate the sensitive sections, give each a <code>VisibleExpr</code> on <code>DocType</code>. Past two variants this becomes unmaintainable — split into two <code>.rpx</code> files and point the workflow's print actions at each.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>Visibility is not security</strong>
+  <p>A control hidden by expression is still populated from the dataset, and the value still exists in the rendered file's data in some export formats. Never use <code>VisibleExpr</code> to hide cost or margin from a class of users — that is a job for separate reports guarded by access rights, or for removing the field from the schema entirely.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the report is.</p>
+
+<h2 id="conditional-styles">Conditional formatting via style expressions</h2>
+<p>Often the requirement is not hide/show but emphasise: overdue balances in red, negative quantities bolded. Controls expose style properties as expressions — <code>ForeColor</code>, <code>Font.Bold</code> and friends can be driven by data:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">STYLE EXPRESSIONS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>ForeColor:  =IIf([ARInvoice.DocDate] &lt; [@AsOfDate] And [ARInvoice.CuryDocBal] &gt; 0,
+                 'Red', 'Black')
+Font.Bold:  =IIf([SOLine.OrderQty] &lt; 0, True, False)</code></pre>
 </div>
-<h2 id="the-report-edge-cases-i-have-shipped">The report edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-report-in-production">How to debug report in production</h2>
-<p>The performance of report in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>Production report looks different from development report. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring report first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with report when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Keep these boring. Reports print on monochrome laser printers more often than designers expect; pair colour with a text cue (an asterisk, "OVERDUE") so the information survives greyscale.</p>
+
+<h2 id="testing">Testing the matrix</h2>
+<p>Conditional visibility multiplies your test cases: document type × paid state × parameter flags. My routine before shipping a document layout is a small grid of real documents — a standard invoice, a credit memo, a zero-balance invoice, one with every optional field empty, one with all of them populated — printed to PDF and eyeballed side by side. It takes twenty minutes and it has caught an embarrassing "PAID" stamp on an open invoice (null balance treated as zero — the <code>IsNull</code> habit again) before the client did.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica report designer conditional visibility. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Use <code>VisibleExpr</code> on controls for stamps and labels, section visibility for anything that must collapse, and style expressions when the answer is emphasis rather than absence. Handle nulls explicitly, compare against stored values not labels, split the report when type-based variants exceed two, and never mistake visibility for security. The result is one layout that quietly does the right thing on every document type — which is exactly what nobody will ever compliment you on, because good conditional visibility is invisible.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-formula-evaluation-context/">Acumatica Formula Evaluation Context</a></li>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
-      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-report-designer-guide/">Acumatica Report Designer Guide</a></li>
+      <li><a href="/blog/acumatica-subreports-hierarchical-data/">Acumatica Subreports for Hierarchical Data</a></li>
+      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting with Style Templates</a></li>
+      <li><a href="/blog/acumatica-report-parameters-vs-prompts/">Acumatica Report Parameters vs Prompts</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

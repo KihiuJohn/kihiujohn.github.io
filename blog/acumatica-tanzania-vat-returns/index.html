@@ -93,82 +93,26 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The fiscalisation landscape in 2026 is more capable than it was in 2020. Modern APIs, signed receipts, real-time validation. this is one of the parts of the modern stack. This article is the part.</p>
-<h2 id="why-acumatica-requires-a-vault">Why acumatica requires a vault</h2>
-<p>Why acumatica requires a vault is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<h2 id="certificate-lifecycle-for-tanzania">Certificate lifecycle for tanzania</h2>
-<p>In the work I have done on acumatica tanzania vat returns — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="clock-sync-and-acumatica">Clock sync and acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the tanzania is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="the-audit-trail-for-tanzania">The audit trail for tanzania</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Filing the VAT 3 return in Tanzania is straightforward on paper — output VAT less input VAT, paid or carried forward — but getting the numbers Acumatica reports to actually match what TRA expects takes more than turning on a standard VAT tax rate. Between EFD/VFD receipting requirements, withholding VAT agents, and restrictions on what input VAT can be claimed, most of the real work is in how Tax Zones and Tax Categories are structured before the first invoice is ever posted.</p>
+
+<h2 id="the-vat-3-return-and-rate-structure">The VAT 3 return and rate structure</h2>
+<p>Tanzania's standard VAT rate is 18%, applied to most goods and services. Alongside it sit zero-rated supplies (exports and a defined list of goods, taxed at 0% but still VAT-registered, so input VAT is still recoverable) and exempt supplies (no output VAT charged, and input VAT tied to exempt supplies generally isn't recoverable). The VAT 3 return separates these categories, so an Acumatica Tax Zone and Tax Category structure that lumps zero-rated and exempt sales into the same non-taxable bucket will produce a return that needs manual correction every period. Set up distinct Tax Categories for standard-rated, zero-rated, and exempt items so the tax reports can be filtered by category directly.</p>
+
+<h2 id="efd-vfd-and-return-reconciliation">EFD/VFD and return reconciliation</h2>
+<p>TRA requires fiscal receipting through EFDs, with larger or more complex taxpayers increasingly moved to VFD (Virtual Fiscal Device), which fiscalises electronically rather than through a physical device. Either way, every VAT-bearing sale needs a fiscal receipt number and, for VFD, a signed electronic record TRA can verify. The reconciliation risk is that the EFD/VFD system and Acumatica's own tax reports can drift apart if invoices are voided, credited, or reissued in Acumatica without an equivalent fiscal reversal on the device side. Before filing, reconcile the EFD/VFD's Z-report totals for the period against Acumatica's tax summary by Tax Category — differences almost always trace back to a credit memo or reissued invoice that didn't get mirrored to the fiscal device.</p>
 <div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
+  <strong>Don't file from memory-entered totals</strong>
+  <p>If the integration between Acumatica and the EFD/VFD ever goes down and someone reissues receipts manually, that gap has to be reconciled by hand before the VAT 3 is filed. Build the habit of comparing Acumatica's output VAT total to the EFD/VFD Z-report total every period, not just at year-end audit time.</p>
 </div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="what-acumatica-tanzania-vat-returns-a-complete-guide-is-for">What Acumatica Tanzania VAT Returns — A Complete Guide is for</h2>
-<p>The performance of tanzania in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>Production tanzania looks different from development tanzania. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tanzania first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tanzania when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="withholding-vat-and-input-vat-restrictions">Withholding VAT agents and input VAT restrictions</h2>
+<p>Tanzania designates certain entities — largely government bodies and some large corporates — as VAT withholding agents, required to withhold a portion of VAT on payments to suppliers and remit it directly to TRA rather than paying the supplier the full VAT amount. If your customer base includes withholding agents, AR invoices to them need a mechanism to record the withheld portion separately, because the amount actually received won't match the invoice total and the difference isn't bad debt — it's VAT already remitted on the customer's behalf. On the input side, not all VAT paid is recoverable: VAT on certain categories (passenger vehicles, entertainment, and a few other restricted categories) is disallowed regardless of business purpose. Tag purchases against those categories with a Tax Category that excludes them from the input VAT claim, otherwise the return will overstate recoverable input tax and invite a query from TRA.</p>
+
+<h2 id="common-pitfalls">Common pitfalls</h2>
+<p>The recurring issues in practice: mixing zero-rated and exempt supplies under one Tax Category so the VAT 3's separate reporting lines can't be populated directly from Acumatica; claiming input VAT on restricted categories because the purchase Tax Category wasn't set up to block it; and treating withheld VAT from a withholding agent customer as a payment shortfall instead of a VAT remittance, which throws off both the AR aging and the VAT reconciliation. All three are configuration issues, not filing issues — they get baked in at Tax Zone/Category setup and only surface months later when the numbers don't tie out.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica tanzania vat returns — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A clean Tanzania VAT 3 filing out of Acumatica comes down to Tax Category granularity — standard, zero-rated, and exempt kept distinct — disciplined reconciliation against the EFD/VFD Z-report before each filing, and explicit handling for withholding VAT agents and restricted input VAT categories rather than leaving those to be caught at filing time. Get the Tax Zone structure right once and the monthly return becomes a report you run, not a spreadsheet you rebuild.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +123,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-uganda-ura-efris-integration/">Acumatica Uganda URA EFRIS Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

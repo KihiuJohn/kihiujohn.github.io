@@ -93,107 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Developers who come to Acumatica Mobile expecting a native mobile codebase — Swift, Kotlin, React Native project files somewhere — are always a little surprised by what they actually find: one generic mobile client app, downloadable from the app stores, that renders whatever screens your Acumatica instance exposes to it through a contract described in Swagger/OpenAPI. There's no per-client app to build or ship. The "app" is a rendering engine; your instance is the content.</p>
+
+<h2 id="how-mobile-actually-connects">The mobile app is a Swagger-driven client, not a bespoke build</h2>
+<p>When a user adds an Acumatica instance to the mobile app (by URL, same as logging into the browser), the app requests the instance's mobile API definition — a Swagger/OpenAPI document describing every mobile-enabled screen's fields, containers, and available actions — and renders the UI from that contract at runtime. This is the same underlying idea as the platform's contract-based REST API, reused for mobile rendering: the client doesn't hardcode what a Sales Order screen looks like, it asks the server and draws whatever comes back.</p>
+<p>The practical consequence: enabling a screen for mobile is a server-side configuration and customization task, not a client development task. You are never writing Swift or Kotlin. You are shaping what the server's mobile contract exposes, and the generic client renders it.</p>
+
+<h2 id="msdl">MSDL: patching the mobile screen definition</h2>
+<p>The Mobile Screen Definition Language (MSDL) is XML that patches a base screen's mobile container definitions — deciding which fields appear, in what containers (header, details grid, summary), with what input types, and which actions (like barcode scanning, discussed separately) attach to which fields:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMobileExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Mobile(Acumatica doc)
-    {
-        // Custom mobile logic for acumatica mobile framework
-        if (doc?.Mobile == null) return;
-        Base.Mobile(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">XML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;mobile&gt;
+  &lt;screen key="SO301000" primaryView="Document"&gt;
+    &lt;container name="Header"&gt;
+      &lt;field name="OrderNbr" /&gt;
+      &lt;field name="CustomerID" /&gt;
+      &lt;field name="OrderTotal" readOnly="true" /&gt;
+    &lt;/container&gt;
+    &lt;container name="Details"&gt;
+      &lt;field name="InventoryID" /&gt;
+      &lt;field name="OrderQty" /&gt;
+      &lt;field name="UnitPrice" /&gt;
+    &lt;/container&gt;
+  &lt;/screen&gt;
+&lt;/mobile&gt;
+</code></pre>
 </div>
-<h2 id="why-acumatica-mobile-framework-swagger-and-the-mf-matters-in-production">Why Acumatica Mobile Framework — Swagger and the MF matters in production</h2>
-<p>In the work I have done on acumatica mobile framework — swagger and the mf, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the mobile is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>This XML deploys inside a customization project, same as everything else — there is no separate "mobile deployment" pipeline. If you're building mobile support for a custom screen you've already extended for classic or Modern UI, the DAC and graph work is entirely reused; MSDL is purely presentation for the mobile renderer, the same way a classic ASPX screen definition is presentation for the browser.</p>
+
+<h2 id="not-every-screen-should-be-mobile">Not every screen belongs on mobile, and the framework doesn't stop you from trying anyway</h2>
+<p>The generic-renderer model means technically almost any screen can get an MSDL patch and appear on mobile. Whether it should is a UX judgment the framework won't make for you. Screens with dense grids, many simultaneous conditional field states, or workflows requiring side-by-side comparison of many rows translate poorly to a phone-sized viewport no matter how carefully you patch the container definitions. The screens that succeed on mobile in my experience share a shape: single-record-at-a-time entry (a receipt, an expense claim, an inventory count line), a short field list, and a workflow that genuinely benefits from being done standing in a warehouse or on a job site rather than at a desk. Forcing a dense financial entry screen onto mobile because a client asked for "everything on mobile" produces something technically functional and practically unused.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Test the Swagger contract itself when a mobile screen misbehaves</strong>
+  <p>Because the client renders from a server-generated Swagger document, a surprising number of "the mobile app is broken" tickets are actually contract issues — a field type mismatch, a required field the MSDL patch didn't account for, an action that exists in the graph but wasn't exposed in the mobile container. Before assuming a device or app-version bug, check the instance's mobile API definition (accessible via the standard OpenAPI endpoint pattern) to confirm the contract actually describes what you expect. Debugging the contract is almost always faster than debugging the device.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of mobile in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production mobile looks different from development mobile. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMobileExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Mobile(Acumatica doc)
-    {
-        // Custom mobile logic for acumatica mobile framework
-        if (doc?.Mobile == null) return;
-        Base.Mobile(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mobile first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mobile when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="offline-and-actions">Actions and offline both build on this same contract</h2>
+<p>Custom <code>PXAction</code> buttons you've added via a graph extension can be exposed on mobile through the same MSDL container patching, appearing as buttons in the mobile UI and invoking your existing server-side action logic unchanged — you are not reimplementing business logic for mobile, only deciding whether and where it's visible. Offline mode (its own deep topic, given the real limitations involved) also builds on this same Swagger-described contract: the app caches a subset of the described screens and their data locally, then reconciles against the server contract on reconnect.
+
+<h2 id="versioning">Version alignment matters here too</h2>
+<p>Because the mobile app is a single generic client shared across every Acumatica customer, and it renders from a Swagger contract your specific instance's version produces, mismatches between the mobile app's supported API version and your instance's actual version are a real source of "it worked last week" tickets after either side updates independently. Acumatica maintains compatibility across a reasonable version range, but on any client project running an older instance version, checking the mobile app's stated compatibility range before troubleshooting a rendering problem as a customization bug saves real time.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica mobile framework — swagger and the mf. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica Mobile is not a codebase you build per client — it's a generic renderer consuming a Swagger/OpenAPI contract your instance generates, shaped through MSDL patches inside your ordinary customization projects. Enabling a screen for mobile is configuration and presentation work layered on business logic you likely already wrote for the browser, and most "mobile is broken" debugging starts more productively at the contract than at the device.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-mobile-barcode-scanning/">Acumatica Mobile Barcode Scanning</a></li>
+      <li><a href="/blog/acumatica-mobile-offline-mode/">Acumatica Mobile Offline Mode — What Actually Works</a></li>
       <li><a href="/blog/acumatica-mobile-app-customization/">Acumatica Mobile App Customization</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
-      <li><a href="/blog/acumatica-currencycloud-fx-integration/">Acumatica Currencycloud FX Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-screen-editor-vs-code-editor/">Acumatica Screen Editor vs Code Editor</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

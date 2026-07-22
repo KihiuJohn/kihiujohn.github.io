@@ -93,98 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>A cash flow forecasting agent's job is narrow: pull the right receivables, payables, and recurring transaction data out of the ERP, and turn it into a projection with stated assumptions — not a magic number. The failure mode to design against is a confident-sounding forecast built on a hallucinated growth rate or a misread aging bucket. The fix isn't a smarter prompt; it's forcing every number in the output to trace back to a tool call result.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on ai agent for cash flow forecasting, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the cash is.</p>
+<h2 id="grounding-every-number">Grounding every number in a tool call</h2>
+<p>The agent should never generate a dollar figure from its own reasoning. Instead, it calls tools that query AR aging, AP aging, recurring billing schedules, and historical collection rates directly from the ERP database, and the LLM's role is limited to combining those numbers under stated assumptions ("assume 85% of current AR collects within terms, based on the trailing 90-day collection rate"). If a number in the final report can't be traced to a specific tool call in the transcript, that's a bug, not a stylistic quirk — treat it as a hallucination and reject the output.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-cash">Prompt patterns that work for cash</h2>
-<p>The performance of cash in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>Production cash looks different from development cash. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · TOOL DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def get_ar_aging_buckets(as_of_date: str) -> dict:
+    """Returns AR balances bucketed by days overdue,
+    pulled directly from the AR ledger. No estimation."""
+    return {
+        "current": 184200.00,
+        "1_30_days": 42100.00,
+        "31_60_days": 11800.00,
+        "60_plus_days": 6400.00,
+        "as_of": as_of_date,
+    }
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def get_recurring_payables(window_days: int) -> list[dict]:
+    """Scheduled AP items due within window_days,
+    from the payables schedule — not projected."""
+    ...</code></pre>
 </div>
+
+<h2 id="separating-known-from-projected">Separating known cash from projected cash</h2>
+<p>A forecast mixes two very different kinds of numbers: contractually known amounts (an invoice due on a specific date, a payroll run on the 15th) and projected amounts (expected new sales, expected collection rate on overdue AR). Collapsing these into a single line total is where trust breaks down — a finance controller needs to see which parts of the number are facts pulled from the ledger and which parts are the model's estimate. Structure the output as two explicit sections, and require the agent to label every projected figure with the assumption behind it.</p>
+<div class="callout-warn">
+  <strong>Never let the model round or "helpfully" adjust ledger figures</strong>
+  <p>LLMs will sometimes round a $42,133.17 balance to "about $42k" or subtly adjust a number to make prose read better. For financial output, pass ledger values through as exact strings the model must echo, not numbers it re-generates. Diff the final output against the raw tool results before it reaches a human.</p>
+</div>
+
+<h2 id="the-approval-gate">Human approval before the forecast ships</h2>
+<p>Cash flow forecasts inform real decisions — whether to draw on a credit line, delay a purchase, or chase collections harder. That makes this a human-in-the-loop workflow, not a fully autonomous one. The agent produces a draft forecast with its assumptions listed inline, a controller reviews and can override any assumption (e.g. "assume the Acme Corp invoice slips another 30 days" based on information the agent doesn't have), and only the reviewed version gets distributed. Log every override — it's a strong signal for which assumptions the model gets systematically wrong.</p>
+
+<h2 id="handling-the-context-budget">Keeping the transaction data within budget</h2>
+<p>A mid-size company can have thousands of open AR and AP lines. Dumping all of them into the prompt burns tokens and pushes older, less relevant context out of the model's effective attention. The tools should pre-aggregate at the database layer — return bucketed totals and the handful of largest individual line items, not every row — and let the agent request drill-down detail only for the buckets that materially affect the forecast. This keeps a 13-week rolling forecast comfortably inside a normal context window even for a company with a large AR book.</p>
+
+<h2 id="evaluating-forecast-quality">Evaluating forecast accuracy over time</h2>
+<p>Run the agent against historical periods where the actual cash position is already known, and score its 4-week and 13-week projections against what actually happened. Track error separately for the "known" line items (should be near zero — these are just data retrieval) versus the "projected" line items (where error is expected and the interesting metric is whether it's improving). A forecast that's consistently overconfident — narrow ranges that miss the actual outcome — is more dangerous than one that's honestly wide, because it invites decisions made on false precision.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cash first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cash when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Category</th><th>Source</th><th>Agent's role</th></tr>
+  <tr><td>Contractually due AP/AR</td><td>Ledger tool call, exact figures</td><td>Aggregate and display, never alter</td></tr>
+  <tr><td>Projected collections</td><td>Historical collection rate + aging</td><td>Apply stated assumption, flag confidence</td></tr>
+  <tr><td>Projected new sales</td><td>Pipeline data or manual input</td><td>Combine under explicit assumption</td></tr>
+  <tr><td>Final report</td><td>Human review</td><td>Approve, override, or reject before distribution</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for cash flow forecasting. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A cash flow forecasting agent earns trust by being boring in the right way: every hard number traces to a ledger query, every soft number carries a visible assumption, and nothing ships without a human sign-off. The value isn't in the model's ability to reason about cash flow in the abstract — it's in the plumbing that keeps its reasoning tethered to what the ERP actually says.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +152,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-aws-bedrock/">AWS Bedrock + Acumatica Integration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

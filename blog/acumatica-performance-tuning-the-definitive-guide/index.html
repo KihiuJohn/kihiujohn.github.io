@@ -94,107 +94,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance tuning
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica performance tuning — the definitive guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-performance-edge-cases-i-have-shipped">The performance edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Every "Acumatica is slow" ticket I have ever picked up turns out to be one of about six root causes wearing different masks. The instance is not slow in the abstract — a specific screen, a specific report, or a specific integration call is slow, and it is slow because of the app tier, the database tier, or the network between them. This post is the map I use before I open Profiler or SQL Server Management Studio: where to look first, and which of the deeper posts in this series covers the fix once you have found the culprit.</p>
+
+<h2 id="three-tiers-one-bottleneck">Three tiers, one bottleneck at a time</h2>
+<p>Acumatica's architecture is a .NET application running under IIS, talking to SQL Server, usually with a load balancer in front of more than one app server in production deployments. Performance work means figuring out which of those three tiers is actually saturated, because tuning the wrong one wastes a day and changes nothing:</p>
+<ul>
+<li><strong>App tier (IIS / w3wp.exe)</strong> — CPU-bound business logic, PXCache churn, garbage collection pressure, thread pool starvation under load.</li>
+<li><strong>Database tier (SQL Server)</strong> — missing indexes, blocking, parameter sniffing, disk I/O on the data or log files.</li>
+<li><strong>Network / infrastructure</strong> — latency between app server and SQL Server, load balancer session affinity, IIS compression settings, connection pool exhaustion.</li>
+</ul>
+<p>Ninety percent of the time the symptom (a slow screen) and the cause (a missing index) live in different tiers, which is exactly why guessing wastes time and measuring does not.</p>
+
+<h2 id="the-first-fifteen-minutes">The first fifteen minutes</h2>
+<p>Before reaching for any tool, I run this sequence on every "it's slow" ticket:</p>
+<ol>
+<li><strong>Reproduce with the Request Profiler</strong> (SM205070). It gives you total request time split against SQL time, per-screen, per-user. If SQL time dominates, you are database-bound. If the gap between SQL time and total time is large, you are app-tier or network bound.</li>
+<li><strong>Check Windows Performance Monitor on the app server</strong> for CPU, available memory, and <code>ASP.NET Applications\Requests Queued</code>. A nonzero queue means the app pool cannot keep up with incoming requests — a capacity problem, not necessarily a code problem.</li>
+<li><strong>Check SQL Server's Activity Monitor or Query Store</strong> for blocking sessions and the top resource-consuming queries in the relevant window.</li>
+</ol>
+<p>That fifteen minutes routes you to one of the deep-dive posts in this series rather than a guess.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Fix one thing at a time</strong>
+  <p>Acumatica performance tuning is not a place for bundling five changes into one deployment window. Add the index, measure. Bump the app pool's queue length, measure. Enable compression, measure. When you change three things at once and the number improves, you do not actually know why — and you will not be able to explain it to the next engineer, including future you.</p>
 </div>
-<h2 id="how-to-debug-performance-in-production">How to debug performance in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of performance in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-performance-tuning-the-definitive-guide-matters-in-production">Why Acumatica Performance Tuning — The Definitive Guide matters in production</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance tuning
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="what-is-and-isnt-in-your-control">What is and is not in your control</h2>
+<p>On SaaS-hosted Acumatica, you do not control IIS settings, SQL Server configuration, or physical infrastructure — your levers are GI/report design, customization code quality, and working with Acumatica support on capacity questions. On private cloud or on-premises deployments, all three tiers are yours to tune, which is both more powerful and more ways to shoot yourself in the foot. Know which situation you are in before promising a client an index change you cannot actually make.</p>
+
+<h2 id="the-series">The rest of this series</h2>
+<p>The posts linked from this one each take one tier or one specific symptom and go deep: CPU profiling on the app server, connection pool sizing, IIS compression and output caching, SQL Server indexing patterns specific to Acumatica's schema, diagnosing a single slow GI or report, and the honest story on things Acumatica does not natively do — sharding the database, or wiring in Redis or Elasticsearch. Start here, measure, then go to the specific post that matches what you found.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance tuning — the definitive guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Performance tuning in Acumatica rewards a boring, disciplined process far more than it rewards expertise in any one tool: reproduce, measure with the Request Profiler and Query Store, isolate the tier, change one variable, remeasure. Everything else in this series is detail underneath that loop.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-perf-connection-pooling/">Acumatica Performance — Connection Pooling</a></li>
-      <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
+      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Slow GI Diagnosis</a></li>
+      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Slow Report Diagnosis</a></li>
+      <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server Indexing for Acumatica</a></li>
       <li><a href="/blog/acumatica-iis-application-pool-tuning/">Acumatica IIS Application Pool Tuning</a></li>
-      <li><a href="/blog/acumatica-perf-database-sharding/">Acumatica Performance — Database Sharding</a></li>
-      <li><a href="/blog/acumatica-perf-iis-compression/">Acumatica Performance — IIS Compression</a></li>
+      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">Acumatica PXCache vs PXSelect — Choosing</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

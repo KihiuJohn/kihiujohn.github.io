@@ -92,107 +92,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="why-acumatica-inventory-adjustment-screen-a-deep-dive-matters-in-production">Why Acumatica Inventory Adjustment Screen — A Deep Dive matters in production</h2>
-<p>Why Acumatica Inventory Adjustment Screen — A Deep Dive matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Inventory Adjustments (IN301000) is the screen that reconciles what the system thinks is on the shelf with what's actually there, and it's one of the few transaction screens where the customization requests are less about workflow and more about cost accuracy. The graph is <code>INAdjustmentEntry</code>; the header/detail pair is <code>INRegister</code>/<code>INTran</code>, the same pair used by receipts, issues, and transfers — <code>INRegister.DocType</code> is what distinguishes an adjustment from every other inventory movement.</p>
+
+<h2 id="what-an-adjustment-actually-does">What an adjustment actually does</h2>
+<p>An adjustment can increase quantity (a positive adjustment, effectively a receipt without a PO), decrease quantity (a negative adjustment, consuming existing cost layers), or move cost without moving quantity (a cost adjustment). Which of these applies is determined by the sign and fields entered on the line, not by a separate document type selector — this is the detail that trips up new users expecting three distinct screens.</p>
+
+<h2 id="key-tabs">Key tabs</h2>
+<ul>
+<li><strong>Details</strong> — the INTran grid: item, warehouse/location, quantity, and (for negative adjustments against FIFO/Specific-cost items) the cost layer being consumed.</li>
+<li><strong>Financial</strong> — the posting class-derived GL accounts for inventory and adjustment/variance, overridable per line if the posting class allows it.</li>
+</ul>
+
+<h2 id="extending-inadjustmententry">Extending INAdjustmentEntry</h2>
+<p>The most common customization is requiring a reason code or approval before a negative adjustment above a value threshold posts — Acumatica ships reason codes as a feature, but enforcing that one is mandatory above a dollar amount, or routing it through an approval map, is custom logic on the graph extension.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class INAdjustmentEntry_Extension : PXGraphExtension&lt;INAdjustmentEntry&gt;
 {
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
+    protected virtual void INTran_RowPersisting(PXCache cache, PXRowPersistingEventArgs e)
     {
-        // Custom inventory logic for acumatica inventory adjustment
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
+        var line = (INTran)e.Row;
+        if (line == null || line.InvtMult != -1) return; // only negative (outbound) lines
+
+        decimal extCost = (line.UnitCost ?? 0m) * (line.Qty ?? 0m);
+        if (extCost &gt;= 5000m &amp;&amp; string.IsNullOrEmpty(line.ReasonCode))
+            throw new PXSetPropertyException("Reason code is required for write-offs over $5,000.");
     }
 }</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica inventory adjustment screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the inventory is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to the Details grid (an internal "adjustment category" separate from reason code, for example) is a straightforward DAC extension on <code>INTran</code>. Because INTran is shared across every inventory document type, scope any custom field's visibility to the Adjustment screen specifically, or it will unexpectedly show up on Receipts and Issues too.</p>
+
+<h2 id="common-use-cases">Common validation and event-handler use cases</h2>
+<p>Beyond reason-code enforcement: defaulting a subaccount segment from the item's product category rather than the posting class default, blocking adjustments to items under active cycle count, and triggering a notification (via a business event or a direct call from the graph extension) when a single adjustment exceeds a value threshold, so finance sees large write-offs before month end rather than during it.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<p>The cost method assigned to an item (FIFO, Average, Specific) determines what a negative adjustment actually consumes, and that method is effectively locked once transactions exist against the item — a customization that assumes Average-cost behavior will misbehave silently on a FIFO item with multiple open cost layers. Adjustments don't require a linked Sales or Purchase document, which means the audit trail for "why was this adjusted" lives entirely in the reason code and description fields — if a customization needs a stronger audit trail, that has to be added explicitly, it isn't implicit in the document type. And negative adjustments on lot/serial-tracked items require selecting which specific lot/serial is being removed; a customization that bulk-imports adjustments without lot/serial detail will fail validation on any tracked item.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Cost adjustments are not quantity adjustments</strong>
+  <p>A pure cost adjustment (revaluing existing stock without changing quantity) uses different fields on the same INTran row than a quantity adjustment. Customizations that generate adjustment lines programmatically need to set the right combination deliberately — mixing the two on one line produces a document that looks valid but posts incorrectly.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of inventory in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory adjustment
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica inventory adjustment screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Inventory Adjustments looks like the simplest inventory screen and is, in practice, the one most sensitive to the item's underlying cost method. Customizations that add friction (reason codes, thresholds, notifications) are welcome and safe; customizations that assume a uniform costing behavior across all items are the ones that come back as a support ticket during the next physical count.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing — FIFO, Average, and Beyond</a></li>
-      <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts — Extensions</a></li>
-      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/acumatica-stock-item-screen-deep-dive/">Acumatica Stock Item Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-receipt-screen-deep-dive/">Acumatica Receipt Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-non-stock-item-screen/">Acumatica Non-Stock Item Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-gl-journal-transaction-screen/">Acumatica GL Journal Transaction Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

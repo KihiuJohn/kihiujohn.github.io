@@ -93,96 +93,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Vertical SaaS metrics that matter is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Cosmetics manufacturers share the chemical industry's lot-genealogy and expiry concerns, but with their own wrinkle: formula versioning tied to regulatory filings (each formula version may need to match an INCI ingredient declaration on file with a regulator), and a much heavier emphasis on shelf-life-driven inventory rotation than most process manufacturers, because a lipstick that expires unsold is a total loss, not a reprocessable input.</p>
+
+<h2 id="expiry-driven-picking">Expiry dates have to drive picking, not just sit as a field</h2>
+<p>Acumatica's lot/serial class supports expiration dates and can enforce FEFO (first-expired-first-out) behavior at issue if the item class and warehouse picking configuration are set up for it — this is native, not custom. The mistake I see on cosmetics implementations is leaving the default lot-selection method at FIFO (first-in-first-out by receipt date) rather than FEFO, which is fine for most goods but wrong for anything with a hard expiry, because a later-received lot can have an earlier expiry than an older one if the vendor's own stock rotation was inconsistent.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CosmeticsExt : PXCacheExtension<Personal>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ITEM CLASS / LOT CLASS SETTING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Lot/Serial Class:  COSM-FEFO
+Lot Numbering:     Automatic, per receipt
+Expiration:        Required (blocks issue of expired lots)
+Issue Method:      FEFO — First Expired, First Out
+                    (not FIFO — receipt order is not expiry order)</code></pre>
 </div>
-<h2 id="what-cosmetics-and-personal-care-manufacturing-vertical-on-acumatica-is-for">What Cosmetics and Personal Care Manufacturing Vertical on Acumatica is for</h2>
-<p>In the work I have done on cosmetics and personal care manufacturing vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<h2 id="formula-versioning-and-inci">Formula versioning tracks the BOM, but INCI declaration is a separate document you must own</h2>
+<p>A cosmetics formula revision — swapping a preservative system, adjusting a fragrance load — is a new BOM revision with an effectivity date, same mechanism covered under chemical manufacturing. What Acumatica does not do is manage the INCI (International Nomenclature of Cosmetic Ingredients) declaration or regulatory filing that must correspond to that formula version for markets that require it. I handle this as a required attachment on the BOM revision (the filed INCI document, PDF, linked via standard Acumatica file attachment) plus a custom "regulatory status" field on the BOM header (Filed / Pending / Not Required) so production cannot release a batch against a formula whose paperwork is not confirmed — a soft workflow gate, not something the platform enforces by itself unless you build the check.</p>
+
+<div class="callout-warn callout">
+  <strong>Batch records for cosmetics are usually a documentation requirement, not just a data requirement</strong>
+  <p>Some markets expect a signed batch production record (who ran it, what lots went in, QC sign-off) as a retrievable document, not just queryable transaction history. Acumatica's production order captures the underlying data natively; generating a formatted, signable batch record document is a Report Designer project, not a default screen. Ask this question explicitly during discovery — clients often assume it exists because the data does.</p>
 </div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>When the work moves from design to production, the questions change. The cosmetics is not the question; the failure mode of the personal is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'cosmetics'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM cosmetics
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The performance of personal in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Production personal looks different from development personal. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CosmeticsExt : PXCacheExtension<Personal>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring personal first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cosmetics on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with personal when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="micro-batch-costing">Small-batch and pilot-run costing distorts standard cost quickly</h2>
+<p>Cosmetics brands frequently run small pilot batches (50–200 units) to test a formula before a full production run, and if those pilot batches post against the same standard-cost item as full-scale runs, one-time setup and testing labor drags the standard cost around unpredictably. I usually isolate pilot/R&D runs into their own non-saleable item variant or a separate production order class so their cost variance does not bleed into the sellable SKU's standard cost.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cosmetics and personal care manufacturing vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cosmetics manufacturing on Acumatica needs FEFO issue configured deliberately (not left at FIFO default), a documented approach to linking BOM revisions to regulatory filings since that link is not native, and a plan for keeping pilot-batch costs from distorting standard costs. All three are known, addressable gaps — none of them are reasons to avoid the platform, but all three surprise clients who assume "lot tracking" alone covers cosmetics compliance.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-apparel-manufacturing-acumatica/">Apparel and Textile Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-automotive-parts-acumatica/">Automotive Parts Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-acumatica/">Beverage Manufacturing and Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-chemical-manufacturing-acumatica/">Chemical Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electronics-manufacturing-acumatica/">Electronics Manufacturing Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/vertical-saas-chemical-manufacturing-acumatica/">Acumatica for Chemical Manufacturing</a></li>
+      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen</a></li>
+      <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
+      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code Side</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,107 +93,74 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="why-acumatica-report-designer-performance-tuning-matters-in-production">Why Acumatica Report Designer — Performance Tuning matters in production</h2>
-<p>Why Acumatica Report Designer — Performance Tuning matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"The invoice prints fine, but the month-end register takes eleven minutes" is a message I get from Acumatica clients often enough that I have a standard diagnostic sequence for it. Report Designer reports are usually slow for boring, fixable reasons — the schema pulls too much, filters run on the wrong side, or a subreport turned the render into an N+1 storm. Here is the sequence, in the order that finds the problem fastest.</p>
+
+<h2 id="measure-first">Step 0: measure before touching anything</h2>
+<p>Run the report from the browser with the Request Profiler enabled (SM205070). You care about two numbers: total SQL time versus total request time, and the count of SQL queries. The split tells you which world you are debugging:</p>
+<ul>
+<li><strong>High SQL time, few queries</strong> — the main dataset query is expensive. Database-side problem.</li>
+<li><strong>Many queries</strong> — hundreds or thousands of statements means subreports or per-row lookups. Report-structure problem.</li>
+<li><strong>Low SQL time, high total</strong> — rendering and layout cost. Usually images, or an enormous page count.</li>
+</ul>
+
+<h2 id="push-filters-into-the-schema">Push filters into the schema, not the layout</h2>
+<p>The single most common defect I find: the report's schema selects a broad dataset and then the layout suppresses rows with visibility expressions, or groups filter with expressions like <code>=IIf([ARInvoice.DocDate] &gt;= [@FromDate], ...)</code>. The database happily returns every invoice since go-live; the report engine then throws most of them away in memory.</p>
+<p>Every parameter should appear as a condition on the Filters tab of the Schema Builder so it becomes a SQL <code>WHERE</code> clause. Check this by profiling: the query text in the profiler should contain your date range. If it does not, the filter is running client-side.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SCHEMA FILTER (RUNS IN SQL)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Field:      ARInvoice.DocDate    Condition: Greater or Equal   Value: =[@FromDate]
+Field:      ARInvoice.DocDate    Condition: Less or Equal      Value: =[@ToDate]
+Field:      ARInvoice.Released   Condition: Equal              Value: True</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica report designer — performance tuning, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="trim-the-relations">Trim relations and fields</h2>
+<p>The Schema Builder makes it painless to join eight tables and select every field "in case". Every joined table widens the row and can change the query plan; every selected long text field (descriptions, note text) inflates the data transferred. Two rules:</p>
+<ul>
+<li>Delete relations the layout does not reference. The designer will not warn you about unused joins.</li>
+<li>Watch join types. A child table joined with an inner join when some parents lack children silently drops rows (a correctness bug), while a left join to a large child table for one display field may be better fetched differently — or accepted, but consciously.</li>
+</ul>
+<p>Also check for the fan-out trap: parent joined to two child tables multiplies rows, and your aggregates go wrong <em>and</em> your row count explodes. That is a case for a subreport or a pre-aggregated join, not a wider flat query.</p>
+
+<h2 id="subreports-and-n1">Subreports: the N+1 you can see in the profiler</h2>
+<p>If the profiler shows one query repeated with different parameters hundreds of times, a subreport (or an embedded per-row report control) is executing per detail row. Fixes in order of cheapness: move the subreport from the detail band to a group footer; replace an aggregate-only subreport with a joined SQL aggregate; pre-flatten the child data into a <code>PXProjection</code> the parent schema can join once.</p>
+
+<div class="callout-warn callout">
+  <strong>Aggregates in expressions do not push down</strong>
+  <p>Layout-level aggregate functions — <code>Sum()</code>, <code>Count()</code> in group footers — are computed by the report engine over the fetched rows. That is fine. What is not fine is fetching detail rows <em>only</em> to compute a total you never display line-by-line. If the report shows totals without details, aggregate in the schema (GROUP BY via a projection or GI-backed source) and fetch the totals directly.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the report is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of report in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production report looks different from development report. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring report first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with report when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="database-side">Database-side: indexes and the big history tables</h2>
+<p>When the profiler shows one slow query, take its text and look at the plan (on SaaS, work with Acumatica support; on private cloud, do it yourself). The usual suspects in my experience:</p>
+<ul>
+<li><strong>Date-range scans on <code>GLTran</code>, <code>ARTran</code>, <code>INTran</code></strong> without a supporting index. Acumatica's stock indexes cover the screens' access patterns, not necessarily your report's. On private cloud, an index on the filtered columns (respecting <code>CompanyID</code> as the leading column convention) can turn minutes into seconds. Keep a script of custom indexes — upgrades can drop them.</li>
+<li><strong>Functions on columns in filters</strong> — expressions applied to the field side of a condition prevent index use.</li>
+<li><strong>FinPeriodID vs date confusion</strong> — filtering GL data by <code>FinPeriodID</code> (a string, indexed, aligned with how balances are stored) is dramatically cheaper than by date on big ledgers.</li>
+</ul>
+
+<h2 id="rendering-costs">Rendering costs: images and page count</h2>
+<p>Two rendering-side offenders worth checking when SQL is fast but the report is not: high-resolution logos placed in the detail band (rendered per row — put them in the page header, and resize the source image to roughly its printed size), and reports that paginate into thousands of pages nobody will read. For the latter, question the requirement: a 4,000-page register exists to be exported, and a GI with Export to Excel serves that need in a tenth of the time, because it skips pagination entirely.</p>
+
+<h2 id="scheduling">When it is still slow: schedule it</h2>
+<p>Some reports are legitimately heavy — a full-year consolidated pack is going to cost real compute. Move those to the Automation Schedules with output to email or a file share, run them off-hours, and keep interactive rendering for interactive-sized questions. Users perceive a report that arrives in their inbox at 6 a.m. as fast, regardless of how long it ran.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica report designer — performance tuning. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Tune in this order: profile, push filters into SQL, trim joins and fields, kill per-row subreports, then and only then look at indexes. Ninety percent of slow <code>.rpx</code> reports I have been handed were fixed in the first three steps without touching the database. The profiler is your ground truth — never tune a report you have not measured.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-connection-pooling/">Acumatica Performance — Connection Pooling</a></li>
-      <li><a href="/blog/acumatica-perf-database-sharding/">Acumatica Performance — Database Sharding</a></li>
+      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Slow Report Diagnosis</a></li>
+      <li><a href="/blog/acumatica-report-designer-the-definitive-guide/">Acumatica Report Designer — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-report-aged-receivables-tuning/">Acumatica Report — Aged Receivables Tuning</a></li>
+      <li><a href="/blog/acumatica-report-financial-statement-tuning/">Acumatica Report — Financial Statement Tuning</a></li>
+      <li><a href="/blog/acumatica-gi-export-large-datasets/">Acumatica GI — Exporting Large Datasets</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

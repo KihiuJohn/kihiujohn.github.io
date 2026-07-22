@@ -93,89 +93,85 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica does not have a "plugin API" in the WordPress sense. What people call the plugin architecture is really the customization/extension model: you drop compiled types and published customization content into the application, and the framework discovers them by convention at startup. Understanding what gets auto-discovered — and what has to be registered by hand — is what keeps a codebase with dozens of custom screens from turning into a pile of guesswork.</p>
+
+<h2 id="what-gets-discovered-automatically">What gets discovered automatically</h2>
+<p>When the site application domain loads, Acumatica scans the assemblies in the <code>Bin</code> folder and reflects over them. Any type deriving from <code>PXGraph</code>, <code>PXGraphExtension&lt;&gt;</code>, or <code>PXCacheExtension&lt;&gt;</code> is picked up without you registering it anywhere. That is the core of the "plugin" behaviour: a graph extension in your assembly is active the moment the DLL is present, because the framework asks each cache and each graph for the extensions declared against it. There is no manifest listing your extensions the way an ASP.NET app lists middleware — the base type parameter <em>is</em> the registration.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPluginExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Present in Bin ⇒ discovered. No registration call anywhere.
+public class SOOrderEntryExt : PXGraphExtension&lt;SOOrderEntry&gt;
 {
-    [PXOverride]
-    public virtual void Plugin(Acumatica doc)
+    // Runs only when the customization package is *published* if it
+    // touches DB/screen content; pure code extensions are live once
+    // the DLL loads and the app domain recycles.
+    public static bool IsActive() =&gt; true;
+
+    protected void _(Events.RowSelected&lt;SOOrder&gt; e)
     {
-        // Custom plugin logic for acumatica plugin architecture
-        if (doc?.Plugin == null) return;
-        Base.Plugin(doc);
+        if (e.Row == null) return;
+        // custom behaviour on the Sales Orders screen
     }
 }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica plugin architecture explained, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The <code>IsActive()</code> hook is the one lever you get over discovery. Return <code>false</code> and the framework skips the extension entirely — that is how you scope an extension to a feature toggle or a specific tenant configuration without commenting out code.</p>
+
+<h2 id="what-needs-explicit-registration">What needs explicit registration</h2>
+<p>Not everything is convention-driven. DACs (data access classes) for custom tables are discovered by reflection, but the <em>table</em> behind them only exists if the customization project's Database Scripts or a Custom Table definition created it. Reports (<code>.rpx</code>), generic inquiries, and screen (<code>.aspx</code>) content are not code at all — they live in the customization package and are applied to the site only when you <strong>publish</strong> that package. This is the split that trips people up: your C# is "live" as soon as the assembly loads, but anything that changes the database schema or the site's file tree is inert until publish.</p>
+<div class="callout">
+  <strong>Two different lifecycles in one project</strong>
+  <p>Compiled extensions (graphs, DACs, attributes) and package content (screens, reports, DB scripts) ship together but activate differently. A hotfix that is pure C# can go out with an assembly swap and an app-pool recycle; anything schema-touching needs a full publish. Plan releases around which half you changed.</p>
+</div>
+
+<h2 id="organising-the-codebase">Organising a codebase that scales</h2>
+<p>Once you pass a handful of screens, folder-by-technical-layer stops helping and folder-by-feature starts. Group the graph extension, DAC extensions, custom DACs, attributes, and helper classes for one business area together, so a single functional change lives in one place. The convention I settle on across projects:</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TEXT · PROJECT LAYOUT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>MyCompany.Distribution/
+  Warehousing/
+    Descriptor/        // attributes, selectors, constants
+    DAC/               // custom DACs + PXCacheExtensions
+    Graph/             // PXGraphExtensions, custom PXGraphs
+  Pricing/
+    DAC/
+    Graph/
+  Common/              // shared attributes + base classes</code></pre>
+</div>
+<p>Namespaces should track the folders, but the assembly name is what matters for publishing: keep one assembly (or a small, stable set) so the customization package references stay simple. Splitting into many assemblies buys you nothing here — discovery works across all of <code>Bin</code> — and costs you dependency headaches at publish time.</p>
+
+<h2 id="the-usr-prefix-rule">The Usr prefix on base tables</h2>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Custom fields on stock DACs must start with Usr</strong>
+  <p>When you add a field to a built-in table like <code>SOOrder</code> through a <code>PXCacheExtension</code>, the field name has to begin with <code>Usr</code>. The framework reserves that prefix for customer fields so upgrades can distinguish them from Acumatica's own columns and never collide. Skip the prefix and the field either fails to persist or breaks on the next upgrade.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the plugin is.</p>
+
+<h2 id="how-extensions-layer">How extensions layer on top of each other</h2>
+<p>Multiple extensions can target the same graph, and they run in a defined order. By default the order is undefined-but-stable; when you need to force it, an extension overrides <code>GetExtensionSchedule()</code> or declares a dependency so that, say, your extension always runs after an ISV's. This matters the moment you install a third-party package on a screen you have already customized — both extensions are discovered, both are active, and their event handlers stack. Test that combination explicitly rather than assuming your handler runs alone.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-plugin-edge-cases-i-have-shipped">The plugin edge cases I have shipped</h2>
-<p>The performance of plugin in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production plugin looks different from development plugin. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPluginExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · ORDERING EXTENSIONS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntryExt : PXGraphExtension&lt;
+    ThirdParty.SOOrderEntryExt,   // run after this one
+    SOOrderEntry&gt;                 // on this graph
 {
-    [PXOverride]
-    public virtual void Plugin(Acumatica doc)
+    protected void _(Events.RowSelected&lt;SOOrder&gt; e)
     {
-        // Custom plugin logic for acumatica plugin architecture
-        if (doc?.Plugin == null) return;
-        Base.Plugin(doc);
+        // safe to read state the ISV extension has already set
     }
 }</code></pre>
 </div>
+
+<h2 id="why-this-model-holds-up">Why this model holds up across upgrades</h2>
+<p>The reason the extension model survives version upgrades is precisely that you never modify base source. Your code sits in a separate assembly, hooks documented extension points, and is re-discovered against the new base each time. When an upgrade breaks something, it breaks at a visible seam — a renamed field, a changed signature — rather than silently, because your extension had to reference the base type by name. That is the whole trade: you accept the ceremony of extensions and <code>Usr</code> prefixes in exchange for upgrades that fail loudly and locally instead of quietly.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring plugin first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with plugin when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Artifact</th><th>Discovery</th><th>Activates on</th></tr>
+  <tr><td>Graph / graph extension</td><td>Reflection over Bin</td><td>Assembly load + recycle</td></tr>
+  <tr><td>DAC / cache extension</td><td>Reflection over Bin</td><td>Assembly load (table must exist)</td></tr>
+  <tr><td>Custom table / DB script</td><td>Customization package</td><td>Publish</td></tr>
+  <tr><td>Screen (.aspx), report (.rpx), GI</td><td>Customization package</td><td>Publish</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica plugin architecture explained. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Think of the plugin architecture as two channels feeding one running app: compiled types the framework finds by convention, and package content you apply by publishing. Keep your code in feature-shaped folders inside a stable assembly, prefix every custom field with <code>Usr</code>, and always test how your extensions layer against ISV packages on the same screen. Get those right and adding the thirtieth custom screen feels the same as adding the third.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -186,9 +182,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

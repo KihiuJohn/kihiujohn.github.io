@@ -94,96 +94,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HipaaExt : PXCacheExtension<Compliance>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+    <p>I get asked "is Acumatica HIPAA compliant?" often enough that it deserves a straight, careful answer rather than a marketing one. The short version: HIPAA compliance is a property of a covered entity's or business associate's whole program — policies, training, risk assessment, hosting arrangement, and configuration — not a certification a software vendor hands you in a box. Acumatica is not a certified EHR and does not claim HIPAA certification as a product; what it offers is a set of general security controls that can be configured as part of a compliant program, provided everything around them is also done right.</p>
+
+<h2 id="what-hipaa-actually-requires">What HIPAA's technical safeguards actually ask for</h2>
+<p>The HIPAA Security Rule's technical safeguards boil down to a short list: access control (unique user IDs, role-based restriction, automatic logoff), audit controls (recording activity on systems containing PHI), integrity controls (protecting data from improper alteration), and transmission security (encrypting PHI in transit). None of these are exotic — they are standard enterprise security practice — but each one has to actually be configured and evidenced, not assumed.</p>
+
+<h2 id="what-acumatica-provides">What Acumatica genuinely provides toward that list</h2>
+<ul>
+<li><strong>Access control.</strong> Unique logins, role-based access control down to screen and field level, and configurable session timeout / automatic logoff settings.</li>
+<li><strong>Audit controls.</strong> A configurable audit trail that can be turned on per screen and per field, logging create/update/delete activity with user and timestamp, plus login/logout and access history.</li>
+<li><strong>Field-level encryption.</strong> AES-256 encryption is available for designated sensitive fields (Acumatica ships this for things like payment card and SSN-style fields, and administrators can extend it to other fields), and standard TLS covers transmission security for data in transit.</li>
+</ul>
+<p>These are real, verifiable features — not something I am inferring. They are also generic security controls that any well-built enterprise system would have, not a HIPAA-specific certification layer.</p>
+
+<div class="callout-warn callout">
+  <strong>What Acumatica does not give you</strong>
+  <p>Acumatica does not include a Business Associate Agreement as a standard offering the way some healthcare-specific SaaS platforms do — if PHI will genuinely reside in your Acumatica instance, you need to work through Acumatica (or your cloud hosting provider, if self-hosted) on a BAA and confirm the specific deployment and hosting arrangement supports it. It also has no PHI-aware data classification, no built-in minimum-necessary access review workflow, and no HIPAA-specific breach notification tooling. Those are program-level controls you build around the ERP, not features you turn on inside it.</p>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on hipaa compliance for healthcare vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The hipaa is not the question; the failure mode of the compliance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'hipaa'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-hipaa-on-a-horizontal-platform-beats-from-scratch">Why hipaa on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="channel-partner-programs-for-compliance">Channel partner programs for compliance</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM hipaa
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-hipaa">Marketplace listing for hipaa</h2>
-<p>The performance of compliance in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-compliance">SOC 2 and ISO 27001 for compliance</h2>
-<p>Production compliance looks different from development compliance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HipaaExt : PXCacheExtension<Compliance>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring compliance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add hipaa on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with compliance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="the-real-question">The question that actually matters: should PHI be in Acumatica at all?</h2>
+<p>In most of the architectures I have built across this vertical series, the better answer is to keep PHI out of Acumatica entirely. Clinical and patient-identifiable data lives in the EHR, practice management system, or lab information system that is purpose-built and typically already covered by its vendor's BAA program. Acumatica receives de-identified financial summaries — billed amounts, service dates without diagnosis detail, aggregate supply consumption — across the integration boundary. That design sidesteps most of the HIPAA scoping question for the ERP rather than trying to answer it.</p>
+<p>If a specific requirement genuinely forces patient-identifiable data into Acumatica (patient-level AR aging for a collections team is the most common real case), treat it as a deliberate, documented decision: enable field-level encryption on the relevant fields, restrict the role that can see them, turn on audit trail for those screens, and get the BAA question answered in writing before go-live — not after an auditor asks.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on hipaa compliance for healthcare vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica is not HIPAA-certified and is not an EHR. It has real, usable security controls — RBAC, audit trail, field-level encryption, TLS in transit — that are legitimate components of a compliant deployment. Whether an actual deployment is HIPAA compliant depends on configuration, hosting, BAAs, and the surrounding program, not on the software alone, and the simplest way to reduce that burden is to keep PHI out of the ERP wherever the architecture allows it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-soc2-compliance/">SOC 2 Compliance for Vertical SaaS</a></li>
+      <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption</a></li>
       <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
-      <li><a href="/blog/acumatica-gdpr-data-subject-requests/">Acumatica GDPR — Data Subject Requests</a></li>
-      <li><a href="/blog/acumatica-pii-discovery-scanning/">Acumatica PII Discovery and Scanning</a></li>
-      <li><a href="/blog/saas-compliance-frameworks/">SaaS Compliance Frameworks — A Comparison</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security Best Practices</a></li>
+      <li><a href="/blog/acumatica-secure-api-key-rotation/">Acumatica Secure API Key Rotation</a></li>
+      <li><a href="/blog/vertical-saas-healthcare-on-acumatica/">Healthcare Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

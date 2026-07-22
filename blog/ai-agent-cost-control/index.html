@@ -93,98 +93,57 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Cost optimisation: caching and batching is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>LLM API costs scale with usage in a way traditional software costs don't — every additional user, every retry, every verbose system prompt shows up directly on next month's bill. Cost control isn't a one-time optimization pass; it's a set of defaults (caching, model tiering, output limits) plus ongoing monitoring, because the same feature that was cheap at 100 users a day can get expensive fast at 10,000.</p>
 
-def list_cost(query: str) -> str:
-    """List cost matching the query."""
-    response = requests.get(
-        f"https://api.example.com/cost",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="cost", func=list_cost, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="the-role-of-control-in-the-agent-loop">The role of control in the agent loop</h2>
-<p>In the work I have done on cost control for llm apps, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="what-cost-control-for-llm-apps-actually-does">What Cost Control for LLM Apps actually does</h2>
-<p>When the work moves from design to production, the questions change. The cost is not the question; the failure mode of the control is.</p>
+<h2 id="prompt-caching-is-the-first-lever">Prompt caching is usually the biggest single lever</h2>
+<p>If your system prompt, tool definitions, or a large retrieved document is identical across many requests, both Anthropic and OpenAI support prompt caching that charges a fraction of the price for cached input tokens on repeat calls. An agent that re-sends the same 3,000-token system prompt and tool schema on every turn of a conversation is paying full price for static content on every single call — structuring the prompt so the stable parts come first and are cache-eligible, with only the variable part (the actual user turn) appended after, often cuts costs by more than caching a document once and querying it.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
+  <div class="code-header"><span class="code-lang">PYTHON · CACHE-AWARE PROMPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>message = client.messages.create(
+    model="claude-sonnet-4-5",
+    system=[
+        {
+            "type": "text",
+            "text": large_static_system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
     ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
+    messages=[{"role": "user", "content": current_turn_only}],
+)
+# static system prompt + tool definitions get cached;
+# only the delta (the new user message) is billed at full rate</code></pre>
 </div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The performance of control in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+
+<h2 id="model-tiering-by-task-difficulty">Not every call needs your most capable model</h2>
+<p>Route by task difficulty: a classification call (routing, tagging, simple extraction) usually does fine on a smaller, cheaper model, while multi-step reasoning over ambiguous data justifies the larger one. Building this as an explicit routing decision — not a single model for every call in the pipeline — is often a 3-5x cost difference on the calls that don't need the extra capability, with no measurable quality loss on those specific tasks.</p>
 <div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
+  <strong>Measure the quality delta before downgrading, not after</strong>
+  <p>Don't swap models to save money and hope quality holds. Run your eval set against the cheaper model first, compare accuracy on the specific task, and only ship the downgrade where the eval says it's safe.</p>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Production control looks different from development control. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_cost(query: str) -> str:
-    """List cost matching the query."""
-    response = requests.get(
-        f"https://api.example.com/cost",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="cost", func=list_cost, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="capping-output-and-retries">Capping output length and retry budgets</h2>
+<p>Two silent cost leaks: uncapped <code>max_tokens</code> on calls that don't need long output, and unbounded retry loops on agent steps that fail. Set explicit, task-appropriate output caps — a classification call needs tens of tokens, not thousands — and put a hard ceiling on how many times an agent step can retry or loop before it escalates to a human instead of continuing to spend tokens on a task it can't complete.</p>
+<div class="callout-warn">
+  <strong>An agent stuck in a retry loop is a cost incident, not just a bug</strong>
+  <p>A tool-call loop that fails validation and retries indefinitely can burn through a token budget fast with nothing to show for it. Cap retries per task (3-5 is typical) and alert when a session exceeds a token budget, not just when it errors out.</p>
 </div>
+
+<h2 id="batching-non-interactive-work">Batching work that doesn't need a live response</h2>
+<p>For workloads that don't need an immediate answer — nightly categorization of a day's transactions, bulk document extraction — batch APIs (Anthropic's and OpenAI's both offer one) process requests asynchronously at roughly half the per-token cost of synchronous calls. Anything currently running as a loop of live API calls against a queue of records, where the result isn't needed within seconds, is a batch API candidate.</p>
+
+<h2 id="tracking-cost-per-outcome">Tracking cost per outcome, not just total spend</h2>
+<p>A monthly API bill tells you what you spent, not whether it was worth it. Tag every call with the workflow it belongs to (case routing, contract extraction, forecast generation) and track cost per successful outcome for each — cost per case routed correctly, cost per contract extracted without a flagged error. That framing catches the case where total spend looks fine but one workflow's cost-per-success is quietly climbing because of a prompt regression or a model that degraded on that specific task.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring control first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cost on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with control when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Lever</th><th>Typical savings</th></tr>
+  <tr><td>Prompt caching on static content</td><td>Large — scales with call frequency</td></tr>
+  <tr><td>Model tiering by task</td><td>3-5x on calls routed to smaller models</td></tr>
+  <tr><td>Output token caps</td><td>Moderate, prevents worst-case spend</td></tr>
+  <tr><td>Batch API for non-live work</td><td>~50% per token vs. synchronous calls</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cost control for llm apps. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cost control for LLM apps is mostly architecture, not negotiation with a vendor: cache what's static, route by task difficulty, cap what can run away, and batch what doesn't need to be live. Track cost per successful outcome per workflow so a regression shows up before the invoice does.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,8 +154,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-json-mode/">JSON Mode for LLM Outputs</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
     
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">

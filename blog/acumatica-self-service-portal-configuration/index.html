@@ -93,107 +93,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A distributor client wanted their customers to log in, see only their own open invoices and order history, and place reorders, without touching their internal ERP users' license count. That is the self-service portal use case in one sentence, and getting there in Acumatica is mostly configuration, restriction groups, and a customer-portal-specific user type, rather than a bespoke build, provided you set the security model up correctly from the start.</p>
+
+<h2 id="portal-user-type">Portal users are a genuinely different user category</h2>
+<p>Self-service portal access is built on the Customer Portal user type, which is licensed and restricted differently from an internal employee user. A portal user is associated with a specific Business Account (typically a customer, sometimes a vendor for AP-facing self-service), and every screen exposed to that user needs to be filtered, at the data level, to only that account's records. This is not a UI-only restriction, if the filtering is done wrong, a portal user with a crafted GI request or a misconfigured screen can potentially see another customer's data through the same screen, which is the single most damaging class of bug a self-service portal can ship with.</p>
+
+<div class="callout-warn callout">
+  <strong>Never rely on UI-level filtering alone for portal data isolation</strong>
+  <p>A grid that only displays rows matching the logged-in customer, without an actual BQL-level restriction tied to that customer's Business Account, is not a security boundary, it is a suggestion. Any screen exposed to portal users needs the row-level restriction enforced in the graph's data view or the GI's filter condition, using the portal user's associated Business Account as the actual join key, not just a client-side or presentation-layer filter that a determined user could route around via the REST API using the same portal credentials.</p>
+</div>
+
+<h2 id="row-level-restriction-mechanism">Tying the portal user to their own data</h2>
+<p>The standard mechanism restricts a portal user's visible rows via the Business Account associated with their portal contact, enforced through restriction groups and, for custom screens, an explicit condition in the graph's primary view:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSelfExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Self(Acumatica doc)
-    {
-        // Custom self logic for acumatica self service
-        if (doc?.Self == null) return;
-        Base.Self(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Custom portal-facing graph: filter every row to the logged-in
+// portal user's own Business Account, never trust the UI alone.
+public PXSelect&lt;ARInvoice,
+    Where&lt;ARInvoice.customerID, Equal&lt;Current&lt;AccessInfo.businessAccountID&gt;&gt;&gt;&gt; MyInvoices;
+</code></pre>
 </div>
-<h2 id="how-to-debug-self-in-production">How to debug self in production</h2>
-<p>In the work I have done on acumatica self-service portal — configuration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the self is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-self-service-portal-configuration-matters-in-production">Why Acumatica Self-Service Portal — Configuration matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p><code>AccessInfo.businessAccountID</code> resolves to the Business Account tied to the currently authenticated portal user, and building every portal-facing view around that current-value join, rather than a filter the user could theoretically edit, is what makes the isolation real instead of cosmetic.</p>
+
+<h2 id="publishing-gis-to-the-portal">Generic Inquiries as the fastest path to a working portal screen</h2>
+<p>For read-mostly portal needs, order history, invoice status, statement download, publishing a Generic Inquiry directly to the portal is usually faster and safer than building a bespoke graph, because the GI publishing wizard has its own portal-scoped restriction configuration built in, provided you actually configure it rather than accepting the default of showing all rows. I default every portal-published GI's filter to the current portal user's Business Account explicitly, then verify by logging in as a real restricted portal test account, not an internal admin account with elevated visibility, before it ships.</p>
+
+<h2 id="branding-and-navigation">Portal branding and navigation live in a different configuration surface</h2>
+<p>Beyond data security, the portal's actual look, its navigation menu, branding, and which screens appear for which portal role, is configured through the portal's own site map and role assignment, separate from the internal ERP's site map. It is easy to publish a screen for portal use and forget to also assign it to the correct portal-facing role, which produces the common symptom of "the screen works when I test it as an internal admin, but the actual customer can't find it," because the admin account's role visibility hid the missing portal-role assignment during testing.</p>
+
+<h2 id="actions-and-write-access">Write access from the portal needs the same scrutiny as reads</h2>
+<p>Letting portal users create reorders or submit cases is a step up in risk from read-only visibility, because now a portal user's actions execute business logic, not just display data. Every action exposed to a portal graph needs the same current-Business-Account scoping as the data views, and any action that could plausibly affect another account's records (changing a ship-to address shared across a corporate hierarchy, for instance) needs an explicit ownership check inside the action itself, not an assumption that the surrounding screen's filtering already covers it.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Test portal actions with two separate portal accounts, not one</strong>
+  <p>The isolation bug that slips through most often only shows up when you have two real portal test accounts and deliberately try to make one see or affect the other's data, an ID guessed or bookmarked from one account's session, tried against the other's login. Testing with a single portal account, however thoroughly, cannot surface this class of bug, because there is no second account to leak into.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of self in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production self looks different from development self. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSelfExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Self(Acumatica doc)
-    {
-        // Custom self logic for acumatica self service
-        if (doc?.Self == null) return;
-        Base.Self(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring self first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with self when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica self-service portal — configuration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A self-service portal in Acumatica is built from ordinary platform pieces, the Customer Portal user type, Business-Account-scoped restrictions, and GI publishing, but the entire project succeeds or fails on whether data isolation is enforced at the query level rather than the UI level. Scope every view and action to the authenticated portal user's own Business Account explicitly, publish GIs with their portal filter actually configured rather than defaulted, and test with two separate real portal accounts before treating any portal screen as done.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-gi-publishing-to-portal-acumatica-self-service/">Publishing an Acumatica GI to the Self-Service Portal</a></li>
-      <li><a href="/blog/acumatica-mobile-app-customization/">Acumatica Mobile App Customization</a></li>
-      <li><a href="/blog/acumatica-modern-ui-adding-custom-screens/">Acumatica Modern UI — Adding Custom Screens</a></li>
-      <li><a href="/blog/acumatica-modern-ui-custom-control/">Acumatica Modern UI Custom Control — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-gi-self-service-config/">Acumatica GI Self-Service Configuration</a></li>
+      <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica Employee Self-Service — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security — Best Practices</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

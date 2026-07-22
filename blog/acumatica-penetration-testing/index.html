@@ -92,107 +92,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPenetrationExt : PXGraphExtension<AcumaticaEntry>
+    <p>Clients bring in outside penetration testers for their Acumatica instance fairly regularly now, usually driven by a customer's security questionnaire or an annual SOC 2 requirement. I've sat on the receiving end of several of these engagements as the developer who then has to fix whatever gets found, and the findings cluster into a small, predictable set that has almost nothing to do with Acumatica's own platform security and almost everything to do with how it was customized and configured on top.</p>
+
+<h2 id="scope-what-testers-actually-hit">What a competent tester actually targets on an Acumatica instance</h2>
+<p>A pen test against Acumatica rarely finds anything interesting in the base platform - it's a mature, widely deployed product and the obvious attack surface has been hardened over many release cycles. The interesting findings live in the custom layer: custom REST endpoints exposed through Business Events or custom actions, custom screens with permission gaps, and configuration issues like default admin credentials never rotated, or an SSO integration that fails open under some edge case. Tell the testing firm explicitly to focus time there rather than re-testing the base platform's own login form for the tenth time this year across their client base.</p>
+
+<h2 id="common-findings">The findings I see repeated across different clients' reports</h2>
+<ul>
+<li><strong>Default or weak credentials on service accounts</strong> - an integration user created years ago with a password that was never rotated and doesn't follow the org's current password policy, because it predates that policy.</li>
+<li><strong>Verbose error pages in production</strong> - a customization throwing an unhandled exception that surfaces a full stack trace, including internal class names and sometimes connection details, to an unauthenticated or low-privilege user.</li>
+<li><strong>Missing server-side authorization on custom actions</strong> - exactly the "hidden button, no server check" pattern covered in the secure coding checklist, found by testers simply replaying a captured request with a different user's session.</li>
+<li><strong>Session and cookie configuration</strong> - missing Secure/HttpOnly flags, or session timeout configured too generously for a system handling financial data, both of which are IIS/web.config settings rather than anything in customization code.</li>
+</ul>
+
+<h2 id="testing-your-own-custom-endpoints">Test your own custom REST surface before the pen tester does</h2>
+<p>Any custom endpoint exposed through a Business Event's REST action, a custom PXAction wired to a webhook, or a bespoke API controller is code your team wrote and is fully your responsibility to have tested, not the platform's. Run the basics yourself before an external test does it for you: hit the endpoint unauthenticated and confirm it rejects; hit it as a low-privilege user and confirm authorization is enforced server-side, not assumed from the caller; and send malformed or oversized payloads and confirm the failure mode is a clean error, not an unhandled exception leaking internals.</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">C# · A minimal guard worth having on every custom webhook receiver</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[HttpPost]
+[Route("api/custom/inboundwebhook")]
+public IHttpActionResult Receive([FromBody] WebhookPayload payload)
 {
-    [PXOverride]
-    public virtual void Penetration(Acumatica doc)
-    {
-        // Custom penetration logic for acumatica penetration testing
-        if (doc?.Penetration == null) return;
-        Base.Penetration(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="how-to-debug-penetration-in-production">How to debug penetration in production</h2>
-<p>In the work I have done on acumatica penetration testing — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the penetration is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-penetration-testing-a-complete-guide-matters-in-production">Why Acumatica Penetration Testing — A Complete Guide matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    if (!ValidateSignature(Request.Headers, payload))
+        return Unauthorized(); // reject before any business logic runs
+
+    if (payload == null || string.IsNullOrEmpty(payload.EventId))
+        return BadRequest("Malformed payload");
+
+    // ... process
+    return Ok();
+}</code></pre></div>
+
+<h2 id="remediation-triage">Triaging findings: not everything is equally urgent</h2>
+<p>A pen test report typically lands with a dozen findings ranked Critical/High/Medium/Low by the testing firm's own scale, which doesn't always match actual business risk on your specific instance. I re-triage against what the finding actually exposes on this client's data - a missing security header is genuinely Low on an instance with no PII exposure risk from it, while a permission gap on a custom action that can modify GL transactions is Critical regardless of what the generic scoring template says. Push back on a report's severity ratings when they don't reflect your system's actual risk; testing firms use a general-purpose rubric that doesn't know your data model.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Retest after remediation, not just at the client's request</strong>
+  <p>I build a retest into the remediation plan by default rather than waiting for the client to ask, because "we fixed it" and "we verified it's fixed" are different claims, and the second one is what actually closes out a finding for an auditor.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of penetration in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production penetration looks different from development penetration. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPenetrationExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Penetration(Acumatica doc)
-    {
-        // Custom penetration logic for acumatica penetration testing
-        if (doc?.Penetration == null) return;
-        Base.Penetration(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring penetration first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with penetration when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica penetration testing — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Penetration tests against Acumatica instances almost never find platform-level issues; they find gaps in the custom layer - unrotated service credentials, verbose error output, missing server-side checks on custom actions, and web-tier configuration nobody revisited since go-live. Test your own custom endpoints with the same rigor before an external firm does, and re-triage findings against your instance's actual data sensitivity rather than accepting a generic severity scale at face value.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
-      <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-disaster-recovery-rto-rpo/">Acumatica Disaster Recovery — RTO and RPO</a></li>
+      <li><a href="/blog/acumatica-vulnerability-management/">Acumatica Vulnerability Management</a></li>
+      <li><a href="/blog/acumatica-secure-coding-checklist/">Acumatica Secure Coding Checklist</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security — Best Practices</a></li>
+      <li><a href="/blog/vertical-saas-soc2-compliance/">SOC 2 Compliance for Vertical SaaS</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

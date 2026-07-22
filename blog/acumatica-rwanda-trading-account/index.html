@@ -92,82 +92,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough fiscalisation projects to know the patterns that work. They share a few traits: the device stores its private key in a vault, the offline buffer is sized for the worst case, and the audit trail is the source of truth. This article is the patterns.</p>
-<h2 id="the-audit-trail-for-rwanda">The audit trail for rwanda</h2>
-<p>The audit trail for rwanda is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A trading account is not an Acumatica module — it is a reporting convention, inherited from UK/Commonwealth-style bookkeeping, that most East African finance teams still expect to see. It sits above the profit and loss statement and isolates gross profit from trading activity: opening stock, purchases, direct costs like freight-in and customs duty, and closing stock, set against sales. For a Rwanda-registered trading or import business, getting this right matters for two reasons — RRA wants books that can substantiate gross margin, particularly on imports subject to customs valuation checks, and management wants a clean split between gross margin and operating overhead. Acumatica does not ship a "Trading Account" screen. You build it from Chart of Accounts structure and a Financial Statement or Pivot report design.</p>
+<h2 id="what-a-trading-account-actually-shows">What a trading account actually shows</h2>
+<p>The mechanics are simple: Opening Stock + Purchases + Direct Expenses − Closing Stock gives Cost of Sales. Sales minus Cost of Sales gives Gross Profit. That Gross Profit figure then rolls into the full P&amp;L, where selling, admin, and finance costs are deducted to reach Net Profit. The reason this survives as a reporting layer, rather than just being buried inside COGS, is that Rwandan trading companies — importers of hardware, consumer goods, construction materials — are frequently asked by banks, auditors, and RRA to show gross margin separately from operating expense ratios. A single P&amp;L that blends COGS with rent and salaries into one undifferentiated expense block does not answer that question cleanly.</p>
+<h2 id="chart-of-accounts-and-sub-account-segmentation">Chart of accounts and sub-account segmentation</h2>
+<p>The cleanest way to isolate trading-account line items in Acumatica is with a sub-account segment, not a parallel set of natural accounts. Keep one Sales account, one Purchases/COGS account, one Freight-In account — but tag every trading-related transaction with a sub-account value (for example a "TRADE" segment) distinct from operating-expense sub-accounts ("ADMIN", "SELL", "FIN"). This keeps the natural account structure sane for tax reporting while giving the Financial Statement Designer a clean axis to subtotal on.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · CHART OF ACCOUNTS SEGMENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Sub-account segment: TRADE-OPS (2 segments, 4 chars each)
+
+Segment 1 - Activity        Segment 2 - Cost Type
+TRD  Trading account         STK   Opening/closing stock
+OPS  Operating (below GP)    PUR   Purchases
+                              FRT   Freight-in / duty
+                              SLS   Sales
+
+Example postings:
+5000-TRD-PUR   Purchases - Trading           (debit)
+5010-TRD-FRT   Freight-in & customs duty      (debit)
+1300-TRD-STK   Inventory - Trading stock      (asset)
+4000-TRD-SLS   Sales - Trading                (credit)
+6100-OPS-ADM   Admin salaries                 (below Gross Profit line)
+6200-OPS-SEL   Selling & distribution         (below Gross Profit line)</code></pre>
 </div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>In the work I have done on acumatica rwanda trading account reconciliation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="building-the-trading-account-in-the-financial-statement-designer">Building the trading account in the Financial Statement Designer</h2>
+<p>With the sub-account segment in place, the Financial Statement Designer (or a Pivot Report against GL Transaction Details) does the rest. Build the report with two blocks: a Trading Account block that subtotals Sales less Cost of Sales (Opening Stock + Purchases + Direct Expenses − Closing Stock) into a Gross Profit line, followed by an Operating block that deducts admin, selling, and finance costs to reach Net Profit. Filter both blocks on the same TRD/OPS sub-account segment so the report self-documents which accounts belong where — auditors and RRA officers reviewing the statement can trace every figure back to a posting rule instead of a manual spreadsheet adjustment.</p>
+<p>Closing stock is the one figure that will not come from a GL account balance directly — it comes from the Inventory subledger (Item Costing / Inventory Summary), valued at the period-end date. Reconcile that number against the Trading Account's closing stock line before you publish the statement; a mismatch here is the most common reason gross profit figures get challenged.</p>
+<h2 id="multi-currency-purchases-and-rwf-reporting">Multi-currency purchases and RWF reporting</h2>
+<p>Most Rwandan trading businesses buy from suppliers in USD or EUR while their statutory books are kept in RWF. That means the Purchases and Freight-In lines in the trading account are exposed to exchange rate movement between invoice date and payment date, and again at period-end revaluation. Set up Currency Rate Types in Acumatica to distinguish the rate used for initial recognition from the rate used for period-end revaluation, and run the revaluation process before closing the period the trading account report covers. If you skip revaluation, the Purchases figure in the trading account will not reconcile to the AP subledger in RWF, and the gross margin percentage you report will drift from what actually happened economically.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>EBM invoices still have to reconcile to sales, not just to VAT</strong>
+  <p>Rwanda's EBM (Electronic Billing Machine) requirement means every VAT-registered sale gets a fiscal signature and QR code transmitted to RRA in near-real-time. It is tempting to treat EBM compliance and the trading account as separate concerns, but the Sales figure feeding the trading account must tie back to the same invoice population reported through EBM. Build the Generic Inquiry that feeds your trading account Sales line off the same AR document set used for EBM submission, not a different summary table — otherwise you end up explaining two different revenue numbers to RRA.</p>
 </div>
-<h2 id="what-acumatica-rwanda-trading-account-reconciliation-is-for">What Acumatica Rwanda Trading Account Reconciliation is for</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the rwanda is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>The performance of rwanda in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>Production rwanda looks different from development rwanda. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
+<h2 id="sample-trading-account-layout">Sample trading account layout</h2>
+<p>A simplified version of what the Financial Statement should render, in RWF, for a monthly or quarterly close:</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rwanda first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rwanda when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Line</th><th>Amount (RWF)</th></tr>
+  <tr><td>Sales</td><td>145,000,000</td></tr>
+  <tr><td>Less: Sales Returns</td><td>(2,100,000)</td></tr>
+  <tr><td>Opening Stock</td><td>18,400,000</td></tr>
+  <tr><td>Add: Purchases</td><td>92,600,000</td></tr>
+  <tr><td>Add: Direct Expenses (freight-in, duty)</td><td>6,300,000</td></tr>
+  <tr><td>Less: Closing Stock</td><td>(21,900,000)</td></tr>
+  <tr><td><strong>Cost of Sales</strong></td><td><strong>95,400,000</strong></td></tr>
+  <tr><td><strong>Gross Profit</strong></td><td><strong>47,500,000</strong></td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica rwanda trading account reconciliation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Gross Profit then carries forward as the opening line of the full P&amp;L, where operating expense sub-accounts (ADM, SEL, FIN) are deducted to arrive at Net Profit. Keeping this as a distinct block, rather than one long undifferentiated expense list, is what makes the statement useful to a bank loan officer or an RRA auditor at a glance.</p>
+<h2 id="closing-checklist">Closing checklist</h2>
+<p>Before you sign off a period: confirm the closing stock value from Inventory Summary matches the trading account's closing stock line, confirm currency revaluation ran before the Purchases figure was pulled, confirm the Sales line matches the EBM-submitted invoice population, and confirm no operating-expense transaction accidentally posted to a TRD sub-account (a common data-entry slip that quietly inflates gross margin). None of this requires custom code — it is Chart of Accounts discipline plus one well-built Financial Statement or Pivot report, checked the same way every close.</p>
+<p>That is the setup I use for trading account reporting on Acumatica implementations across the region — the same pattern holds whether the business is in Nairobi, Johannesburg, Kigali, Lusaka or Harare, with the sub-account segment and revaluation cadence being the only things that shift per country. If you are stuck wiring this up for your own chart of accounts, <a href="/#contact">reach out</a> or browse the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +151,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-zambia-turnover-tax/">Acumatica Zambia Turnover Tax — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

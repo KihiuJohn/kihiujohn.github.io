@@ -92,107 +92,75 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A CFO asked me once why the inventory valuation total on their balance sheet didn't match what the Inventory Valuation report showed for the same date. Both numbers were technically correct. They were answering different questions: one was a point-in-time GL balance, the other was a live recalculation against current item costs that had moved since the period closed. Inventory valuation reporting in Acumatica is one of those areas where understanding what a report is actually computing matters more than knowing which buttons to click.</p>
+
+<h2 id="live-vs-snapshot">Live valuation vs snapshot valuation are answering different questions</h2>
+<p>Acumatica's standard Inventory Valuation report, run without care, recalculates valuation using each item's <em>current</em> cost layers and current status. Run it for "as of" a date three months ago, and depending on costing method and whether cost layers have since been consumed or adjusted, you can get a number that does not match what the GL actually posted at that historical date. This isn't a bug; it's the report doing exactly what it's built to do, which is show current valuation logic applied against historical quantities, not literally replay history.</p>
+<p>A true valuation snapshot needs to freeze both quantity and unit cost at a specific point in time and never recompute against later cost changes. That's a materially different query, and it's the one auditors actually want when they ask for "inventory valuation as of period end."</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory valuation
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C# · building a frozen snapshot from INTran history</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Reconstruct on-hand qty and cost AS OF a period by summing all
+// transactions up to and including that period, per item/site/lot.
+PXSelectGroupBy&lt;INTran,
+    Where&lt;INTran.finPeriodID, LessEqual&lt;Required&lt;INTran.finPeriodID&gt;&gt;&gt;,
+    Aggregate&lt;
+        GroupBy&lt;INTran.inventoryID,
+        GroupBy&lt;INTran.siteID,
+        Sum&lt;INTran.qty,
+        Sum&lt;INTran.tranCost&gt;&gt;&gt;&gt;&gt;&gt;
+    .Select(Base, asOfPeriodID);
+</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on acumatica inventory valuation snapshot report, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the inventory is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-inventory-edge-cases-i-have-shipped">The inventory edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>The key discipline: sum <code>TranCost</code>, the actual recorded transaction cost at the time each movement posted, never the item's current standard or average cost. Joining historical quantity to today's cost is exactly the bug that produces a valuation report that doesn't reconcile to the GL.</p>
+
+<h2 id="costing-method-differences">Costing method changes what "unit cost" even means at a point in time</h2>
+<p>FIFO tracks discrete cost layers consumed in order, so a snapshot needs to know which layers were still open at the snapshot date, not just a blended average. Average costing recomputes a moving average with every receipt, so the "unit cost" at a historical date is whatever the running average was after the last receipt before that date, which the item's cost history table tracks, not the item master's current value. Standard costing is the simplest to snapshot because the standard cost is a deliberately set, relatively static value, but standard costing introduces its own variance accounts that a valuation snapshot needs to account for separately if you want the snapshot to tie to GL inventory asset accounts exactly.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>INItemCost and the cost history tables are where the real historical data lives</strong>
+  <p>Don't try to reconstruct historical average cost from current <code>INItemCost</code> values alone. Acumatica retains cost layer and cost history detail (particularly under FIFO and for landed cost adjustments) that lets you reconstruct what a specific lot's cost actually was at a point in time. Building a snapshot report against only the item's current cost fields instead of the transaction and layer history is the single most common mistake I've seen in custom valuation reports, and it's the direct cause of the CFO's mismatch story above.</p>
 </div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="gl-reconciliation">Tying the snapshot back to the GL inventory account</h2>
+<p>A valuation snapshot that doesn't reconcile to the GL's inventory asset account balance for the same date isn't useful for audit purposes, it's just a number. The reconciliation check that actually catches problems: sum the snapshot's extended value (quantity times historical unit cost) per site, and compare it against the GL account balance for the corresponding inventory account and branch as of that period, pulled straight from <code>GLTran</code>.
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · reconciliation check against the GL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>decimal glInventoryBalance = PXSelectGroupBy&lt;GLTran,
+    Where&lt;GLTran.accountID, Equal&lt;Required&lt;GLTran.accountID&gt;&gt;,
+    And&lt;GLTran.finPeriodID, LessEqual&lt;Required&lt;GLTran.finPeriodID&gt;&gt;&gt;&gt;,
+    Aggregate&lt;Sum&lt;GLTran.debitAmt&gt;&gt;&gt;
+    .Select(Base, inventoryAcctID, asOfPeriodID)
+    .RowCast&lt;GLTran&gt;().Sum(r =&gt; (r.DebitAmt ?? 0m) - (r.CreditAmt ?? 0m));
+
+decimal snapshotValue = /* sum of snapshot extended values for same account/branch */;
+decimal variance = glInventoryBalance - snapshotValue;
+// A nonzero variance here is worth investigating BEFORE handing the
+// report to an auditor, not after they find it themselves.
+</code></pre>
 </div>
-<h2 id="how-to-debug-inventory-in-production">How to debug inventory in production</h2>
-<p>The performance of inventory in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory valuation
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>A small persistent variance is often explainable, in-transit inventory, landed cost accruals not yet allocated, a timing difference between physical receipt and GL posting. A large or growing variance usually means a costing method edge case (a negative-quantity sale that later got a cost adjustment, for instance) that the snapshot query isn't accounting for correctly.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica inventory valuation snapshot report. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The standard Inventory Valuation report and a true point-in-time valuation snapshot answer different questions, and conflating them is how you end up explaining a mismatch to a CFO after the fact instead of before. Build snapshots from transaction-level cost history, never from an item's current cost fields, respect that FIFO and average costing carry genuinely different historical cost semantics, and always reconcile the snapshot against the GL inventory account before treating it as audit-ready.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing — FIFO, Average, and Beyond</a></li>
       <li><a href="/blog/acumatica-report-inventory-valuation-tuning/">Acumatica Inventory Valuation Report — Tuning Guide</a></li>
-      <li><a href="/blog/acumatica-formula-evaluation-context/">Acumatica Formula Evaluation Context</a></li>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-cost-rollup-and-standard-costing/">Acumatica Cost Rollup and Standard Costing</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Incident Response Runbook | John Kihiu</title>
-<meta name="description" content="Acumatica Incident Response Runbook is the Acumatica security topic that is invisible until it is breached. By the time you have a security incident, the questions are being asked.">
+<meta name="description" content="A practical incident-response runbook for Acumatica: how to detect, contain, investigate using the audit trail and login history, and recover from a security incident on a live ERP.">
 <meta name="keywords" content="Acumatica security, Acumatica operations, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-incident-response-runbook/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Incident Response Runbook">
-<meta property="og:description" content="Acumatica Incident Response Runbook is the Acumatica security topic that is invisible until it is breached. By the time you have a security incident, the questions are being asked.">
+<meta property="og:description" content="A practical incident-response runbook for Acumatica: how to detect, contain, investigate using the audit trail and login history, and recover from a security incident on a live ERP.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-incident-response-runbook.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-incident-response-runbook/">
 <meta property="article:author" content="John Kihiu">
@@ -20,7 +20,7 @@
 <meta property="article:tag" content="operations">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Incident Response Runbook","description":"Acumatica Incident Response Runbook is the Acumatica security topic that is invisible until it is breached. By the time you have a security incident, the questions are being asked.","image":"https://kihiujohn.github.io/assets/og/acumatica-incident-response-runbook.svg","datePublished":"2026-06-04","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-incident-response-runbook/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Incident Response Runbook","description":"A practical incident-response runbook for Acumatica: how to detect, contain, investigate using the audit trail and login history, and recover from a security incident on a live ERP.","image":"https://kihiujohn.github.io/assets/og/acumatica-incident-response-runbook.svg","datePublished":"2026-06-04","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-incident-response-runbook/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Incident Response Runbook","item":"https://kihiujohn.github.io/blog/acumatica-incident-response-runbook/"}]}
@@ -86,95 +86,71 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Incident Response Runbook</span></nav>
     <span class="tag">Acumatica · Security</span>
     <h1>Acumatica Incident Response Runbook</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Incident Response Runbook is the Acumatica security topic that is invisible until it is breached. By the time you have a security incident, the questions are being asked.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A practical incident-response runbook for Acumatica: how to detect, contain, investigate using the audit trail and login history, and recover from a security incident on a live ERP.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-04">Jun 4, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="why-acumatica-incident-response-runbook-matters-in-production">Why Acumatica Incident Response Runbook matters in production</h2>
-<p>Why Acumatica Incident Response Runbook matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaIncidentExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Incident(Acumatica doc)
-    {
-        // Custom incident logic for acumatica incident response
-        if (doc?.Incident == null) return;
-        Base.Incident(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica incident response runbook, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>A security incident on an ERP is not a code problem, it is a time problem. The minutes between "something looks wrong" and "we have contained it" are where the damage is either stopped or compounded, and nobody makes good decisions inventing the plan while a compromised account is exporting your customer list. This is the runbook I keep for Acumatica: what to do, in order, using the tools the platform already gives you — the audit trail, login history, access rights, and API activity — so the response is mechanical rather than improvised.</p>
+
+<h2 id="what-counts-as-an-incident">What counts as an incident</h2>
+<p>Define this before you need it, because in the moment everything looks either trivial or catastrophic and neither judgement is reliable. An incident is any of: a login you cannot attribute to a real user, a role or access-rights change nobody requested, a mass export or bulk record change outside normal hours, a new integration or API user you did not create, or unexpected outbound email from the tenant. A single failed login is noise. Fifty failed logins against one account followed by a success is an incident. Write the list down and give it to whoever watches the system, so the escalation is triggered by a rule, not by a feeling.</p>
+
+<h2 id="contain-first">Contain first, investigate second</h2>
+<p>The instinct to understand what happened before acting is the wrong one under active compromise. Containment comes first. In Acumatica that means, in order: disable the suspect user on the <strong>Users (SM201010)</strong> screen (set the account inactive rather than deleting it — you need it for the investigation), force a logout by revoking active sessions, rotate any shared or integration credentials the account could reach, and if an API token or OAuth client is implicated, revoke it under <strong>Connected Applications (SM303010)</strong>. Only once the door is shut do you start reconstructing what came through it.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Do not delete the account</strong>
+  <p>Deleting a compromised user destroys the audit linkage you need to trace their activity. Deactivate instead. The same applies to the records they touched — resist the urge to "clean up" until the investigation has captured what changed.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the incident is.</p>
+
+<h2 id="reconstruct-with-the-audit-trail">Reconstruct with the audit trail</h2>
+<p>Acumatica's built-in audit (configured under <strong>Audit (SM205510)</strong>) records inserts, updates, and deletes on the tables you have enabled it for, with the user, timestamp, and old/new values. If audit was turned on for the affected screens before the incident, this is your primary evidence. Pull the changes for the suspect user across the incident window and reconstruct the sequence. If you need to go wider than the audited tables, the platform login history and the <code>AU</code> audit history tables are queryable directly against the database.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · AUDIT QUERY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Login history for a suspect user across the incident window
+SELECT lh.Username, lh.LoginDateTime, lh.LogoutDateTime,
+       lh.ClientAddress, lh.LoginResult
+FROM   Login lh
+WHERE  lh.Username = @Username
+  AND  lh.LoginDateTime BETWEEN @From AND @To
+ORDER  BY lh.LoginDateTime;
+
+-- Field-level changes captured by the audit engine
+SELECT ah.CreatedDateTime, ah.CreatedByID, ah.TableName,
+       ah.FieldName, ah.OldValue, ah.NewValue
+FROM   AUAuditHistory ah
+WHERE  ah.CreatedDateTime BETWEEN @From AND @To
+ORDER  BY ah.CreatedDateTime;</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>Treat these queries as read-only forensics. Run them against a replica or with care against production, and export the results to a file that lives outside the tenant — you want the evidence somewhere the attacker cannot reach even if they still have a foothold.</p>
+
+<h2 id="check-access-rights-changes">Check what access changed</h2>
+<p>A common second stage of an account compromise is privilege escalation: the attacker adds themselves to a powerful role or creates a fresh admin. Review recent changes on <strong>User Roles (SM201005)</strong> and <strong>Access Rights by Role (SM201025)</strong>, and look for any user added to the Administrator role or granted rights to the integration and export screens. If your audit configuration covered the security tables, the who-and-when is already recorded; if not, this is the gap to close after the incident.</p>
+
+<h2 id="assess-data-exposure">Assess data exposure</h2>
+<p>The hardest question a stakeholder will ask is "what did they see or take". Narrow it with evidence rather than guessing. Look at the request log and any Web Services / OData API activity for large or unusual pulls, check whether generic inquiries or reports were exported, and review email history for outbound messages the account sent. If you have request-level logging in front of Acumatica (a reverse proxy or WAF), correlate the suspect client address from the login history against response sizes to spot bulk extraction. Document what you can prove was accessed and, separately, what was reachable but shows no evidence of access — regulators and customers care about the distinction.</p>
+
+<h2 id="recover-and-harden">Recover and harden</h2>
+<p>Recovery is not just re-enabling the account. Rotate every credential the incident could have exposed, including integration users and any secrets stored in the tenant. Reverse unauthorised data changes using the audit old-values as the source of truth. Re-enable the user only after forcing a password reset and confirming two-factor is enrolled. Then close the specific gap that let it happen: if 2FA was optional, make it mandatory; if audit was off on the affected screens, turn it on; if a shared integration account was used interactively, split it into a service account with least privilege.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Keep a written timeline</strong>
+  <p>From the first alert, log every action with a timestamp and who took it, in a document outside the tenant. This is what you hand to leadership, auditors, or a cyber-insurance claim. Reconstructing it from memory afterwards is where accuracy goes to die.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of incident in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production incident looks different from development incident. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaIncidentExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Incident(Acumatica doc)
-    {
-        // Custom incident logic for acumatica incident response
-        if (doc?.Incident == null) return;
-        Base.Incident(doc);
-    }
-}</code></pre>
-</div>
+
+<h2 id="the-runbook-at-a-glance">The runbook at a glance</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring incident first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with incident when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Phase</th><th>Action in Acumatica</th></tr>
+  <tr><td>Detect</td><td>Login history, audit trail, unusual API/export activity, unexpected role changes</td></tr>
+  <tr><td>Contain</td><td>Deactivate user (SM201010), revoke sessions, rotate credentials, revoke API clients (SM303010)</td></tr>
+  <tr><td>Investigate</td><td>Query Login and AUAuditHistory, review SM201005/SM201025 for privilege changes</td></tr>
+  <tr><td>Assess</td><td>API/OData logs, GI and report exports, outbound email history</td></tr>
+  <tr><td>Recover</td><td>Reverse changes from audit old-values, rotate secrets, re-enable with forced reset + 2FA</td></tr>
+  <tr><td>Harden</td><td>Mandatory 2FA, audit on security tables, least-privilege service accounts</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica incident response runbook. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The value of a runbook is that it turns a panic into a checklist. None of the individual steps here are exotic — deactivate, query the audit, rotate secrets, reverse the changes — but doing them in the right order, quickly, and with the evidence captured is the difference between an incident and a disaster. Write your version down now, enable audit on the screens that matter, and make 2FA non-optional, so the worst day is one you have already rehearsed. If you want a second pair of eyes on your Acumatica security posture, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -185,9 +161,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

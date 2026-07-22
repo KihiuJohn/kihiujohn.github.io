@@ -92,116 +92,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When to use it (and when not to) is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>"Parameters" and "prompts" get used interchangeably by clients and, honestly, by some documentation, but in the Report Designer they're related concepts with a real distinction that matters the moment a report needs to run both interactively and from a screen action. Getting this wrong is why reports that work perfectly when a user clicks through the sitemap sometimes fail — or worse, silently show wrong data — when triggered from a button on a business document.</p>
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-acumatica">Latency and cost tradeoffs for acumatica</h2>
-<p>In the work I have done on acumatica report parameters vs prompts, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-report">Prompt patterns that work for report</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the report is.</p>
+<h2 id="what-a-parameter-actually-is">A parameter is a typed input the schema can reference; a prompt is its optional UI</h2>
+<p>A report parameter is declared once, with a name, a type, and optionally a default value and a list of valid values. Every WHERE clause, every layout expression, references it as <code>[@ParameterName]</code>. Whether the end user ever sees a box to type into depends on how the report is invoked: run from the report catalogue via the sitemap, Acumatica auto-generates a prompt screen from the declared parameters. Invoked from a screen's Print action or a workflow via <code>PXReportRequiredException</code>, the calling graph populates the parameter dictionary in code and the report renders directly — no prompt screen appears at all, because the caller already knows the values.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">C# — INVOKING A REPORT WITH PARAMETERS SET IN CODE (NO PROMPT SHOWN)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var parameters = new Dictionary&lt;string, string&gt;
+{
+    { "OrderType", order.OrderType },
+    { "OrderNbr", order.OrderNbr },
+};
+throw new PXReportRequiredException(parameters, "SO641000", PXBaseRedirectException.WindowMode.NewWindow,
+    "Print Order");</code></pre>
 </div>
-<h2 id="how-to-evaluate-acumatica-in-production">How to evaluate acumatica in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-role-of-report-in-the-agent-loop">The role of report in the agent loop</h2>
-<p>The performance of report in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="what-acumatica-report-parameters-vs-prompts-actually-does">What Acumatica Report Parameters vs Prompts actually does</h2>
-<p>Production report looks different from development report. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="the-failure-mode">Why this breaks reports that assume they're always prompted</h2>
+<p>A report built and tested only through the sitemap prompt screen gets used to the idea that a parameter is always populated — the prompt validates required fields before letting the user run the report. A report invoked from a screen action has no such gate: if the calling graph forgets to pass a parameter, or passes an empty string instead of omitting it, the report runs anyway with a blank or default value, and depending on how the schema's filter is written, either returns everything (a missing WHERE condition effectively vanishes) or returns nothing (a filter comparing to an empty string that matches no rows). Test every report both ways — through the prompt screen and via a direct action call with deliberately incomplete parameters — before considering it done.</p>
+<div class="callout-warn callout">
+  <strong>Required-but-blank behaves differently depending on the parameter type</strong>
+  <p>A string parameter left blank and referenced in a filter as <code>Field Equal =[@Param]</code> typically returns zero rows, not an error — the filter just doesn't match anything, which looks to a user like "the report is broken" rather than "you forgot to fill in the box." A numeric or date parameter left blank can instead throw a conversion error at render time. Know which failure mode each of your parameters produces and decide whether that's acceptable or needs a default value.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring report first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with report when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="cascading-and-defaults">Defaults and cascading values reduce prompt friction — use them for interactive reports</h2>
+<p>For reports that are genuinely meant to be run interactively and often, invest in sensible defaults (date range defaulting to current period, not blank) and, where the Schema Builder supports it, cascading parameter lists (selecting a customer narrows a subsequent order-number picklist to that customer's orders) rather than presenting a wall of unconstrained free-text boxes. This is the same UX discipline that makes a good Generic Inquiry filter panel pleasant to use, and it applies just as much to a report prompt screen that a controller runs every Monday morning.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica report parameters vs prompts. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A parameter is the underlying typed input; a prompt is only the auto-generated UI for it when a report runs standalone from the sitemap — screen-action invocations skip the prompt and populate parameters directly from code. Test both invocation paths, know what an unset parameter does to your specific filter expressions, and give interactive reports sensible defaults and cascading lists so the prompt screen doesn't become the annoying part of running the report.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-formula-evaluation-context/">Acumatica Formula Evaluation Context</a></li>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
-      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-report-designer-guide/">Acumatica Report Designer Guide</a></li>
+      <li><a href="/blog/acumatica-gi-parameters-and-default-values/">Acumatica GI Parameters and Default Values</a></li>
+      <li><a href="/blog/acumatica-report-designer-conditional-visibility/">Acumatica Report Designer Conditional Visibility</a></li>
+      <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters</a></li>
+      <li><a href="/blog/acumatica-report-publishing-to-version-control/">Acumatica Report Publishing to Version Control</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

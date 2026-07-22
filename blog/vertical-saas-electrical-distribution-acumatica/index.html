@@ -93,96 +93,44 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Electrical distributors have one inventory problem that plumbing and HVAC distributors mostly do not share at the same intensity: commodity-priced wire and conduit whose cost moves daily with copper and aluminum prices, sold alongside thousands of comparatively stable-cost fittings and devices. Getting inventory costing method selection right per item class matters more here than in most distribution verticals I work with, because a single wrong default can distort margin reporting across a huge share of revenue.</p>
+
+<h2 id="costing-method-by-item-class">Costing method should follow the commodity, not a single instance-wide default</h2>
+<p>Acumatica supports several inventory costing methods (FIFO, moving average/perpetual average, standard, and others) configured at the item class or item level, not forced instance-wide. For copper and aluminum wire products where cost genuinely moves week to week, I generally recommend FIFO or moving average over standard costing, because standard costing on a fast-moving commodity requires constant revision to stay accurate and otherwise buries real margin swings in a variance account nobody reviews. For stable-cost fittings and devices, standard or average costing is simpler to manage and the volatility argument does not apply.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ElectricalExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · COSTING METHOD BY ITEM CLASS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Item Class WIRE-COPPER      Costing Method: FIFO (or Moving Avg)
+Item Class WIRE-ALUMINUM    Costing Method: FIFO (or Moving Avg)
+Item Class DEVICES-STD      Costing Method: Standard
+Item Class FITTINGS-STD     Costing Method: Standard</code></pre>
 </div>
-<h2 id="why-electrical-on-a-horizontal-platform-beats-from-scratch">Why electrical on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on electrical distribution vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<h2 id="cut-length-and-uom">Cut lengths and unit-of-measure conversions are the second recurring gap</h2>
+<p>Wire and conduit sold by the foot off large spools, with a spool tracked as a stocking unit but sold in variable cut lengths, is a unit-of-measure and, often, a lot/serial-adjacent tracking problem — Acumatica's UOM conversion handles the foot-to-spool math natively, but reconciling "how much is left on this partially used spool" cleanly usually needs either a dedicated non-inventory adjustment workflow at cut time or a lightweight customization tracking remaining footage per spool as a sub-lot. I scope this explicitly rather than assuming standard UOM conversions alone solve it, because they solve the pricing math, not the physical remaining-quantity tracking.</p>
+
+<div class="callout-warn callout">
+  <strong>Price protection and quote validity windows are a common ask, not a stock feature</strong>
+  <p>Because copper and aluminum prices move, electrical distributors frequently want a quote to lock in pricing for a defined window (say, 15 days) regardless of what the commodity does afterward. Acumatica does not enforce a price-lock expiration by default — it is a validation or a workflow addition on the quote-to-order conversion, checking the quote date against a configured validity period before allowing conversion at the quoted price. Confirm this is genuinely needed before building it; some distributors handle it as a sales policy rather than a system control.</p>
 </div>
-<h2 id="channel-partner-programs-for-distribution">Channel partner programs for distribution</h2>
-<p>When the work moves from design to production, the questions change. The electrical is not the question; the failure mode of the distribution is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'electrical'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-electrical">Marketplace listing for electrical</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-distribution">SOC 2 and ISO 27001 for distribution</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM electrical
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of distribution in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-electrical-distribution-vertical-on-acumatica-is-for">What Electrical Distribution Vertical on Acumatica is for</h2>
-<p>Production distribution looks different from development distribution. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ElectricalExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring distribution first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add electrical on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with distribution when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on electrical distribution vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Electrical distribution on Acumatica is a Distribution Edition base with two areas of real customization attention: costing method selected deliberately per item class rather than one instance-wide default, and cut-length/spool tracking for wire and conduit, which usually needs a small addition beyond stock UOM conversion. Everything else — matrix items, warehouse operations, replenishment — follows the standard distribution pattern.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-distribution-acumatica/">Beverage Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-food-distribution-acumatica/">Food Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-hvac-distribution-acumatica/">HVAC Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-industrial-supply-acumatica/">Industrial Supply Distribution Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-hvac-distribution-acumatica/">HVAC Distribution on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-plumbing-distribution-acumatica/">Plumbing Distribution on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-trades-acumatica/">Trades Contractors on Acumatica</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts Extension</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,107 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-acumatica-gi-real-time-vs-snapshot-patterns-matters-in-production">Why Acumatica GI — Real-Time vs Snapshot Patterns matters in production</h2>
-<p>Why Acumatica GI — Real-Time vs Snapshot Patterns matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaRealExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Real(Acumatica doc)
-    {
-        // Custom real logic for acumatica real time
-        if (doc?.Real == null) return;
-        Base.Real(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica gi — real-time vs snapshot patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the real is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Every GI is "live" in the sense that it queries current data on every execution — there is no caching layer built into the GI engine itself. Whether that live query is the right architecture for a given use case is a separate question, and conflating "GIs are always real-time" with "real-time is always what I want" causes both performance problems and, less obviously, correctness problems.</p>
+
+<h2 id="what-live-actually-means">What "the GI is live" actually costs</h2>
+<p>Every time a GI runs — grid load, refresh, dashboard tick, scheduled export — it issues a fresh query against the transactional tables. There is no automatic result caching between requests, no materialized intermediate state. That is exactly right for "show me this specific invoice's current balance" and exactly wrong for "show a company-wide KPI that fifty people glance at all day" — the second case pays the full query cost every single time, for data that realistically only changes a few times a day.</p>
+
+<h2 id="when-snapshot-is-the-honest-answer">When a snapshot is actually more correct, not just faster</h2>
+<p>There is a subtler reason to prefer a snapshot beyond raw performance: period-based financial reporting often wants a specific point-in-time view, and a "live" GI queried at different moments during a busy posting day can return different numbers for what is nominally "the same report" — which is confusing for anyone comparing what they saw at 9 a.m. to what a colleague sees at 3 p.m. A snapshot taken once (say, at end of day) and reported from consistently removes that ambiguity entirely; it is not just cheaper, it is the more defensible answer for "what did the aged AR report say on the 30th."</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Ask what the number is supposed to mean before optimizing it</strong>
+  <p>"As of right now" and "as of end of last business day" are both legitimate answers depending on the report's purpose. Confirm which one the requirement actually needs before assuming real-time is the goal — a lot of "make it faster" requests are better solved by admitting the report never needed to be live in the first place.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="building-a-snapshot">Building a snapshot in practice</h2>
+<p>A snapshot is not a GI feature — it is a scheduled job (a processing screen or a simple graph action under Automation Schedules) that runs a query and writes the results into a plain summary DAC, timestamped. The GI you actually expose to users then queries that summary table instead of the live transactional data:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SNAPSHOT PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>1. Scheduled job (nightly, or every N hours) runs the expensive aggregation
+   query against GLTran / ARTran, writes results to KGDailyBalanceSnapshot
+   with a SnapshotDate column.
+
+2. User-facing GI queries KGDailyBalanceSnapshot directly:
+   SelectFrom&lt;KGDailyBalanceSnapshot&gt;.Where&lt;SnapshotDate.IsEqual&lt;LatestSnapshot&gt;&gt;
+
+3. GI header displays "As of {SnapshotDate}" pulled from the same table,
+   so users always know exactly how current the number is.</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of real in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production real looks different from development real. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaRealExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Real(Acumatica doc)
-    {
-        // Custom real logic for acumatica real time
-        if (doc?.Real == null) return;
-        Base.Real(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring real first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with real when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>That last point — always surfacing the as-of timestamp — is the detail that separates a good snapshot design from a confusing one. Users forgive stale data readily as long as they know it is stale; what erodes trust is a report that looks live but silently is not.</p>
+
+<h2 id="hybrid-approach">A hybrid worth knowing: event-driven refresh</h2>
+<p>Between fully live and fixed-schedule snapshot sits an event-driven refresh: Business Events trigger the snapshot job on meaningful transitions (a GL batch release, a period close) rather than on a fixed timer. This gets you snapshot-level query performance with freshness that tracks actual business events rather than an arbitrary clock — worth the extra setup when the data's natural cadence is "changes a few times a day, unpredictably" rather than either constant or perfectly scheduled.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi — real-time vs snapshot patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>GIs are live by default because there is no caching layer under them — that is a fact about the platform, not a design recommendation for every report. For high-traffic, low-volatility numbers, a scheduled or event-triggered snapshot table is often both faster and more correct than a live query, as long as the as-of time is surfaced honestly to whoever is reading it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
-      <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters — Dependent Filters</a></li>
+      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage</a></li>
+      <li><a href="/blog/acumatica-gi-dashboard-best-practices/">Acumatica GI Dashboard Best Practices</a></li>
+      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
+      <li><a href="/blog/acumatica-business-events-monitoring/">Acumatica Business Events Monitoring</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

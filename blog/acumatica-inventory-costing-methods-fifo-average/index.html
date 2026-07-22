@@ -93,98 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="how-to-evaluate-acumatica-in-production">How to evaluate acumatica in production</h2>
-<p>How to evaluate acumatica in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>The costing method you choose in Acumatica decides what number lands in cost of goods sold every time you ship, and it is one of the hardest things to change once a company is live and holding history. FIFO, Average, Specific, and Standard are not interchangeable preferences — each implies a different cost flow, a different reaction to price volatility, and a different reconciliation story with finance. This is how they actually behave and how to pick before you are stuck.</p>
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="where-the-method-is-set">Where the method is set</h2>
+<p>Valuation method is a property of the <strong>Item</strong>, defaulted from the <strong>Item Class</strong>, and set on the Stock Item's <em>General</em> settings. That means you can run different methods for different item classes in the same company — Standard for manufactured goods, FIFO for high-value traded stock, Average for fast-moving consumables — as long as you decide deliberately. The important constraint: once an item has transactions, Acumatica will not let you switch its valuation method freely, because the historical layers no longer make sense under a different flow. Changing method in practice means running the item down to zero, or a scripted revaluation project, not a dropdown change.</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="fifo">FIFO — first in, first out</h2>
+<p>FIFO keeps discrete cost layers. Each receipt creates a layer at its own unit cost, and each issue consumes the oldest layers first. In a rising-price environment your COGS lags current replacement cost, which flatters margin in the short term and leaves inventory valued near current cost on the balance sheet. FIFO is the right choice when you genuinely rotate physical stock oldest-first and want cost to track that flow — perishables, batch-dated goods, anything where the layer history is meaningful. The cost is complexity: Acumatica tracks every open layer per item/warehouse, so high-turnover items accumulate a lot of them, and the inventory valuation reconciliation is layer-by-layer rather than a single average.</p>
+
+<h2 id="average">Average cost</h2>
+<p>Average (moving average) collapses everything into one running cost per item/warehouse. Every receipt recomputes the average against the on-hand quantity, and every issue leaves at that current average. It is the simplest to reason about and reconcile — one number, not a stack of layers — and it smooths price volatility rather than exposing it. The trade-off is that it hides the timing information FIFO preserves, and a large receipt at an unusual price shifts the cost of everything already on hand. For most distribution and general inventory scenarios in the region, Average is the pragmatic default: finance understands it, the sub-ledger stays simple, and the month-end variance investigation is short.</p>
+<div class="callout">
+  <strong>Average is not a single global number</strong>
+  <p>The moving average is maintained per item <em>per warehouse</em> (and per valuation cost basis). Transfers between warehouses move cost between those pools. If two sites show different unit costs for the same item, that is expected behaviour, not a bug.</p>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on acumatica inventory costing — fifo, average, and beyond, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="specific">Specific — track by lot or serial</h2>
+<p>Specific identification carries the exact cost of the exact unit. It is only meaningful for items you already track by lot or serial number, where each physical unit is individually identifiable and its acquisition cost is known. Think high-value, low-volume goods — equipment, precious materials, regulated items with recall requirements. It gives you the most precise COGS possible, and it is the most operationally demanding: every issue has to name the specific lot/serial, so it only works when your warehouse process already enforces that discipline.</p>
+
+<h2 id="standard">Standard cost</h2>
+<p>Standard cost fixes a planned unit cost and books the difference between standard and actual as variances (purchase price variance on receipt, and manufacturing variances in production). Inventory always sits at standard, which makes the sub-ledger predictable and makes margin analysis clean — until the standards drift from reality and the variance accounts balloon. Standard is the natural fit for manufacturing and for businesses that want stable planning costs and treat variance as a management signal. It requires a discipline the others do not: a periodic standard-cost roll and review, or the numbers quietly go stale.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Standard cost needs a maintenance cadence</strong>
+  <p>A standard cost is only as good as its last review. If purchase prices have moved 20% and standards have not, every receipt throws a large variance and inventory valuation drifts from economic reality. Schedule the cost roll — quarterly at minimum — and treat growing variances as the alarm they are.</p>
 </div>
-<h2 id="the-role-of-inventory-in-the-agent-loop">The role of inventory in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the inventory is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="what-acumatica-inventory-costing-fifo-average-and-beyond-actually-does">What Acumatica Inventory Costing — FIFO, Average, and Beyond actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of inventory in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="how-they-compare">How they compare</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Method</th><th>Cost flow</th><th>Best fit</th><th>Main trade-off</th></tr>
+  <tr><td>FIFO</td><td>Oldest layer first</td><td>Rotated / dated stock, layer history matters</td><td>Many open layers to track and reconcile</td></tr>
+  <tr><td>Average</td><td>Moving average per item/warehouse</td><td>General distribution, simple reconciliation</td><td>Hides timing; large receipts shift on-hand cost</td></tr>
+  <tr><td>Specific</td><td>Exact cost of the exact unit</td><td>Lot/serial-tracked high-value goods</td><td>Demands per-unit discipline on every issue</td></tr>
+  <tr><td>Standard</td><td>Fixed cost + variances</td><td>Manufacturing, stable planning costs</td><td>Needs a regular cost roll or standards go stale</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica inventory costing — fifo, average, and beyond. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<h2 id="migration">Changing method on a live item</h2>
+<p>The recurring real-world request is "we picked Average and now we want Standard" (or the reverse). There is no in-place switch on an item with history. The clean path is to run the item quantity to zero, change the method, then receive it back in — practical only for a handful of items. For a whole company it becomes a project: freeze transactions, capture on-hand quantities and current valuation, adjust everything out at the old method, change the item/class method, and adjust back in at the target cost, tying the net inventory GL impact to zero. Do it in a copy of the tenant first, reconcile the inventory sub-ledger to the GL before and after, and pick a period boundary with finance so the cut-over is clean.</p>
+
+<h2 id="wrapping-up">Choosing without regret</h2>
+<p>Default to Average unless you have a specific reason not to — it is the simplest to run and reconcile, and most distribution businesses never outgrow it. Reach for FIFO when physical rotation and layer history genuinely matter, Specific when you already track lots or serials on high-value goods, and Standard when you are manufacturing or need stable planning costs and can commit to maintaining them. The one thing you cannot do cheaply is change your mind after go-live, so decide with finance up front. If you are weighing this for a live implementation, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +142,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

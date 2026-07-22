@@ -93,81 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Observability: lineage, monitoring, alerts is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica's schema is generated: every DAC maps to a physical table, and out of the box the platform indexes primary keys, a handful of unique constraints, and the columns it already knows will be filtered on. Everything else — the custom BQL view that joins three tables, the generic inquiry a controller built to slice AR by project, the report that groups by a Usr-prefixed field — runs on whatever the query optimizer can do with what's there. Indexing Acumatica well is less about learning new SQL and more about knowing where the platform stops helping you and your own judgment has to start.</p>
+
+<h2 id="how-dacs-map-to-tables">How DACs map to tables</h2>
+<p>A DAC's fields correspond one-to-one with columns on its mapped table, and Acumatica ships primary key and identity indexes for the tables it controls directly — <code>APInvoice</code>, <code>SOOrder</code>, <code>ARTran</code>, and so on. What it does not do is anticipate every predicate you'll ever filter or sort on. A generic inquiry built against <code>SOOrder</code> filtering on <code>CustomerID</code> and a custom date range will use the clustered index scan happily at 5,000 rows and choke at 500,000, because nothing indexes that specific combination. The same is true for custom DACs backed by new tables created through a Usr-field or a full custom table — SQL Server gives you a clustered primary key and nothing more unless you add it yourself.</p>
+
+<h2 id="finding-missing-indexes-safely">Finding missing indexes safely</h2>
+<p>SQL Server tracks what the optimizer wished it had via the missing-index DMVs. They're a starting point, not a prescription — they reflect compiled plans since the last service restart and say nothing about write cost, so blindly creating every suggestion is how systems end up with fifteen overlapping indexes on <code>GLTran</code>. Treat the output as a shortlist to validate against actual query patterns from the slow queries you already know about, not as a to-do list to clear.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · MISSING INDEX + TARGETED INDEX</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Rank missing-index suggestions by estimated impact
+SELECT TOP 20
+    d.statement AS table_name,
+    d.equality_columns,
+    d.inequality_columns,
+    d.included_columns,
+    gs.avg_user_impact,
+    gs.user_seeks + gs.user_scans AS usage_count
+FROM sys.dm_db_missing_index_details d
+JOIN sys.dm_db_missing_index_groups g ON d.index_handle = g.index_handle
+JOIN sys.dm_db_missing_index_group_stats gs ON g.index_group_handle = gs.group_handle
+ORDER BY gs.avg_user_impact * (gs.user_seeks + gs.user_scans) DESC;
+
+-- A realistic fix: SOOrder filtered by branch + status,
+-- sorted by order date, with commonly-selected columns included
+-- so the query is satisfied from the index without a key lookup
+CREATE NONCLUSTERED INDEX IX_SOOrder_Branch_Status_OrderDate
+ON SOOrder (BranchID, Status, OrderDate)
+INCLUDE (CustomerID, OrderNbr, OrderType, CuryOrderTotal);</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on acumatica sql server — indexing for acumatica dacs, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The <code>INCLUDE</code> columns matter as much as the key columns. Acumatica's generic inquiries and reports tend to select a wide set of display fields even when they filter narrowly, so an index that covers the filter but forces a key lookup for every display column barely helps. Include what the query actually selects, not just what it filters on.</p>
+
+<h2 id="index-maintenance-jobs">Index maintenance jobs</h2>
+<p>Acumatica tables under active transaction load — <code>GLTran</code>, <code>ARTran</code>, <code>APTran</code>, <code>INTran</code> — fragment quickly because rows insert in transaction order but indexes are frequently keyed by business date or reference number, not insert order. A standard maintenance job checks <code>sys.dm_db_index_physical_stats</code> and reorganizes indexes between 5-30% fragmentation, rebuilds above 30%, and skips small tables where fragmentation is cosmetic. Run it in the maintenance window, not mid-day — a rebuild takes a schema modification lock unless you're licensed for <code>ONLINE = ON</code>, which stalls every screen touching that table.</p>
+<div class="callout">
+  <strong>Update statistics after large data loads</strong>
+  <p>A bulk import through the Acumatica import scenarios or a direct SQL load can leave statistics stale even when fragmentation is fine. If a report that was fast suddenly picks a bad plan after a data migration, check <code>sys.dm_db_stats_properties</code> before you assume it's an indexing problem — sometimes it's just an out-of-date row-count estimate.</p>
+</div>
+
+<h2 id="the-cost-of-over-indexing">The cost of over-indexing</h2>
+<p>Acumatica is a write-heavy OLTP system — every sales order, AP bill, and inventory move touches several tables in one transaction. Every additional nonclustered index on those tables is extra work on every insert and update, and on high-transaction tables like <code>GLTran</code> or <code>INTran</code> that overhead is felt directly in screen responsiveness, not just in batch jobs. It's tempting to index every column a generic inquiry ever filters on; the better discipline is to add indexes for the queries that actually run often and are actually slow, and to periodically check <code>sys.dm_db_index_usage_stats</code> for indexes with high writes and near-zero reads — those are pure cost with no benefit, and dropping them is often the fastest performance win available.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Don't index what a report only runs once a month</strong>
+  <p>A month-end reconciliation report that takes ninety seconds is usually acceptable. Adding a wide covering index to shave it to ten seconds, when that index adds overhead to every GL posting for the other 29 days, is a bad trade. Match the index investment to how often the query runs, not just how slow it feels once.</p>
 </div>
-<h2 id="why-acumatica-in-the-warehouse-beats-in-the-lake">Why acumatica in the warehouse beats in the lake</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sql is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.acumatica > 0).groupBy("sql").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="schema-evolution-for-sql">Schema evolution for sql</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="cost-optimisation-for-acumatica">Cost optimisation for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_acumatica') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-sql">The testing pyramid for sql</h2>
-<p>The performance of sql in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-acumatica">Backfills and rollbacks for acumatica</h2>
-<p>Production sql looks different from development sql. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sql first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sql when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sql server — indexing for acumatica dacs. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Index the predicates your custom BQL views, generic inquiries, and reports actually use, not every column that could theoretically be filtered. Use the missing-index DMVs as a lead to investigate, not an instruction to execute. Keep a maintenance job rebuilding and reorganizing based on measured fragmentation, and periodically prune indexes nobody reads — on a system where every table write cascades through GL, AR, and inventory in the same transaction, an unused index isn't neutral, it's a tax you're paying on every posting.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +150,6 @@ LIMIT 100;</code></pre>
       <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

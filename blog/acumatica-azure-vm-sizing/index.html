@@ -93,89 +93,70 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAzureExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Azure(Acumatica doc)
-    {
-        // Custom azure logic for acumatica azure sizing
-        if (doc?.Azure == null) return;
-        Base.Azure(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>In the work I have done on acumatica azure vm sizing — a practical guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Acumatica is a .NET application running on IIS in front of SQL Server, so sizing it on Azure is really two sizing exercises: the application (web) tier, which is CPU- and memory-bound per concurrent request, and the database tier, which lives or dies by how much of the working set fits in the SQL buffer pool. Get the split right and a mid-size deployment runs comfortably on a handful of vCPUs; get it wrong and you either overpay for idle cores or watch response times climb every quarter-end.</p>
+
+<h2 id="size-by-concurrent-users-not-named">Size by concurrent users, not named users</h2>
+<p>Acumatica's own sizing guidance is expressed in <strong>concurrent</strong> users — people actively hitting the server in the same window — not the number of accounts you licensed. A useful planning ratio is that concurrent users land somewhere around 25–35% of named users for a typical office-hours ERP workload, higher if you run shift work or heavy self-service portals. Count the concurrent number honestly, because every tier below is driven by it. A 200-named-user tenant that peaks at 50 concurrent is a very different machine from one where all 200 log in for month-end close.</p>
+
+<h2 id="the-application-tier">The application tier</h2>
+<p>The IIS/application server is the front line. Each concurrent request consumes CPU and a slice of the worker-process memory, and Acumatica keeps a lot of metadata and per-graph cache in memory. General-purpose <strong>D-series</strong> VMs (Dsv5/Dds_v5) are the right family here — balanced vCPU-to-RAM, premium-SSD capable. A <code>D4s_v5</code> (4 vCPU, 16&nbsp;GB) is a sane starting point for up to roughly 50 concurrent users; step to <code>D8s_v5</code> (8 vCPU, 32&nbsp;GB) as you cross that. Add app servers behind a load balancer before you add a single giant one — Acumatica supports web farm deployments, and two mid-size nodes survive a reboot better than one large node.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Do not run production on B-series burstable VMs</strong>
+  <p>B-series (<code>B2s</code>, <code>B4ms</code>) look cheap because they bank CPU credits while idle and spend them under load. An ERP at close time drains those credits and then throttles to the baseline — exactly when you need the CPU. B-series is fine for a dev or training box; production wants D- or E-series with sustained performance.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the azure is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="the-database-tier">The database tier</h2>
+<p>SQL Server is almost always the tier that decides how the whole system feels. The single most important number is RAM: you want enough that the active working set — the data and index pages the day-to-day screens touch — stays resident in the buffer pool instead of being read from disk on every query. That points at the memory-optimised <strong>E-series</strong> (Esv5/Eds_v5), which give you roughly 8&nbsp;GB of RAM per vCPU. An <code>E4s_v5</code> (4 vCPU, 32&nbsp;GB) is a reasonable database starting point; move to <code>E8s_v5</code> (8 vCPU, 64&nbsp;GB) as the database grows past what 32&nbsp;GB can cache.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>SQL Server is licensed per core — buy RAM, not cores</strong>
+  <p>Because SQL Server Standard/Enterprise licensing is priced per physical core, over-provisioning vCPUs is expensive twice: once for the VM and again for the license. The memory-optimised E-series lets you add RAM (which is not licensed) without adding cores, which is usually the cheaper way to make SQL faster on an ERP workload.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="storage-layout-and-disks">Storage layout and disks</h2>
+<p>Disk is where a lot of Azure ERP deployments quietly underperform. Use <strong>Premium SSD</strong> (P-series managed disks) at minimum, and split SQL across separate disks so their I/O patterns do not fight each other: one disk for data files, one for the transaction log, and one for <code>tempdb</code>. Enable read-only host caching on the data disk, and set host caching to <em>None</em> on the log disk — the log is write-heavy and sequential, and caching it buys nothing while risking write-ordering surprises. If a specific workload is genuinely IOPS-starved (large imports, heavy reporting), <strong>Ultra Disk</strong> lets you dial IOPS and throughput independently, but confirm you actually need it before paying for it.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · AZURE CLI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Application (IIS) node: general-purpose D-series, Premium SSD OS disk
+az vm create \
+  --resource-group acumatica-prod \
+  --name acu-app-01 \
+  --image MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition:latest \
+  --size Standard_D4s_v5 \
+  --storage-sku Premium_LRS \
+  --admin-username acuadmin
+
+# Database node: memory-optimised E-series + dedicated Premium data/log/tempdb disks
+az vm create \
+  --resource-group acumatica-prod \
+  --name acu-sql-01 \
+  --image MicrosoftSQLServer:sql2022-ws2022:standard:latest \
+  --size Standard_E4s_v5 \
+  --storage-sku Premium_LRS \
+  --admin-username acuadmin
+az vm disk attach --resource-group acumatica-prod --vm-name acu-sql-01 \
+  --name sql-data --new --size-gb 256 --sku Premium_LRS --caching ReadOnly
+az vm disk attach --resource-group acumatica-prod --vm-name acu-sql-01 \
+  --name sql-log  --new --size-gb 128 --sku Premium_LRS --caching None</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The performance of azure in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Production azure looks different from development azure. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAzureExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Azure(Acumatica doc)
-    {
-        // Custom azure logic for acumatica azure sizing
-        if (doc?.Azure == null) return;
-        Base.Azure(doc);
-    }
-}</code></pre>
-</div>
+
+<h2 id="a-sizing-starting-point">A sizing starting point by deployment size</h2>
+<p>These are starting points to validate against your own telemetry, not guarantees — a report-heavy tenant or a chatty integration can push you up a tier regardless of user count.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring azure first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with azure when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concurrent users</th><th>App server</th><th>Database server</th><th>Notes</th></tr>
+  <tr><td>Up to ~25</td><td>D2s_v5 (2&nbsp;vCPU / 8&nbsp;GB)</td><td>E2s_v5 (2&nbsp;vCPU / 16&nbsp;GB)</td><td>Can co-locate app + SQL on one box for very small sites</td></tr>
+  <tr><td>~25–50</td><td>D4s_v5 (4&nbsp;vCPU / 16&nbsp;GB)</td><td>E4s_v5 (4&nbsp;vCPU / 32&nbsp;GB)</td><td>Separate app and database VMs</td></tr>
+  <tr><td>~50–100</td><td>D8s_v5 (8&nbsp;vCPU / 32&nbsp;GB)</td><td>E8s_v5 (8&nbsp;vCPU / 64&nbsp;GB)</td><td>Consider a second app node behind a load balancer</td></tr>
+  <tr><td>100+</td><td>2× D8s_v5 web farm</td><td>E16s_v5 (16&nbsp;vCPU / 128&nbsp;GB)</td><td>Scale app tier out, database tier up; watch disk IOPS</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica azure vm sizing — a practical guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<h2 id="managed-sql-vs-sql-on-a-vm">Managed SQL vs SQL on a VM</h2>
+<p>Running SQL Server on its own VM gives you full control and the familiar operational model, at the cost of patching, backups, and HA being your problem. <strong>Azure SQL Managed Instance</strong> takes most of that off your plate and keeps near-full SQL Server compatibility, which matters because Acumatica uses SQL Server features and expects a real instance. Verify the specific Acumatica version's supported configurations before committing to Managed Instance — support has broadened over releases, and you want it confirmed for your build rather than assumed. The trade-off is straightforward: a VM is cheaper and more flexible if you already run SQL well; Managed Instance is worth the premium if patching and failover are chores you would rather not own.</p>
+
+<h2 id="controlling-the-monthly-bill">Controlling the monthly bill</h2>
+<p>ERP load is predictable — office hours, known close cycles — which makes it an ideal candidate for <strong>Azure Reserved Instances or a savings plan</strong>. Committing to one or three years on the VMs you know you will run cuts compute cost substantially versus pay-as-you-go, and you can still burst on-demand for anything seasonal. Two more levers: shut down or downscale non-production (dev, test, training) VMs outside working hours with an automation schedule, and use <strong>Azure Hybrid Benefit</strong> to bring existing Windows Server and SQL Server licences to the VM instead of paying for them again in the hourly rate. Right-size from real metrics after a month in production — CPU, buffer-pool hit ratio, disk queue length — rather than leaving the launch-day guess in place forever.</p>
+
+<h2 id="the-short-version">The short version</h2>
+<p>Split the tiers, size the app server for concurrent CPU and the database server for RAM, put SQL data, log, and tempdb on separate Premium disks, and keep burstable VMs out of production. Start from the table above, run for a month, then true it up against actual telemetry and lock in the cost with a reservation. If you want a second opinion on a specific deployment, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -186,9 +167,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-azure-service-bus-bridge/">Acumatica Azure Service Bus — A Bridge Pattern for Async Work</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

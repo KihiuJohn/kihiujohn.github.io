@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PXSetup Record Usage in Acumatica Customizations | John Kihiu</title>
-<meta name="description" content="PXSetup Record Usage in Acumatica Customizations is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Nearly every module in Acumatica ships a setup screen - AR Preferences, AP Preferences, Sales Orders Preferences - and behind each one is a DAC decorated with PXCacheName but.">
 <meta name="keywords" content="Acumatica customization, Acumatica dac, Acumatica configuration, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-pxsetup-record-usage/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PXSetup Record Usage in Acumatica Customizations">
-<meta property="og:description" content="PXSetup Record Usage in Acumatica Customizations is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Nearly every module in Acumatica ships a setup screen - AR Preferences, AP Preferences, Sales Orders Preferences - and behind each one is a DAC decorated with PXCacheName but.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-pxsetup-record-usage.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-pxsetup-record-usage/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="configuration">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PXSetup Record Usage in Acumatica Customizations","description":"PXSetup Record Usage in Acumatica Customizations is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxsetup-record-usage.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxsetup-record-usage/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PXSetup Record Usage in Acumatica Customizations","description": "Nearly every module in Acumatica ships a setup screen - AR Preferences, AP Preferences, Sales Orders Preferences - and behind each one is a DAC decorated with PXCacheName but.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxsetup-record-usage.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxsetup-record-usage/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PXSetup Record Usage in Acumatica Customizations","item":"https://kihiujohn.github.io/blog/acumatica-pxsetup-record-usage/"}]}
@@ -87,113 +87,97 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PXSetup Record Usage in Acumatica Customizations</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>PXSetup Record Usage in Acumatica Customizations</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PXSetup Record Usage in Acumatica Customizations is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Nearly every module in Acumatica ships a setup screen - AR Preferences, AP Preferences, Sales Orders Preferences - and behind each one is a DAC decorated with PXCacheName but.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="why-pxsetup-record-usage-in-acumatica-customizations-matters-in-production">Why PXSetup Record Usage in Acumatica Customizations matters in production</h2>
-<p>Why PXSetup Record Usage in Acumatica Customizations matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Nearly every module in Acumatica ships a setup screen - AR Preferences, AP Preferences, Sales Orders Preferences - and behind each one is a DAC decorated with <code>PXCacheName</code> but backed by a table that, by convention, holds exactly one row. When a customization needs its own module-level settings (a default markup percentage, an integration endpoint, a feature toggle), reaching for that same pattern is the right instinct. Getting the single-row guarantee actually right, though, is where I've seen this go wrong more than once.</p>
+
+<h2 id="the-pattern">A setup DAC is a one-row table, and PXSetup enforces that</h2>
+<p><code>PXSetup&lt;TSetup&gt;</code> is the data view type built specifically for this: it guarantees exactly one row exists, auto-creating it with defaults on first access if the table is empty, and every graph reading setup data gets the same singleton-per-tenant row rather than having to worry about "what if there are zero rows" or "what if there are somehow two."</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PxsetupRecordExt : PXGraphExtension<PxsetupEntry>
+  <div class="code-header"><span class="code-lang">C# · A minimal setup DAC</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[Serializable]
+[PXCacheName("Custom Module Preferences")]
+public class CSCustomSetup : IBqlTable
 {
-    [PXOverride]
-    public virtual void Record(Pxsetup doc)
-    {
-        // Custom record logic for pxsetup record usage
-        if (doc?.Record == null) return;
-        Base.Record(doc);
-    }
+    #region CompanyID
+    [PXDBInt]
+    [PXDBDefault(typeof(AccessInfo.companyID))]
+    public virtual int? CompanyID { get; set; }
+    public abstract class companyID : PX.Data.BQL.BqlInt.Field&lt;companyID&gt; { }
+    #endregion
+
+    #region DefaultMarkupPct
+    [PXDBDecimal(2)]
+    [PXDefault(TypeCode.Decimal, "0.0")]
+    [PXUIField(DisplayName = "Default Markup %")]
+    public virtual decimal? DefaultMarkupPct { get; set; }
+    public abstract class defaultMarkupPct : PX.Data.BQL.BqlDecimal.Field&lt;defaultMarkupPct&gt; { }
+    #endregion
+
+    #region IntegrationEndpoint
+    [PXDBString(255, IsUnicode = true)]
+    [PXUIField(DisplayName = "Integration Endpoint URL")]
+    public virtual string IntegrationEndpoint { get; set; }
+    public abstract class integrationEndpoint : PX.Data.BQL.BqlString.Field&lt;integrationEndpoint&gt; { }
+    #endregion
+}
+
+public PXSetup&lt;CSCustomSetup&gt; Setup;
+</code></pre>
+</div>
+
+<h2 id="companyid-and-multitenancy">CompanyID is what actually makes this safe on multi-tenant instances</h2>
+<p>The detail that's easy to skip and expensive to discover later: on a multi-tenant Acumatica instance (multiple companies sharing the same database), a setup table without a proper <code>CompanyID</code> field scoped by tenant isolation doesn't give you one row per company, it gives you one row for the entire database, silently shared across every tenant. <code>PXDBDefault(typeof(AccessInfo.companyID))</code> combined with the platform's standard tenant-isolation behavior on the field is what makes "exactly one row" actually mean "exactly one row per company" rather than "exactly one row, period." I've seen a client's custom markup setting bleed across two of their own subsidiary companies because this attribute was missed on the initial build - nobody noticed until Company B's invoices started showing Company A's markup percentage.</p>
+
+<div class="callout-warn callout">
+  <strong>Always verify with two real companies, not just Company A alone</strong>
+  <p>A setup DAC without a working CompanyID column tests as completely correct on a single-company sandbox, because there's nothing to isolate it from. The bug only shows up once a second company exists and both save different values into what turns out to be the same physical row. If your instance is multi-company at all, or ever might be, test setup screens against two companies before calling the feature done.</p>
+</div>
+
+<h2 id="reading-setup-values">Reading setup values from anywhere in a graph</h2>
+<p>Because <code>PXSetup</code> guarantees the row exists, reading a setting is a direct property access on <code>Setup.Current</code> without the null-checking dance you'd otherwise need - though I still guard it defensively in code that might run before the graph's views have initialized, such as static or early-lifecycle code paths:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · Reading setup from a FieldUpdated handler</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.FieldUpdated&lt;SOLine.curyUnitCost&gt; e)
+{
+    SOLine row = (SOLine)e.Row;
+    if (row == null) return;
+
+    decimal markupPct = Setup.Current?.DefaultMarkupPct ?? 0m;
+    row.CuryUnitPrice = decimal.Round(
+        (row.CuryUnitCost ?? 0m) * (1 + markupPct / 100m), 2, MidpointRounding.AwayFromZero);
 }</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on pxsetup record usage in acumatica customizations, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="pxsetup-implementation-walkthrough">Pxsetup implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The pxsetup is not the question; the failure mode of the record is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for pxsetup
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-pxsetup">Performance and observability for pxsetup</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of record in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production record looks different from development record. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PxsetupRecordExt : PXGraphExtension<PxsetupEntry>
-{
-    [PXOverride]
-    public virtual void Record(Pxsetup doc)
-    {
-        // Custom record logic for pxsetup record usage
-        if (doc?.Record == null) return;
-        Base.Record(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring record first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pxsetup on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with record when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="setup-screen-wiring">The setup screen itself is just PXSetup bound to a form, no grid</h2>
+<p>The screen definition for a setup page is deliberately simple compared to a transactional screen - a single form bound to the one-row view, no grid, because there's exactly one record to ever show. The graph backing it needs nothing beyond the <code>PXSetup</code> view itself unless you're adding cross-field validation (confirming an integration URL is well-formed, for instance) via the same RowPersisting pattern used everywhere else in the framework.</p>
+
+<h2 id="caching-across-graph-instances">Setup values are re-read per graph instance, not cached process-wide</h2>
+<p>A common performance assumption that's wrong: developers sometimes assume setup values, being "basically constants," are cached at the application level and free to read anywhere. They're not automatically - each new <code>PXSetup</code> view instance in each new graph instance triggers its own read (itself normally cache-fast via the platform's standard row caching, but not free of graph-instantiation overhead). For a value read constantly in a hot path - inside a loop processing thousands of rows, for example - read it once into a local variable at the top of the loop rather than dereferencing <code>Setup.Current</code> repeatedly inside it.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pxsetup record usage in acumatica customizations. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p><code>PXSetup&lt;T&gt;</code> is the correct pattern for module-level configuration precisely because it guarantees a single row exists without your code having to defend against zero or many. The detail that actually matters on real instances is CompanyID-based tenant isolation - get that wrong and "one row" quietly becomes "one row shared by every company on the database," a bug that stays invisible until a second company exists to expose it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-field-level-attribs-decimal-precision/">Acumatica Field Attributes — Decimal Precision and the Ones That Bite</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

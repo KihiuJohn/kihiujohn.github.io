@@ -93,107 +93,38 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFinancialExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Financial(Acumatica doc)
-    {
-        // Custom financial logic for acumatica financial statement
-        if (doc?.Financial == null) return;
-        Base.Financial(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica financial statement report — tuning guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the financial is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Acumatica's Financial Statement functionality (GL Financial Statements, built via the Financial Statement Designer rather than the classic Report Designer) has a different performance profile from a normal <code>.rpx</code> report, because a financial statement isn't one query — it's a tree of rows, each with its own formula referencing account groups, other rows, or prior columns, evaluated recursively. A slow financial statement is almost always a layout-recursion problem, not a database problem, and the fix is different from every other report in this series.</p>
+
+<h2 id="row-formulas-recompute-the-tree">Row formulas can force the whole statement to recompute per cell</h2>
+<p>A financial statement row can reference another row by ID in its formula — "Gross Profit = Row(Revenue) - Row(COGS)" — and those references can chain several levels deep (subtotals referencing subtotals). Each column (this period, prior period, budget, variance) re-evaluates that chain independently. A statement with twenty derived rows and six columns is 120 formula evaluations minimum, and if any of those rows pull from an account group with a wide account range, each evaluation is its own balance lookup. The fix is not "add an index" — GL balances are already summarized in <code>GLHistory</code>/<code>GLBalance</code>-family tables, not scanned from raw <code>GLTran</code>. The fix is reducing unnecessary column count and collapsing rows that don't need to be separately computed.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Check whether the report reads GLHistory or GLTran</strong>
+  <p>Acumatica's financial statement engine is built to read from the pre-summarized balance history tables, which is why it's fast by default for period-end totals. It falls back to detail-level transaction reads when a row's definition demands transaction-level filtering — a specific reference number pattern, a subaccount wildcard combined with a description filter — that summarized balances can't answer. If a statement got slow after someone added a row with a transaction-level filter condition, that's the row to look at first.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-financial-edge-cases-i-have-shipped">The financial edge cases I have shipped</h2>
-<p>The performance of financial in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production financial looks different from development financial. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaFinancialExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Financial(Acumatica doc)
-    {
-        // Custom financial logic for acumatica financial statement
-        if (doc?.Financial == null) return;
-        Base.Financial(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring financial first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with financial when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="account-group-wildcards">Account group definitions: broad wildcards cost more than they look like they should</h2>
+<p>A row defined against an account group with a broad wildcard (all accounts starting with <code>5</code>) forces the engine to resolve group membership at run time rather than reading a pre-materialized set, on some configurations. Where the requirement allows it, prefer explicit account groups maintained on the Account Groups screen over ad hoc wildcard patterns typed into the row definition — the account group is resolved once and cached by the platform, the inline wildcard is evaluated as part of the row formula every run.</p>
+
+<h2 id="column-count-and-comparatives">Comparative columns multiply cost linearly — don't default to more than needed</h2>
+<p>Every additional column (prior year, budget, budget variance, variance percentage) is effectively a full re-run of the row tree against a different period or dataset filter. A statement built with six comparative columns because "someone might want to see all of them" costs six times the base statement's evaluation cost on every single run, for a report most people view with two columns visible at a time. Default to the columns that are actually read weekly, and make additional comparatives a report variant or a drill-down rather than baked into the standard render.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica financial statement report — tuning guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Financial statement performance is a layout-recursion and column-count problem, not a SQL-tuning problem — the underlying balance tables are already summarized. Check whether a slow statement fell back to transaction-level reads because of a row's filter condition, prefer maintained account groups over inline wildcards, and keep comparative columns to what people actually look at rather than every combination someone might one day want.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-report-trial-balance-tuning/">Acumatica Trial Balance Report — Tuning Guide</a></li>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
-      <li><a href="/blog/acumatica-report-aged-payables-tuning/">Acumatica Aged Payables Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
+      <li><a href="/blog/acumatica-gl-period-end-close-checklist/">Acumatica GL Period-End Close Checklist</a></li>
+      <li><a href="/blog/acumatica-report-cash-flow-tuning/">Acumatica Cash Flow Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-trial-balance-vs-general-ledger-report/">Acumatica Trial Balance vs General Ledger Report</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

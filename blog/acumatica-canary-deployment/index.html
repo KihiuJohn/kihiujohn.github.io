@@ -92,93 +92,32 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Cost optimisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica's own release process for the Cloud editions is effectively a canary rollout — new builds reach a small ring of tenants before the wider fleet. When you run self-hosted or manage a fleet of client instances, you can borrow the same discipline for your own customization releases: ship a change to one low-risk tenant or environment first, watch it, then widen the blast radius. This is not built into Acumatica; it is a release discipline you impose around deployments of DLLs, projects, and database changes.</p>
+<h2 id="what-canary-means-for-a-monolith">What canary means for a monolith</h2>
+<p>Acumatica is not a fleet of independently deployable microservices, so "canary" does not mean routing 5% of traffic to a new pod. It means picking the smallest real exposure for a change: one tenant in a multitenant deployment, one branch in a multi-company setup used only by a small division, or a dedicated pilot environment with a subset of real users. The goal is the same as any canary — catch a regression while the cost of catching it is still small.</p>
+<h2 id="using-tenants-as-canary-rings">Using tenants as canary rings</h2>
+<p>If you run Acumatica multitenant, you already have a natural canary boundary. Publish a customization project to a single non-production-critical tenant first, run your smoke tests, and only then push to the tenant snapshot template used for the rest. The Instance Manager lets you manage tenants independently, so a bad customization in the canary tenant does not touch the others. The catch: schema-level changes (new DAC fields backed by real columns) apply at the database level shared across tenants in the same site, so not every change can be canaried this way — only project/customization-level changes that don't alter the shared schema.</p>
+<div class="callout-warn">
+  <strong>Site vs. tenant scope</strong>
+  <p>A customization project publish typically compiles and deploys for the whole site, not a single tenant. True per-tenant canarying only works cleanly when the change is data/configuration-driven — a feature flag stored in a custom setup field that you turn on for one tenant — rather than a code change that recompiles the whole application pool.</p>
+</div>
+<h2 id="canary-via-a-second-application-pool">Canary via a second application instance</h2>
+<p>The more reliable pattern for a genuine code canary is to stand up a second Acumatica instance pointed at a copy of the database (or a read-mostly staging copy), publish the new customization there, and route a small slice of real users — often just the QA team plus one or two friendly power users — to that URL for a defined window. Because Acumatica instances are IIS applications, this is just another site binding; DNS or a load balancer can send an internal "canary" hostname to the new pool while production stays on the old one.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · ROLLOUT SEQUENCE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>1. Publish customization to canary instance (canary.internal.company.com)
+2. Run automated smoke tests against canary (login, key screens, key actions)
+3. Route pilot users (QA + 2-3 power users) to canary for 24-48h
+4. Monitor: PXTrace log, IIS error log, SQL Server slow query log
+5. No new errors / no regression reports -> publish to production instance
+6. Keep the canary instance one version behind production as a rollback target</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on acumatica canary deployment, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="why-acumatica-is-the-on-call-s-best-friend">Why acumatica is the on-call's best friend</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the canary is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_canary" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="gitops-for-canary">GitOps for canary</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-deployment-pipeline-for-acumatica">The deployment pipeline for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-canary">SLOs and error budgets for canary</h2>
-<p>The performance of canary in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>Production canary looks different from development canary. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring canary first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with canary when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="what-to-watch-during-the-canary-window">What to watch during the canary window</h2>
+<p>A canary is only useful if you are actually watching it. The signals that matter most for an Acumatica release are the application event log for unhandled exceptions, the trace log for new PXException entries that were not present before, and SQL Server's plan cache for a query that suddenly went from an index seek to a scan because a new field on a DAC forced a different join. None of this requires new tooling — it requires deciding in advance what "worse" looks like and checking for it deliberately during the pilot window rather than waiting for a support ticket.</p>
+<h2 id="rolling-forward-vs-rolling-back">Rolling forward vs. rolling back</h2>
+<p>Because Acumatica customization packages are versioned and reversible through the Customization Projects screen, rollback during a canary is usually just re-publishing the previous package version to the affected tenant or instance. Keep the previous package archived outside of source control's working tree too — a project export you can hand to a colleague in a hurry is worth more at 6 PM on a Friday than a git tag that requires a full environment rebuild to apply.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica canary deployment. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Canary deployment on Acumatica is less about tooling and more about sequencing: pick the smallest real audience, define what you are watching for before you publish, and keep the previous package one click away. It will not catch everything — shared-schema changes and application-pool-wide recompiles limit how granular you can get — but it catches the class of regression that a same-day rollback turns into a non-event instead of an incident.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -189,9 +128,6 @@ jobs:
       <li><a href="/blog/acumatica-cicd-github-actions-for-acumatica/">Acumatica CI/CD with GitHub Actions</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

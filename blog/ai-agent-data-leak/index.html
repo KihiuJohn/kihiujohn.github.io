@@ -93,98 +93,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="latency-and-cost-tradeoffs-for-data">Latency and cost tradeoffs for data</h2>
-<p>Latency and cost tradeoffs for data is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>An LLM agent wired to your ERP has, by construction, broad read access to customer data, pricing, and financials — and every tool call result becomes part of the context sent to a third-party API. Data leak prevention here means two separate concerns: making sure the agent doesn't retrieve more than the current user is entitled to see, and making sure sensitive fields don't end up somewhere they shouldn't — provider logs, a wrong recipient, a downstream system without the same access controls.</p>
 
-def list_data(query: str) -> str:
-    """List data matching the query."""
-    response = requests.get(
-        f"https://api.example.com/data",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="data", func=list_data, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-leak">Prompt patterns that work for leak</h2>
-<p>In the work I have done on data leak prevention in llm apps, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="how-to-evaluate-data-in-production">How to evaluate data in production</h2>
-<p>When the work moves from design to production, the questions change. The data is not the question; the failure mode of the leak is.</p>
+<h2 id="permission-checks-belong-in-the-tool-not-the-prompt">Permission checks belong in the tool, not the prompt</h2>
+<p>"Only show data the current user is authorized to see" as a system prompt instruction is not a security boundary — a sufficiently unusual request, an injected instruction, or just model inconsistency can bypass it. Every tool that reads data should independently verify the requesting user's permissions against the record being accessed, the same way you'd guard a REST endpoint, regardless of what the prompt says or what the model claims about who's asking.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · PERMISSION-CHECKED TOOL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def get_customer_record(customer_id: str, requesting_user: User) -> dict:
+    """The permission check happens here, in code,
+    every time — never delegated to the model's judgment."""
+    if not requesting_user.can_view(customer_id):
+        raise PermissionDenied(f"{requesting_user.id} cannot view {customer_id}")
+    record = db.fetch_customer(customer_id)
+    return redact_fields(record, requesting_user.clearance_level)</code></pre>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="redaction-before-the-model-sees-it">Redact before the data reaches the model, not after</h2>
+<p>If a field shouldn't be visible to a given user, don't fetch it and trust the model not to repeat it — strip it at the data layer before it enters the prompt. A model can't leak a social security number, a full card number, or an internal margin figure it was never given. This also shrinks your token footprint, since fields the current request doesn't need don't need to be fetched or redacted at all — just excluded from the query.</p>
+<div class="callout-warn">
+  <strong>Don't rely on the model to "remember" not to repeat something</strong>
+  <p>Once sensitive data is in context, asking the model not to repeat it in its response is unreliable — it can leak through a summary, a debug trace, or an unrelated follow-up question later in the conversation. Keep it out of context in the first place.</p>
+</div>
+
+<h2 id="logging-and-provider-data-retention">What happens to the data after the API call</h2>
+<p>Understand your LLM provider's data retention and training-use policies before sending anything sensitive — Anthropic's and OpenAI's enterprise/API tiers generally don't train on API data by default, but logging and retention windows still apply, and your own application logs are usually the bigger risk. If your app logs full prompts and responses for debugging, that log store now contains whatever customer data passed through the LLM call, and it needs the same access controls and retention policy as your production database, not the defaults your logging framework ships with.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Treat prompt/response logs as production data, not debug output</strong>
+  <p>A logging pipeline set up for convenience during development often ships to production unchanged. If it captures full LLM payloads, it's now a second copy of sensitive data with its own access surface to secure.</p>
 </div>
-<h2 id="the-role-of-leak-in-the-agent-loop">The role of leak in the agent loop</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="what-data-leak-prevention-in-llm-apps-actually-does">What Data Leak Prevention in LLM Apps actually does</h2>
-<p>The performance of leak in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>Production leak looks different from development leak. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_data(query: str) -> str:
-    """List data matching the query."""
-    response = requests.get(
-        f"https://api.example.com/data",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="cross-tenant-isolation-in-multi-tenant-systems">Cross-tenant isolation when the agent serves multiple customers</h2>
+<p>If one agent deployment serves multiple tenants (common in a vertical SaaS or multi-client consulting setup), retrieval and tool calls need tenant ID scoping enforced at the query level, not just implied by which agent instance is running. A shared vector store queried without a tenant filter, or a tool that accepts a record ID without checking it belongs to the caller's tenant, is a cross-tenant data leak waiting for the wrong combination of inputs.</p>
 
-tools = [Tool(name="data", func=list_data, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="testing-for-leaks-deliberately">Testing for leaks as part of the eval suite, not just hoping</h2>
+<p>Build test cases that deliberately probe for leakage: a user requesting data belonging to another account, a request phrased to coax the model into revealing a redacted field, a prompt injection embedded in retrieved content trying to exfiltrate context. Run these against every prompt or model change, the same way you'd run a regression suite — a permission boundary that held last month can silently break after a seemingly unrelated prompt tweak.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring leak first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add data on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with leak when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Control</th><th>Where it lives</th></tr>
+  <tr><td>Access permission check</td><td>Inside the tool function, always</td></tr>
+  <tr><td>Field-level redaction</td><td>Data layer, before the prompt is built</td></tr>
+  <tr><td>Tenant isolation</td><td>Query-level filter, not agent-instance assumption</td></tr>
+  <tr><td>Prompt/response logging</td><td>Same access controls as production data</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on data leak prevention in llm apps. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Data leak prevention for an LLM-integrated agent is mostly the same discipline as securing any API that touches sensitive data — permission checks in code, redaction before data leaves your boundary, careful logging — plus the reminder that a prompt instruction is not a security control. Test for leaks deliberately, because a subtle regression here won't announce itself.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,8 +148,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
     
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">

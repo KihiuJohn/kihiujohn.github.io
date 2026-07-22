@@ -93,96 +93,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The vertical SaaS model on a horizontal platform is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The question I get from every hotel prospect is some version of "can Acumatica run our front desk." No — Acumatica is not a property management system (PMS), has no room inventory or reservation calendar, and does not compete with Opera, Cloudbeds, or the regional PMS platforms hotels already run. What it can be, credibly, is the financial back office sitting behind a PMS that was never designed to do multi-property consolidated accounting, AP automation, or fixed-asset tracking for a hotel group with more than one property.</p>
+
+<h2 id="what-acumatica-is-not">Say the gap out loud, early</h2>
+<p>I lead with this in discovery because hotel owners have usually been sold "one system to run everything" by someone before me, and it did not work. There genuinely is a named ISV ecosystem here — Hotel Investor Apps (HIA) is one Acumatica-listed partner building hospitality-specific back-office accounting on top of the Acumatica platform, with PMS import connections as part of their offering. Whether a client needs a dedicated hospitality ISV layer or a lighter custom integration depends entirely on portfolio size: a single boutique property with one PMS feed rarely justifies a specialized ISV license on top of Acumatica; a multi-property group juggling several PMS systems across acquisitions usually does.</p>
+
+<h2 id="pms-integration-shape">What a PMS integration actually moves</h2>
+<p>Whether via a hospitality ISV or a custom build, the data that needs to flow from PMS to Acumatica is narrower than people expect — hotels do not need reservation data in the ERP, they need the financial consequence of reservations:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HotelExt : PXCacheExtension<Management>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · PMS-TO-ERP DAILY FEED</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Daily night-audit export from PMS, posted via REST API to Acumatica:
+  -&gt; Room revenue by rate code/department (GL journal, summarized)
+  -&gt; City ledger / AR postings for corporate/travel-agent accounts
+  -&gt; Tax collected (occupancy tax, VAT) by jurisdiction
+  -&gt; Payment types reconciled against merchant settlement batches
+     (feeds Cash Management bank reconciliation, not a manual entry)</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>In the work I have done on hotel management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<p>The department-level GL detail matters more in hospitality than in most verticals because owners want room revenue, F&amp;B revenue, and ancillary revenue (spa, parking, minibar) reported separately even though they all land through one PMS folio — map the PMS's revenue codes to Acumatica GL sub-accounts or branches deliberately during setup, because getting this taxonomy wrong means redoing every historical report later.</p>
+
+<div class="callout-warn callout">
+  <strong>Do not build real-time; build reconciled</strong>
+  <p>A live, transactional sync between a PMS and an ERP is a fragile thing to maintain — PMS systems change their export formats, and a broken real-time feed corrupts a day's books silently. The pattern that has held up for me is a nightly batch import tied to the PMS's own night-audit process, with a reconciliation report comparing PMS-reported totals against what landed in Acumatica before the books close for the day. Boring, and it catches the one night a month something did not map correctly.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>When the work moves from design to production, the questions change. The hotel is not the question; the failure mode of the management is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'hotel'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM hotel
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of management in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="why-hotel-on-a-horizontal-platform-beats-from-scratch">Why hotel on a horizontal platform beats from-scratch</h2>
-<p>Production management looks different from development management. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HotelExt : PXCacheExtension<Management>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring management first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add hotel on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with management when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="fixed-assets">Where Acumatica clearly wins on its own: fixed assets and multi-property consolidation</h2>
+<p>No PMS is a fixed-asset system. A hotel group renovating rooms, replacing HVAC units, and depreciating furniture across a portfolio of properties gets real, native value from Acumatica's Fixed Assets module and multi-branch consolidated reporting — this is not a gap-fill exercise, it is Acumatica doing exactly what it is built for, and it is usually the second phase of a hotel implementation after the PMS bridge is stable.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on hotel management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Do not sell (or let a client believe) that Acumatica replaces a PMS. It does not, and pretending otherwise is how these projects fail. Scope it as a financial back office fed by a nightly, reconciled PMS export — via a hospitality ISV like Hotel Investor Apps for multi-property groups, or a lighter custom REST API bridge for a single property — with fixed assets and consolidation as the genuine native strength.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
-      <li><a href="/blog/cac-payback-period/">CAC Payback Period — A Field Guide</a></li>
-      <li><a href="/blog/churn-prediction-saas/">SaaS Churn Prediction — A Field Guide</a></li>
+      <li><a href="/blog/vertical-saas-resort-acumatica/">Resort Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-event-venue-acumatica/">Event Venue Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
+      <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
+      <li><a href="/blog/acumatica-business-events-webhooks/">Acumatica Business Events — Webhooks</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

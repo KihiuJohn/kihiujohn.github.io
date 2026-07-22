@@ -92,107 +92,76 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Projects (PM301000) is the anchor screen of Acumatica's Project Accounting module, built on <code>ProjectEntry</code> over the <code>PMProject</code> DAC, with <code>PMTask</code> underneath for the task-level breakdown that budgets, billing, and time entry all key off. Almost every other module — AP, AR, GL, even Sales Orders — can tag a transaction with a Project and Task, which makes this screen's customizations disproportionately far-reaching for how few people work in it directly.</p>
+
+<h2 id="projects-vs-the-non-project-code">Projects vs. the "non-project" code</h2>
+<p>Every transaction that could be tagged with a project has to resolve to <em>something</em> in that field — Acumatica handles this with a reserved "non-project" placeholder code so that GL/AP/AR transactions not actually tied to a real project still have a valid value. A customization that filters "all project-related transactions" by excluding null needs to exclude the non-project code specifically, not just check for blank.</p>
+
+<h2 id="key-tabs">Key tabs</h2>
+<ul>
+<li><strong>Summary</strong> — status, project manager, and customer, plus rolled-up budget-vs-actual figures.</li>
+<li><strong>Tasks</strong> — the PMTask breakdown, each task carrying its own budget, billing rule, and status independent of the project header.</li>
+<li><strong>Budget</strong> — the detailed budget lines by cost code/account, the basis for budget-vs-actual reporting and (optionally) commitment checks against POs.</li>
+<li><strong>Billing</strong> — the rules governing how project activity becomes an AR invoice — time and materials, fixed-fee milestones, or percentage complete, each with materially different calculation logic.</li>
+<li><strong>Change Orders</strong> — formal budget/scope revisions, tracked separately from the original budget so variance reporting can distinguish scope creep from estimation error.</li>
+</ul>
+
+<h2 id="extending-projectentry">Extending ProjectEntry</h2>
+<p>A common customization is enforcing that a project can't move to Active status without a complete budget on every task, or that time entries can't be posted against a task marked Closed — both are validation layered on top of status transitions rather than changes to the billing engine itself, which is complex enough that most teams configure it rather than override it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaProjectExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ProjectEntry_Extension : PXGraphExtension&lt;ProjectEntry&gt;
 {
-    [PXOverride]
-    public virtual void Project(Acumatica doc)
+    protected virtual void PMProject_Status_FieldVerifying(PXCache cache,
+        PXFieldVerifyingEventArgs e)
     {
-        // Custom project logic for acumatica project screen
-        if (doc?.Project == null) return;
-        Base.Project(doc);
+        string newStatus = (string)e.NewValue;
+        var row = (PMProject)e.Row;
+        if (newStatus != "A" || row == null) return;
+
+        bool hasUnbudgetedTask = PXSelect&lt;PMTask,
+            Where&lt;PMTask.projectID, Equal&lt;Required&lt;PMTask.projectID&gt;&gt;,
+                And&lt;PMTask.curyBudgetTotal, Equal&lt;decimal0&gt;&gt;&gt;&gt;
+            .Select(Base, row.ContractID).Any();
+
+        if (hasUnbudgetedTask)
+            throw new PXSetPropertyException("All tasks must have a budget before the project can go active.");
     }
 }</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on acumatica project screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="custom-fields-and-tabs">Custom fields and tabs via the Customization Project Editor</h2>
+<p>Adding a field to Summary or a task is a standard DAC extension. Because Project/Task is referenced by transaction screens across nearly every module, a custom field meant to influence posting or billing behavior needs to be checked at each of those entry points — the same "enforce it where it's used, not just where it's defined" pattern seen on the Chart of Accounts screen, amplified here by how many modules touch project data.</p>
+
+<h2 id="common-use-cases">Common validation and event-handler use cases</h2>
+<p>Beyond status-gated budget checks: validating that a task's billing rule is compatible with its budget structure (percentage-complete billing needs a defined budget baseline to calculate against), syncing project status changes to a linked Sales Order or Case for cross-departmental visibility, and triggering a revenue recognition review when a task's percentage complete jumps by more than a configured threshold in one update.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<p>Budget figures are stored at the task level, and project-level totals are a rollup — a customization that edits or reports on project-level budget fields directly, bypassing the task breakdown, will drift from what the Budget tab actually shows. Billing rules vary enough between time-and-materials and fixed-fee/milestone structures that generic "calculate what to invoice" logic written against one rule type usually doesn't transfer to the other without real rework. And change orders exist specifically so original budget and approved scope changes stay distinguishable — a customization that merges change-order amounts directly into the original budget loses the variance reporting the whole feature exists to provide.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Project fields propagate everywhere — test broadly</strong>
+  <p>Because nearly every transactional screen can carry a Project/Task tag, a customization to PMProject or PMTask needs testing against AP, AR, GL, and Sales Order entry, not just the Projects screen itself. A change that looks correct here can break validation on a completely unrelated screen that also references the task.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the project is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-project-edge-cases-i-have-shipped">The project edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-project-in-production">How to debug project in production</h2>
-<p>The performance of project in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>Production project looks different from development project. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaProjectExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Project(Acumatica doc)
-    {
-        // Custom project logic for acumatica project screen
-        if (doc?.Project == null) return;
-        Base.Project(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring project first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with project when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica project screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Projects is less a single screen than a hub that half the other modules quietly depend on through the Project/Task fields they expose. Customizations here need the widest blast-radius thinking of any screen in this series — validate at the source, but test at every downstream screen that can reference a task.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
-      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica Projects Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress, Milestone, and More</a></li>
-      <li><a href="/blog/acumatica-project-task-screen/">Acumatica Project Task Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-ar-invoice-screen-deep-dive/">Acumatica AR Invoice Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-gl-journal-transaction-screen/">Acumatica GL Journal Transaction Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

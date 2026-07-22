@@ -93,78 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Multi-tenant data isolation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Building an Acumatica customization for one client is a different job from building one you intend to ship to fifty tenants. The single-client customization can hardcode a screen ID, assume one set of business rules, and get away with a manual publish. A SaaS-intended customization has to survive tenants you'll never meet, upgrades you don't control the timing of, and a support burden that scales with adoption instead of headcount — which changes almost every design decision from day one.</p>
+<h2 id="extension-not-modification">Extensions, never base modifications</h2>
+<p>This matters more for a shipped product than for a one-off: every base-code modification is a merge conflict waiting for the next Acumatica platform upgrade, and you don't control when your tenants upgrade. Build exclusively through <code>PXGraphExtension</code> and DAC extensions with <code>Usr</code>-prefixed fields, never by editing generated or base project code directly. A customization built entirely on the extension model survives platform upgrades with, at worst, a recompile; one with base modifications can silently break a tenant's instance on their next scheduled upgrade with no signal to you.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class DesigningExt : PXCacheExtension<Acumatica>
+  <div class="code-header"><span class="code-lang">C# · FEATURE-FLAGGED EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_VerticalExt : PXGraphExtension<SOOrderEntry>
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    public static bool IsActive() =>
+        PXAccess.FeatureInstalled<FeatureIDs.VerticalModule>();
+
+    [PXDBString(20)]
+    [PXUIField(DisplayName = "Vertical Reference")]
+    public virtual string UsrVerticalRef { get; set; }
+
+    protected virtual void _(Events.RowSelected<SOOrder> e)
+    {
+        if (!IsActive()) return;
+        PXUIFieldAttribute.SetVisible<SOOrderExt.usrVerticalRef>(
+            e.Cache, e.Row, ShouldShowForCustomerClass(e.Row));
+    }
 }</code></pre>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>In the work I have done on designing an acumatica customization for saas, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+<h2 id="feature-flags-not-per-tenant-forks">Feature toggles instead of per-tenant code forks</h2>
+<p>The moment you fork the customization codebase per client — "Acme gets version A, Beta Corp gets version B" — you have committed to maintaining N codebases forever. Acumatica's own feature management (<code>PXAccess.FeatureInstalled</code>, configured per license/tenant) or a simple custom setup screen with boolean flags lets one codebase serve every tenant, with behavior gated by what's enabled for that specific tenant. Every conditional branch checks a flag; there is exactly one project to publish and one version to support.</p>
+<h2 id="configuration-ui-instead-of-code-changes">A configuration screen, not a support ticket, for every variation</h2>
+<p>Anything a tenant might reasonably want to vary — a threshold, a default value, a list of codes — belongs on a custom setup screen backed by its own DAC, not as a value a developer edits in code per client. This is the difference between "email support to change a number" and "the customer's admin changes it themselves," and it's the single biggest lever on your support ticket volume as tenant count grows.</p>
+<div class="callout-warn">
+  <strong>Plan the upgrade story before the first customer, not after the tenth</strong>
+  <p>A customization designed for one client can tolerate an ad hoc "email me before you upgrade" process. A customization with real SaaS distribution cannot — you need a tested, repeatable way to validate a new customization package against a current-version sandbox before every Acumatica platform release, and a communication plan for tenants when a breaking change is unavoidable. Retrofitting this after tenant ten is far more expensive than designing for it before tenant one.</p>
 </div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>When the work moves from design to production, the questions change. The designing is not the question; the failure mode of the acumatica is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'designing'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM designing
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="why-designing-on-a-horizontal-platform-beats-from-scratch">Why designing on a horizontal platform beats from-scratch</h2>
-<p>The performance of acumatica in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="channel-partner-programs-for-acumatica">Channel partner programs for acumatica</h2>
-<p>Production acumatica looks different from development acumatica. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class DesigningExt : PXCacheExtension<Acumatica>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring acumatica first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add designing on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with acumatica when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="tenant-isolation-in-a-multitenant-deployment">Data isolation across tenants</h2>
+<p>If you're distributing through Acumatica's own multitenancy (one site, many tenants, shared schema) rather than one dedicated instance per customer, every custom DAC and every BQL query your extension writes needs to respect Acumatica's tenant-scoping automatically — which Acumatica handles for you at the platform level for standard entities, but any custom table you introduce must still be designed so it can never leak across tenant boundaries in a Generic Inquiry or a custom report that a careless query might bypass.</p>
+<h2 id="versioning-the-customization-package">Versioning the package deliberately</h2>
+<p>Treat the customization project's version number as a real contract: tenants on version 2.3 should be able to jump to 2.4 without action beyond the standard publish, but 2.x to 3.x should carry release notes describing what changed and why. This discipline is cheap to build in early and expensive to bolt on once tenants are already confused about which version they're running and what's different.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on designing an acumatica customization for saas. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The technical shape of a SaaS-intended Acumatica customization is not exotic — extensions over modifications, feature flags over forks, configuration screens over support tickets, and a real upgrade-testing habit. What's different from a single-client build is that every shortcut you'd tolerate once now multiplies by tenant count, so the discipline that feels like overhead on customer one is what keeps customer fifty from being unsupportable.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +139,6 @@ public class DesigningExt : PXCacheExtension<Acumatica>
       <li><a href="/blog/vertical-saas-licensing-models/">Licensing Models for Vertical SaaS on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

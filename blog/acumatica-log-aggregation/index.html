@@ -92,93 +92,31 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="what-acumatica-log-aggregation-gives-you">What Acumatica Log Aggregation gives you</h2>
-<p>What Acumatica Log Aggregation gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica writes several kinds of logs by default — IIS logs, the application trace log accessible through the Trace screen (SM205020), Windows Event Log entries for unhandled exceptions, and SQL Server's own error and slow-query logs. None of these are aggregated anywhere by default; on a self-hosted deployment each lives on its own server, in its own format, and finding a correlated picture of what happened during an incident means opening several tools by hand. Log aggregation is the discipline of shipping all of it somewhere queryable in one place before you need it.</p>
+<h2 id="what-to-ship-and-what-to-skip">What actually needs to leave the server</h2>
+<p>Not every log is worth centralizing. IIS access logs and the Acumatica trace log (which captures PXException details, including the stack trace and the screen/action that triggered it) are the highest-value sources for diagnosing user-reported issues. SQL Server's error log matters for infrastructure-level problems. Windows Event Log application entries catch things that crash before Acumatica's own trace logging engages. Verbose debug-level tracing, if enabled, generates enormous volume and is usually better left local, toggled on only during active investigation of a specific issue.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · TYPICAL SOURCES TO SHIP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>C:\inetpub\logs\LogFiles\W3SVC1\*.log        -> IIS access logs
+C:\Acumatica\<instance>\App_Data\Trace\*.log -> PXTrace / exception log
+Windows Event Log (Application channel)      -> unhandled exceptions, IIS crashes
+SQL Server error log                         -> deadlocks, timeouts, corruption warnings
+Custom PXTrace.WriteInformation calls         -> business-logic-level breadcrumbs</code></pre>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>In the work I have done on acumatica log aggregation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+<h2 id="shipping-with-a-standard-agent">A standard log-shipping agent does the heavy lifting</h2>
+<p>Because these are all just files on a Windows server, the shipping mechanism doesn't need to be Acumatica-specific — Filebeat, the OpenTelemetry Collector's filelog receiver, or Azure Monitor Agent (if you're already on Azure infrastructure) can all tail these paths and forward to whatever store you've standardized on: an ELK/OpenSearch stack, Azure Log Analytics, Datadog, or similar. The Acumatica-specific work is entirely in configuring the right file paths and, ideally, parsing the trace log's structure so exception messages and stack traces land as structured fields rather than one opaque blob of text per entry.</p>
+<div class="callout-warn">
+  <strong>Correlate by session or request ID, not just timestamp</strong>
+  <p>A single user action in Acumatica can touch IIS, the trace log, and SQL Server within the same second, and timestamp alone won't reliably tell you which log lines belong together under load. If your aggregation stack supports it, extract and index the Acumatica session ID or a correlation ID from the trace log entries so you can pivot from "user reports an error at 2:14pm" to every related log line across all three sources in one query, not three separate manual searches.</p>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the log is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_log" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The performance of log in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production log looks different from development log. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring log first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with log when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="retention-and-what-compliance-actually-needs">Retention driven by what you'll actually need later</h2>
+<p>Trace and error logs are useful for maybe two to four weeks of active debugging; audit-relevant logs (who logged in, what was changed on a financial record) may need to be retained far longer for compliance reasons, but that's a different concern from operational log aggregation and is better served by Acumatica's built-in audit trail feature than by parsing trace logs after the fact. Set a shorter hot-retention window for operational logs in your aggregation tool and let cost drive that number — a slow query from six months ago is rarely still actionable.</p>
+<h2 id="alerting-on-the-signal-not-the-noise">Alert on rate-of-change, not raw error counts</h2>
+<p>Once logs are centralized, the temptation is to alert on any exception appearing in the trace log — which produces so much noise from routine validation errors (a user typing an invalid value) that the alert channel gets muted within a week. A more durable signal is the rate of a specific exception type spiking above its normal baseline, or a brand-new exception type appearing that's never been seen before; both are far better indicators of an actual regression than "an exception happened."</p>
+<h2 id="the-payoff-during-an-actual-incident">Why this matters at 6pm on a Friday</h2>
+<p>The value of aggregation shows up specifically during an incident, when a user reports "the system is slow" or "I got an error saving an invoice" with no other detail. Without centralized logs, diagnosing that means remoting into the app server, then the SQL server, then correlating timestamps by hand. With aggregation already in place, the same investigation is one query filtered by time window and, if you've indexed it, by user or session — minutes instead of the better part of an evening.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica log aggregation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Log aggregation for Acumatica is unglamorous plumbing — a shipping agent pointed at IIS, trace, event log, and SQL Server error log paths, landing in whatever aggregation tool your team already runs. The return on that plumbing is entirely realized during incidents, which is exactly the wrong time to be setting it up for the first time.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -189,9 +127,6 @@ jobs:
       <li><a href="/blog/acumatica-business-events-monitoring/">Acumatica Business Events Monitoring</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

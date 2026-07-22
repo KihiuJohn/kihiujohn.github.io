@@ -93,100 +93,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The SaaS playbook in 2026 has stabilised. this is one of the metrics that the playbook tracks. The benchmark is the median for your stage; the goal is to be above the benchmark. This article is the benchmark, the goal, and how to improve.</p>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Why the metric matters for your business is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A nightclub or bar's Acumatica story is closer to the restaurant playbook than anything else in this series — POS stays the POS, Acumatica is the back office — but with two things that come up disproportionately often for this vertical: cash handling controls, because nightlife venues run heavier cash volumes than most restaurants, and liquor cost/pour-cost tracking, which is a stricter version of the recipe-costing problem covered for cafes and restaurants.</p>
+
+<h2 id="pos-boundary-same-as-restaurant">Same POS boundary, same reasoning</h2>
+<p>I am not re-deriving this: keep the POS (bar-specific POS systems handle tabs, split checks, and age verification workflows Acumatica has no interest in replicating) and bridge nightly sales summaries into Acumatica via REST API, exactly as described for restaurants. What differs is what happens on the cash-handling side once that money lands.</p>
+
+<h2 id="cash-heavy-reconciliation">Cash reconciliation needs tighter controls, not new modules</h2>
+<p>A venue doing significant cash volume at the door and bar needs disciplined till-to-bank reconciliation, and Acumatica's Cash Management module (bank reconciliation, entry types for over/short variances) is the right native tool — this is not a gap, it is a configuration-and-discipline problem. The pattern I set up: each till/register is its own Cash Account in Acumatica, nightly cash counted and entered as a Cash Deposit transaction, and an entry type specifically for "Cash Over/Short" so variances are visible on a report by till and by shift rather than silently absorbed into a miscellaneous expense account where nobody notices a pattern.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · PER-TILL CASH ACCOUNTS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Cash Accounts:   TILL-MAIN-BAR, TILL-VIP, TILL-DOOR
+Entry Type:      CASH-OVERSHORT  (offset to a variance expense/income GL account)
+Nightly flow:    POS reports expected cash -&gt; actual counted cash entered
+                 -&gt; variance auto-calculated -&gt; flagged if beyond threshold
+                    (e.g. &gt;1% of till total triggers a manager review note)</code></pre>
 </div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>In the work I have done on nightclub and bar vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<div class="callout-warn callout">
+  <strong>Variance thresholds only work if someone reviews them</strong>
+  <p>I have set up over/short reporting for clients who then never looked at it again — the report existed, nobody read it, and the control was theater. This only has value paired with an actual weekly review habit; say so explicitly when handing off, because building the report is the easy 20% of the fix.</p>
 </div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>When the work moves from design to production, the questions change. The nightclub is not the question; the failure mode of the bar is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, bar, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>The performance of bar in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-nightclub-is-the-first-thing-to-look-at">Why nightclub is the first thing to look at</h2>
-<p>Production bar looks different from development bar. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring bar first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add nightclub on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with bar when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="pour-cost">Pour cost is recipe costing with a stricter tolerance</h2>
+<p>Liquor pour cost — the percentage of a drink's sale price that its ingredient cost represents — is the same BOM-based recipe costing mechanism described for cafes and restaurants, but bars typically watch it more tightly (industry target is commonly cited around 18-24% depending on drink category) because over-pouring is a much larger margin leak per drink than in food service. The Acumatica-side build is identical: a BOM per cocktail/drink, standard pour sizes as BOM quantities, theoretical cost compared against actual liquor purchases and physical bar inventory counts. The only nightlife-specific nuance is inventory count frequency — a busy bar counting weekly catches over-pour patterns fast enough to correct bartender behavior; monthly counts are usually too slow to be actionable.</p>
+
+<h2 id="excise-and-licensing-tax">Excise duty on alcohol, same tax-engine pattern as beverage manufacturing</h2>
+<p>If the venue is also involved in any resale of packaged alcohol (bottle sales, retail), the excise-as-a-separate-tax-category approach covered in the beverage-manufacturing piece applies directly — configure it as its own tax type in Acumatica's tax engine rather than blending it into a single VAT-plus-excise rate.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on nightclub and bar vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Nothing about a nightclub demands a different Acumatica edition or a specialized module — it is the restaurant back-office pattern (POS stays, nightly bridge, recipe/pour costing) with cash-handling discipline turned up because the cash volumes and shrinkage risk are higher. The technical build is standard Cash Management and BOM costing; the value is in the operational habit of actually reviewing the variance and pour-cost reports it produces.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-cafe-acumatica/">Cafe and Coffee Shop Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-restaurant-acumatica/">Restaurant Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
+      <li><a href="/blog/vertical-saas-restaurant-acumatica/">Restaurant Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-event-venue-acumatica/">Event Venue Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-tax-engine-configuring-multi-country/">Acumatica Tax Engine — Configuring for Multi-Country</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

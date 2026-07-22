@@ -93,82 +93,35 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The fiscalisation landscape in 2026 is more capable than it was in 2020. Modern APIs, signed receipts, real-time validation. this is one of the parts of the modern stack. This article is the part.</p>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>The implementation architecture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Zimbabwe VAT is administered by ZIMRA and, since the FDMS (Fiscal Device Management System) rollout, standard-rated VAT invoices generally need to be fiscalised in real time through a registered fiscal device before or as they're issued. That changes the shape of the Acumatica VAT-return project: it is not just tax-engine configuration, it is a real-time integration that has to work reliably at the point of sale or invoicing.</p>
+<h2 id="tax-engine-configuration">Tax engine configuration</h2>
+<p>Standard configuration mirrors most VAT jurisdictions: separate <strong>Tax Categories (TX205500)</strong> for standard-rated, zero-rated exports, and exempt supplies, each mapped to their own GL output/input tax accounts through <strong>Tax Zones (TX206000)</strong>. Zimbabwe also has periods of USD and ZWL dual-currency operation depending on the prevailing monetary policy, which means your tax GL accounts and reporting currency configuration need to be verified against current regulations rather than assumed from a prior project — this is one area where "how it worked last year" can be wrong.</p>
+<h2 id="fdms-fiscalisation-integration">FDMS fiscalisation integration</h2>
+<p>Each qualifying sales invoice needs to be submitted to a registered fiscal device (or an FDMS-compliant virtual fiscal device/gateway) before it is considered fiscally valid. In practice this means an outbound call from Acumatica at invoice-release time, waiting for the device's fiscalisation response (receipt number, signature, QR payload), and writing that response back onto the invoice record before it can be printed as a valid fiscal tax invoice.</p>
+<div class="callout-warn">
+  <strong>Do not release invoices ahead of fiscalisation</strong>
+  <p>If fiscalisation happens asynchronously after release, you risk printing or emailing an invoice to a customer that later fails fiscalisation — leaving you with a document in the customer's hands that ZIMRA doesn't recognise. Gate invoice printing on a successful fiscal response, and hold anything that fails in a retry queue rather than letting it through unfiscalised.</p>
+</div>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION HOOK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ARInvoiceEntry_Extension : PXGraphExtension&lt;ARInvoiceEntry&gt;
+{
+    [PXOverride]
+    public void Persist(Action baseMethod)
+    {
+        baseMethod();
+        ARInvoice doc = Base.Document.Current;
+        if (doc != null && doc.Released == true && doc.UsrFiscalReceiptNbr == null)
+        {
+            FiscalGatewayClient.Fiscalize(doc);
+        }
+    }
+}</code></pre>
 </div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>In the work I have done on acumatica zimbabwe vat returns — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the zimbabwe is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="why-acumatica-requires-a-vault">Why acumatica requires a vault</h2>
-<p>The performance of zimbabwe in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="certificate-lifecycle-for-zimbabwe">Certificate lifecycle for zimbabwe</h2>
-<p>Production zimbabwe looks different from development zimbabwe. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring zimbabwe first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with zimbabwe when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="the-monthly-return">The monthly return</h2>
+<p>The VAT return itself (VAT 7) is filed monthly through ZIMRA's e-services portal, summarising output tax and input tax by category for the period. Build the return from the tax transaction tables rather than a manually maintained spreadsheet, and reconcile the total against GL tax account balances before filing — the same discipline that matters in every VAT jurisdiction, but doubly important here because the FDMS integration adds another system whose numbers need to agree with Acumatica's.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica zimbabwe vat returns — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The tax configuration is the easy half of this project. The real engineering is a fiscalisation integration that fails safely, retries sensibly, and never lets an invoice reach a customer before ZIMRA has fiscally acknowledged it. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +132,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-tanzania-vat-returns/">Acumatica Tanzania VAT Returns — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

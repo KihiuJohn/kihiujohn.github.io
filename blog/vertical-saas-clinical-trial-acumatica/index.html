@@ -93,100 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS metrics are a discipline, not a dashboard. this is one of the metrics that the discipline tracks. The pattern is to measure the metric correctly, to act on the signal, and to ignore the noise. This article is the discipline.</p>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Why the metric matters for your business is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Clinical trials are the most specialized vertical in this series, and the one where I most want to be upfront: there is no such thing as running a clinical trial "on Acumatica." A trial needs a validated Clinical Trial Management System (CTMS) and electronic data capture (EDC) system, subject randomization, and regulatory submission tooling, none of which Acumatica offers or should be asked to approximate. What Acumatica can legitimately do is sit underneath the trial sponsor's or CRO's (contract research organization's) financial operations — investigational product (IP) inventory and site payment tracking.</p>
+
+<h2 id="ctms-edc-are-non-negotiable">CTMS and EDC own the trial itself</h2>
+<p>Subject enrollment, randomization, visit scheduling, adverse event reporting, and case report form data collection are the job of dedicated, typically GxP-validated CTMS/EDC platforms — software built and validated specifically for FDA/ICH-GCP requirements around electronic records and signatures in a clinical trial context. Acumatica has no subject data model, no randomization capability, and no GxP validation posture for this purpose. This is not a gap to fill with customization; it is a different category of software entirely.</p>
+
+<h2 id="ip-inventory">Where it fits: investigational product inventory and site financials</h2>
+<p>Investigational product — the trial drug or device — has to be tracked from manufacture or receipt, through shipment to trial sites, to dispensing/administration and eventual reconciliation or destruction, with full chain of custody. That is structurally the same lot-genealogy problem as pharma manufacturing and distribution covered earlier in this series, just with trial-specific metadata layered on: which site, which protocol, which arm (if unblinded at the sponsor's operational level — many trials keep site-level shipment tracking separate from the blinding of clinical outcome data).</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · IP SHIPMENT TO TRIAL SITE</span><button class="copy-parameter" type="button">Copy</button></div>
+<pre><code>Stock Item:          IP-PROTOCOL-4471-A
+Lot/Serial Class:     Track Expiration = Yes, Issue = Expiration (FEFO)
+Custom Fields:         Protocol Number, Site ID, Kit Number
+                       (kit number is the trial-specific identifier;
+                        Acumatica's internal lot key stays separate)
+Transaction:           Transfer Order, Warehouse (depot) -> Site
+Reconciliation:        Site periodically reports used/unused/
+                       destroyed kits back via a scoped integration;
+                       Acumatica records the reconciling inventory
+                       adjustment with reason code</code></pre>
 </div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>In the work I have done on clinical trial management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+<p>The chain-of-custody trail this produces — receipt, shipment to site, reconciliation, destruction — is genuinely useful supporting evidence for a trial's drug accountability audit, but it supplements the CTMS's own records; it does not replace the GxP-validated system of record for the trial itself.</p>
+
+<h2 id="site-payments">Site payments and sponsor/CRO financials</h2>
+<p>Separately, and more straightforwardly, a sponsor or CRO has ordinary ERP needs: paying trial sites per a payment schedule tied to enrollment and visit milestones, tracking budget versus actual spend per protocol (Acumatica's Project module fits this — protocol as project, site as task or cost center), and multi-currency handling for international multi-site trials. This is closer to conventional project accounting than anything healthcare-specific.</p>
+
+<div class="callout-warn callout">
+  <strong>Do not let subject-level data anywhere near Acumatica</strong>
+  <p>Clinical trial subject data is about as sensitive as healthcare data gets, often with its own consent and de-identification requirements independent of general HIPAA. There is no legitimate reason for subject-identifiable information to appear in Acumatica in this vertical — even the exceptions discussed elsewhere in this series (private-pay AR, for instance) do not apply here. If a proposed integration would pass subject-level data into the ERP, that is a design error to catch in review, not a customization request to fulfill.</p>
 </div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>When the work moves from design to production, the questions change. The clinical is not the question; the failure mode of the trial is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, trial, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>The performance of trial in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-clinical-is-the-first-thing-to-look-at">Why clinical is the first thing to look at</h2>
-<p>Production trial looks different from development trial. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring trial first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add clinical on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with trial when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on clinical trial management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Clinical trial management belongs entirely to validated CTMS/EDC systems — Acumatica has no role there and no business approximating one. Its legitimate, narrow fit is investigational product chain-of-custody inventory (leaning on the same lot-genealogy strength as pharma manufacturing) and ordinary project-based financials for site payments and protocol budgets, with subject-level data never crossing into the ERP under any circumstance.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-architecture-firm-acumatica/">Architecture Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-dental-practice-acumatica/">Dental Practice Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-ehr-integration-acumatica/">EHR Integration Patterns for Healthcare Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-engineering-firm-acumatica/">Engineering Firm Management Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Number Tracking</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen Deep Dive</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
+      <li><a href="/blog/vertical-saas-pharma-manufacturing-acumatica/">Pharma Manufacturing Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

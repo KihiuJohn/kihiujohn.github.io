@@ -93,107 +93,74 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most of my Acumatica clients are in East and Southern Africa, so you might assume GDPR never comes up. It comes up constantly. The moment a distributor has one EU customer in the address book, or a Kenyan firm sells into Germany, someone eventually sends a data subject request — and Kenya's own Data Protection Act and South Africa's POPIA impose very similar obligations anyway. The good news is that Acumatica shipped a genuine GDPR toolkit back in 2018 R2, and most people running the system have never opened it.</p>
+
+<p>This post walks through how I handle the three requests that actually arrive in practice — access ("show me what you hold about me"), erasure ("delete me"), and rectification ("fix this") — using the built-in tools plus a little customization for the fields the toolkit doesn't know about.</p>
+
+<h2 id="where-personal-data-lives">Where personal data actually lives in Acumatica</h2>
+<p>Before you can answer a request you need the map. In a stock instance, personal data concentrates in a handful of DACs: <code>Contact</code> (names, emails, phones — and remember every customer, vendor, and employee has a linked contact record), <code>Address</code>, <code>BAccount</code>, the <code>EPEmployee</code> chain, and then the long tail: <code>CRActivity</code> records (emails synced from Exchange are full message bodies), <code>Note</code> text, file attachments, and the audit trail if you have field-level auditing turned on for any of those tables.</p>
+
+<p>That last one bites people. If you enable auditing on the Contacts screen, the <code>AuditHistory</code> table keeps old values forever — so "we deleted the email address" is not true until you deal with audit history too. The built-in pseudonymization handles this, which is one reason to use it rather than hand-rolled SQL.</p>
+
+<h2 id="the-built-in-toolkit">The built-in toolkit: pseudonymize, not delete</h2>
+<p>Acumatica's answer to erasure requests is <strong>pseudonymization</strong>, not physical deletion, and that is the correct call for an ERP. A contact that placed orders is referentially welded to AR invoices, shipments, and GL history. Hard-deleting the row would either fail on foreign keys or corrupt your financial audit trail — which you are legally required to keep under tax law, and tax retention obligations generally override GDPR erasure.</p>
+
+<p>The mechanism: DACs and fields that hold personal data are decorated with <code>PXPersonalDataTable</code> and <code>PXPersonalDataField</code> attributes. When you run the <em>Pseudonymize</em> action against a contact (available once the record's processing is restricted), Acumatica replaces every marked field value — in the live table <em>and</em> in audit history and the full-text search index — with a neutral placeholder, while keeping the record and all its financial links intact. There's a matching <em>Restore</em> option that works from an encrypted stash until you purge it, which covers the "we pseudonymized the wrong person" scenario.</p>
+
+<div class="callout">
+  <strong>Turn on the switch first</strong>
+  <p>None of this appears in the UI until you enable <em>GDPR Compliance Tools</em> on the Enable/Disable Features screen (CS100000). It's off by default, and I've audited more than one instance where the team swore Acumatica "had no GDPR support" because nobody had ticked the box.</p>
+</div>
+
+<h2 id="custom-fields">Custom fields: the part the toolkit can't see</h2>
+<p>Here's the gotcha from real projects: pseudonymization only touches fields marked as personal data. Every custom field you've added — the <code>UsrNationalID</code> on the customer, the <code>UsrNextOfKinPhone</code> on the employee extension — is invisible to it. If your DSAR process relies on the built-in action but your customizations added identity fields, you have a compliance gap that no screen will warn you about.</p>
+
+<p>The fix is one attribute in your DAC extension:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGdprExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public sealed class ContactExt : PXCacheExtension&lt;PX.Objects.CR.Contact&gt;
 {
-    [PXOverride]
-    public virtual void Gdpr(Acumatica doc)
-    {
-        // Custom gdpr logic for acumatica gdpr data
-        if (doc?.Gdpr == null) return;
-        Base.Gdpr(doc);
-    }
+    [PXDBString(20, IsUnicode = true)]
+    [PXUIField(DisplayName = "National ID No.")]
+    [PXPersonalDataField]   // now included in pseudonymization + audit scrub
+    public string UsrNationalID { get; set; }
+    public abstract class usrNationalID : PX.Data.BQL.BqlString.Field&lt;usrNationalID&gt; { }
 }</code></pre>
 </div>
-<h2 id="why-acumatica-gdpr-data-subject-requests-matters-in-production">Why Acumatica GDPR — Data Subject Requests matters in production</h2>
-<p>In the work I have done on acumatica gdpr — data subject requests, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the gdpr is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of gdpr in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production gdpr looks different from development gdpr. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGdprExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Gdpr(Acumatica doc)
-    {
-        // Custom gdpr logic for acumatica gdpr data
-        if (doc?.Gdpr == null) return;
-        Base.Gdpr(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring gdpr first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with gdpr when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Make this a standing rule in code review: any new field that can identify a person gets <code>PXPersonalDataField</code> the day it's created, not during the audit two years later.</p>
+
+<h2 id="access-requests">Access requests: build the export once</h2>
+<p>For "show me everything you hold," I build a small set of Generic Inquiries keyed on <code>ContactID</code>: one over Contact/Address, one over activities and emails, one over cases and opportunities, and one over audit history for those tables. Export to Excel, review for third-party data (an email thread usually mentions other people — you're supposed to redact them), and send. The GI approach means the process is repeatable by an admin, not a developer, which matters because the GDPR clock is 30 days and I am not always available on day 28.</p>
+
+<p>For portability requests, the same GIs exposed via OData give you a machine-readable format for free.</p>
+
+<h2 id="process">The process that holds up to scrutiny</h2>
+<ul>
+<li><strong>Verify identity first.</strong> A DSAR is itself a social-engineering vector. Confirm the requester controls the email address on the contact record before exporting anything.</li>
+<li><strong>Log the request as a Case.</strong> You need evidence of the timeline. A dedicated case class with an SLA gives you that plus reminders.</li>
+<li><strong>Erasure = restrict processing → pseudonymize → purge the restore stash</strong> after your internal review window. Document why financial documents are retained (legal obligation basis).</li>
+<li><strong>Check the satellites.</strong> Data replicated into Power BI datasets, a warehouse, or an e-commerce middleware doesn't get pseudonymized by Acumatica. Your DSAR runbook needs a line item per downstream system.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gdpr — data subject requests. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica handles the hard mechanical part of GDPR — scrubbing personal data from live tables, audit history, and search without breaking financial integrity — as long as you enable the feature and keep your custom fields annotated. The rest is process: verified requests, a case-based paper trail, and honesty about the downstream copies the ERP can't reach. Do the annotation work now; retrofitting <code>PXPersonalDataField</code> across three years of customizations under a regulator's deadline is a much worse afternoon.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
-      <li><a href="/blog/acumatica-pii-discovery-scanning/">Acumatica PII Discovery and Scanning</a></li>
-      <li><a href="/blog/sbom-software-bill-of-materials/">SBOM for Production Software</a></li>
-      <li><a href="/blog/vertical-saas-hipaa-compliance-acumatica/">HIPAA Compliance for Healthcare Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-soc2-compliance/">SOC 2 Compliance for Vertical SaaS</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security — Best Practices</a></li>
+      <li><a href="/blog/acumatica-gi-audit-trail/">Acumatica GI Audit Trail — Who Ran What When</a></li>
+      <li><a href="/blog/ai-agent-privacy-compliance/">Privacy Compliance for LLM Apps (GDPR, POPIA)</a></li>
+      <li><a href="/blog/saas-compliance-frameworks/">SaaS Compliance Frameworks — A Comparison</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

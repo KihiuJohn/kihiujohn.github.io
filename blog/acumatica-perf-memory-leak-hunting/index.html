@@ -93,107 +93,65 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Performance and observability for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The symptom is always the same shape: the app pool's private bytes climb steadily over hours or days until IIS recycles it, users on that worker process get dropped mid-session, and everyone blames "the server" instead of the DLL that has been quietly holding references it should have let go.</p>
+
+<h2 id="confirm-its-a-leak-not-growth">Confirm it is a leak, not just growth</h2>
+<p>Acumatica caches metadata, compiled BQL expressions, and site map data at the process level by design — memory climbing after a cold start and then plateauing is normal warm-up, not a leak. Watch <code>Process\Private Bytes</code> for the <code>w3wp.exe</code> instance over several hours under steady load. A leak keeps climbing after the plateau point a healthy instance would have reached; growth that flattens is fine.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance memory
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
+  <div class="code-header"><span class="code-lang">POWERSHELL — SAMPLE PRIVATE BYTES EVERY 5 MIN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>while ($true) {
+  $p = Get-Process w3wp -Id (Get-WmiObject Win32_Process |
+    Where-Object { $_.CommandLine -match 'AcumaticaProd' }).ProcessId
+  "{0}  PrivateMB={1}" -f (Get-Date), [math]::Round($p.PrivateMemorySize64/1MB)
+  Start-Sleep -Seconds 300
 }</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on acumatica performance — memory leak hunting, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="common-culprits">The usual suspects in Acumatica customizations</h2>
+<ul>
+<li><strong>Static event handler subscriptions.</strong> A graph extension that subscribes to a static event (on a singleton service, a custom cache, or a third-party SDK) in its constructor without unsubscribing pins the graph instance in memory for the lifetime of the process. Graphs are meant to be short-lived per request; a static subscriber defeats that.</li>
+<li><strong>PXCache references held outside the graph's lifetime.</strong> Stashing a <code>PXCache</code> or a full row object in a static dictionary "for performance" outlives the request and accumulates one entry per distinct key forever, since nothing ever evicts it.</li>
+<li><strong>Unbounded in-memory collections in PXLongOperation callbacks.</strong> A long-running background operation that appends to a static <code>List&lt;T&gt;</code> for logging or progress tracking, and is never cleared after the operation completes, grows with every run.</li>
+<li><strong>Un-disposed unmanaged resources.</strong> Custom code opening file handles, HTTP clients, or SQL connections outside the framework's managed connection pooling, without a <code>using</code> block, leaks unmanaged memory that the .NET GC cannot reclaim on its own.</li>
+</ul>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>HttpClient is the classic offender</strong>
+  <p>Creating a new <code>HttpClient</code> per request in an integration extension — common in webhook or business-event handler code — exhausts available sockets under load even though each instance is individually disposed, because socket teardown is asynchronous (TIME_WAIT). Use a single static <code>HttpClient</code> (it is thread-safe for concurrent requests) or <code>IHttpClientFactory</code> if your customization's hosting model supports it, not a new instance per call.</p>
 </div>
-<h2 id="the-performance-edge-cases-i-have-shipped">The performance edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="capturing-a-dump">Capturing and reading a memory dump</h2>
+<p>When the pattern above is not obviously the cause, capture two dumps of the same worker process spaced an hour apart under load, and diff them:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">CMD — procdump</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>procdump -ma 3812 dump1.dmp
+:: wait an hour under normal load
+procdump -ma 3812 dump2.dmp</code></pre>
 </div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The performance of performance in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-performance-in-production">How to debug performance in production</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance memory
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Open both in WinDbg with SOS, or load them into a managed memory analyzer, and sort by retained size. Object counts that grow roughly linearly with elapsed time or request count — not proportional to active sessions — point straight at the leak; a type held once per logged-in user is expected and not a leak at all.</p>
+
+<h2 id="mitigation-while-you-fix-it">Mitigation while you find the root cause</h2>
+<p>A scheduled app pool recycle (Application Pools → Recycling → a fixed time overnight, or a private-bytes threshold as a safety net) buys time without masking the investigation, as long as you treat it as a stopgap and keep the ticket open. Do not let a recycle schedule become the permanent fix — it just delays the crash to a less visible hour and hides the regression from whoever ships the next customization.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance — memory leak hunting. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Distinguish warm-up growth from a real leak by watching whether Private Bytes plateaus, suspect static references and un-disposed HTTP/SQL resources in custom code first, and use before/after dumps to confirm rather than guess. A scheduled recycle is a bandage, not a cure.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-perf-cpu-profiling/">Acumatica Performance — CPU Profiling</a></li>
-      <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
-      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage — Locking and Caching</a></li>
+      <li><a href="/blog/acumatica-iis-application-pool-tuning/">Acumatica IIS Application Pool Tuning</a></li>
+      <li><a href="/blog/acumatica-perf-graph-event-loop/">Acumatica Performance — Graph Event Loop</a></li>
+      <li><a href="/blog/acumatica-performance-tuning-the-definitive-guide/">Acumatica Performance Tuning — The Definitive Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

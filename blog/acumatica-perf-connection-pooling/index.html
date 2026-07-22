@@ -93,107 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="the-performance-edge-cases-i-have-shipped">The performance edge cases I have shipped</h2>
-<p>The performance edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Timeout expired. The timeout period elapsed prior to obtaining a connection from the pool" is one of those errors that gets blamed on "the database being slow" when the actual cause is almost always upstream of SQL Server entirely: the app tier asked for more concurrent connections than the pool was configured to hand out, and everyone waited in line.</p>
+
+<h2 id="where-pooling-is-configured">Where the pool is actually configured</h2>
+<p>Acumatica's connection strings live in <code>web.config</code> (or, on newer builds, the site's connection configuration in the Database Configuration Wizard output), and pooling parameters ride on the connection string itself as standard ADO.NET/SQL Server connection string keywords:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance connection
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">XML — web.config connection string</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;add name="AcumaticaDB"
+     connectionString="Data Source=SQLPROD\ACU;Initial Catalog=AcumaticaProd;
+       Integrated Security=False;User ID=acu_app;Password=***;
+       Pooling=True;Min Pool Size=10;Max Pool Size=200;
+       Connect Timeout=30;Connection Lifetime=0"
+     providerName="System.Data.SqlClient" /&gt;</code></pre>
 </div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>In the work I have done on acumatica performance — connection pooling, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="how-to-debug-performance-in-production">How to debug performance in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
+
+<p><code>Max Pool Size</code> is the number that actually matters under load — the default of 100 is frequently too low for a busy multi-user instance with several worker processes, because <em>each</em> app pool process gets its own pool. Three worker processes at the default cap out at 300 total connections to SQL Server combined, which needs to be checked against SQL Server's own <code>max server memory</code> and connection limits, not just bumped blindly.</p>
+
+<h2 id="diagnosing-exhaustion">Confirming it is pool exhaustion, not a slow query</h2>
+<p>Windows Performance Monitor exposes <code>.NET Data Provider for SqlServer\NumberOfPooledConnections</code> and <code>NumberOfActiveConnections</code> per process. If active connections sit flat at your configured max while requests queue, you are pool-bound. If active connections stay well under the max but requests are still slow, the pool is not your problem — go look at query execution time instead.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL — connections currently open per app login</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT login_name, COUNT(*) AS open_connections
+FROM sys.dm_exec_sessions
+WHERE program_name LIKE '%Acumatica%' OR login_name = 'acu_app'
+GROUP BY login_name
+ORDER BY open_connections DESC;</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+
+<h2 id="what-actually-exhausts-a-pool">What actually exhausts a pool in practice</h2>
+<ul>
+<li><strong>Long-running reports or GIs holding connections open</strong> for the duration of a slow query, starving short interactive requests of a connection to check out.</li>
+<li><strong>Custom integration code that opens raw <code>SqlConnection</code> objects outside the framework's data access layer</strong> and does not reliably close them in a <code>finally</code> or <code>using</code> block — a leaked connection from a failed integration call is worse than a slow query, because it never comes back to the pool at all.</li>
+<li><strong>PXLongOperation-backed processing screens run at high concurrency</strong> — each concurrently processing user/batch can hold a connection for the operation's duration; a mass processing run during business hours competes with everyone else's interactive connections.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>Raising Max Pool Size treats the symptom</strong>
+  <p>Doubling <code>Max Pool Size</code> makes the timeout go away for a while and pushes the real cost onto SQL Server, which now has to context-switch and manage locks across more concurrent sessions. If you are raising the pool size past a few hundred per app server to make timeouts stop, you have an underlying long-running-query or connection-leak problem that the bigger pool is hiding, not fixing. Fix the leak or the slow query first; resize the pool as capacity planning after that, not instead of it.</p>
 </div>
-<h2 id="why-acumatica-performance-connection-pooling-matters-in-production">Why Acumatica Performance — Connection Pooling matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of performance in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance connection
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="tuning-recommendations">What I actually set, and why</h2>
+<p>Starting point for a mid-size production instance (a few dozen concurrent users, 2-3 app servers): <code>Max Pool Size=200</code>, <code>Min Pool Size=10</code> (keeps a warm floor so the first requests after an app pool recycle are not all paying connection-open latency), <code>Connection Lifetime=0</code> (let the pool manage recycling rather than forcing periodic resets, which is mostly relevant behind older load balancers that dislike long-lived TCP sessions). Adjust up only after confirming via Perfmon that you are actually pool-bound, not query-bound.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance — connection pooling. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A pool exhaustion timeout is an app-tier symptom with two possible app-tier causes — genuinely high concurrency, or a leak/long-holder eating connections that should have been returned — and resizing the pool only addresses the first. Measure active versus max pooled connections before touching the config, and audit custom integration code for connections that never get released.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-performance-tuning-the-definitive-guide/">Acumatica Performance Tuning — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-iis-application-pool-tuning/">Acumatica IIS Application Pool Tuning</a></li>
-      <li><a href="/blog/acumatica-perf-database-sharding/">Acumatica Performance — Database Sharding</a></li>
-      <li><a href="/blog/acumatica-perf-iis-compression/">Acumatica Performance — IIS Compression</a></li>
-      <li><a href="/blog/acumatica-perf-load-balancer-sticky/">Acumatica Performance — Load Balancer Sticky Sessions</a></li>
+      <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server Indexing for Acumatica</a></li>
+      <li><a href="/blog/acumatica-perf-network-latency/">Acumatica Performance — Network Latency</a></li>
+      <li><a href="/blog/acumatica-database-migration-strategy/">Acumatica Database Migration Strategy</a></li>
+      <li><a href="/blog/acumatica-performance-tuning-the-definitive-guide/">Acumatica Performance Tuning — The Definitive Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

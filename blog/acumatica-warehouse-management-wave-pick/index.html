@@ -93,107 +93,89 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="how-to-debug-warehouse-in-production">How to debug warehouse in production</h2>
-<p>How to debug warehouse in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A distribution client came to me with a warehouse team picking one order at a time, walking the same aisles repeatedly across dozens of orders a day, and asked whether Acumatica's Warehouse Management edition could batch that work. Wave picking was the right answer, but explaining it took longer than implementing it, because wave picking is a planning and grouping concept layered on top of Acumatica's existing pick/pack/ship workflow, not a separate module you bolt on. Here's how the pieces actually connect.</p>
+
+<h2 id="what-a-wave-actually-is">A wave is a grouping of shipments, not a new document type</h2>
+<p>In Acumatica's Warehouse Management functionality, a Wave groups multiple Shipments together based on selection criteria, ship date, carrier, warehouse zone, order priority, so the warehouse can generate one consolidated pick list covering many orders' demand at once, instead of pickers working shipment-by-shipment. The underlying documents haven't changed: you still have Sales Orders generating Shipments, and Shipments still generate the pick, pack, and confirm workflow. A wave just changes how picking is batched and sequenced across those shipments.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaWarehouseExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · creating a wave programmatically from eligible shipments</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>WMSWaveManagementEntry graph = PXGraph.CreateInstance&lt;WMSWaveManagementEntry&gt;();
+graph.WaveHeader.Insert(new WMSWave
 {
-    [PXOverride]
-    public virtual void Warehouse(Acumatica doc)
+    WarehouseID = warehouseID,
+    WaveType = WMSWaveType.Pick,
+    ShipVia = shipVia   // one of several possible grouping criteria
+});
+
+var eligibleShipments = PXSelect&lt;SOShipment,
+    Where&lt;SOShipment.status, Equal&lt;SOShipmentStatus.open&gt;,
+    And&lt;SOShipment.confirmed, Equal&lt;False&gt;,
+    And&lt;SOShipment.siteID, Equal&lt;Required&lt;SOShipment.siteID&gt;&gt;&gt;&gt;&gt;
+    .Select(Base, warehouseID);
+
+foreach (SOShipment shipment in eligibleShipments)
+    graph.WaveDetails.Insert(new WMSWaveDetail { ShipmentNbr = shipment.ShipmentNbr });
+
+graph.Save.Press();
+</code></pre>
+</div>
+
+<h2 id="pick-strategies">Pick list generation: consolidated by item, not by shipment</h2>
+<p>The actual value of wave picking shows up in how the generated pick list is organized: instead of forty separate pick lists for forty shipments, each requiring a separate walk through the warehouse, a wave-generated pick list can consolidate demand by item and bin location across all shipments in the wave, so a picker collects the total quantity of an item needed across every order in one pass, then the system handles allocating what was picked back to individual shipments during pack. This only pays off when pick strategies (single-order pick, batch pick, or zone pick, configured per warehouse or per wave type) are matched to how the physical warehouse is actually laid out.</p>
+
+<div class="callout-warn callout">
+  <strong>Zone picking without correctly configured warehouse zones is worse than no wave picking at all</strong>
+  <p>Zone-based wave picking assumes your Warehouse Location records are accurately zoned and that pickers are actually assigned to specific zones. I've seen an implementation go live with wave picking enabled but warehouse locations left with default or inconsistent zone assignments, and pickers ended up crossing zones constantly anyway, all the wave batching overhead with none of the walking-distance benefit. Get the physical warehouse's zone and location data accurate before flipping on zone-based wave strategies, not after.</p>
+</div>
+
+<h2 id="allocation-and-lot-serial">Allocation happens at pick confirmation, and lot/serial tracking complicates the consolidation</h2>
+<p>When a picker confirms a consolidated pick (via the Warehouse Mobile app in most real deployments), the system has to allocate what was actually picked back down to the individual shipment lines that generated the demand. For non-tracked items this is straightforward quantity math. For lot- or serial-tracked items, the allocation has to also decide which specific lot or serial goes to which shipment, which matters enormously if the client has any FEFO (first-expired-first-out) or specific-lot-per-customer requirements, because a naive consolidated pick can hand a soon-to-expire lot to whichever shipment happens to get allocated first rather than respecting expiration-driven priority.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · lot-aware allocation during wave pick confirmation</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowUpdated&lt;WMSPickDetail&gt; e)
+{
+    var row = (WMSPickDetail)e.Row;
+    if (row == null || row.LotSerialNbr == null) return;
+
+    // Respect FEFO: verify the confirmed lot is the earliest-expiring
+    // available lot for this item/site, not just whatever was scanned
+    var earliestLot = PXSelect&lt;INLotSerStatus,
+        Where&lt;INLotSerStatus.inventoryID, Equal&lt;Required&lt;INLotSerStatus.inventoryID&gt;&gt;,
+        And&lt;INLotSerStatus.qtyOnHand, Greater&lt;decimal0&gt;&gt;&gt;,
+        OrderBy&lt;Asc&lt;INLotSerStatus.expireDate&gt;&gt;&gt;
+        .SelectWindowed(Base, 0, 1, row.InventoryID);
+
+    if (earliestLot != null &amp;&amp; ((INLotSerStatus)earliestLot).LotSerialNbr != row.LotSerialNbr)
     {
-        // Custom warehouse logic for acumatica warehouse management
-        if (doc?.Warehouse == null) return;
-        Base.Warehouse(doc);
+        // Warn or block depending on how strict the client's FEFO policy is
+        e.Cache.RaiseExceptionHandling&lt;WMSPickDetail.lotSerialNbr&gt;(row, row.LotSerialNbr,
+            new PXSetPropertyException("A lot with an earlier expiration date is available.", PXErrorLevel.Warning));
     }
 }</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>In the work I have done on acumatica warehouse management — wave pick, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="why-acumatica-warehouse-management-wave-pick-matters-in-production">Why Acumatica Warehouse Management — Wave Pick matters in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the warehouse is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of warehouse in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Production warehouse looks different from development warehouse. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaWarehouseExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Warehouse(Acumatica doc)
-    {
-        // Custom warehouse logic for acumatica warehouse management
-        if (doc?.Warehouse == null) return;
-        Base.Warehouse(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring warehouse first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with warehouse when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="when-waves-dont-help">Wave picking is a throughput optimization, not a universal upgrade</h2>
+<p>For a warehouse shipping a handful of large, complex orders a day, wave consolidation adds overhead (wave planning, more complex allocation logic) without meaningful walking-distance savings, because there's little overlapping demand across orders to consolidate in the first place. Wave picking earns its complexity specifically when there's high order volume with meaningful item overlap across orders, which is the actual pattern to check for before recommending it, not just "the client wants WMS features." I've talked more than one prospective client out of wave picking after looking at their actual order profile and finding each order's item mix was different enough that consolidation wouldn't have saved meaningful picker time.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica warehouse management — wave pick. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Wave picking is a grouping and sequencing layer over Acumatica's existing shipment and pick/pack/ship workflow, not a separate system, and its value depends entirely on whether the warehouse's actual order profile has enough item overlap to make consolidated picking worthwhile. Get warehouse zone data accurate before turning on zone-based strategies, treat lot/serial allocation during consolidated picks as a place that needs explicit FEFO-aware logic rather than first-come allocation, and validate the throughput case with real order data before committing a client to the added complexity.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing — FIFO, Average, and Beyond</a></li>
       <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts — Extensions</a></li>
-      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-sales-orders-from-quote-to-invoice/">Acumatica Sales Orders — From Quote to Invoice</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing — FIFO, Average, and Beyond</a></li>
+      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

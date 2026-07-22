@@ -93,107 +93,69 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The dispatch board — Acumatica calls it the <strong>Calendar Board</strong> — is where the Field Service module either wins or loses the room. Back-office staff will forgive clunky setup screens; a dispatcher staring at the board eight hours a day will not. I've configured field service for an equipment maintenance company and an HVAC-adjacent contractor, and in both cases the board configuration and the discipline around appointment statuses mattered more than any other module setting.</p>
+
+<h2 id="the-object-model-under-the-board">The object model under the board</h2>
+<p>Understanding the board means understanding three documents. A <strong>service order</strong> (FS300100) is the commitment — customer, location, problem, estimated services and inventory. An <strong>appointment</strong> (FS300200) is a scheduled visit against that order: one order can have many appointments (initial visit, return with parts). The board schedules <em>appointments</em>, assigning them to <strong>staff</strong> (employees flagged as service personnel, with skills, licenses and service areas) on a timeline. Everything you drag on the board is an appointment; everything unscheduled in the side panel is an order or appointment awaiting a slot.</p>
+
+<h2 id="board-setup-that-dispatchers-thank-you-for">Board setup that dispatchers actually thank you for</h2>
+<ul>
+<li><strong>Filter the staff list hard.</strong> The board renders a row (or column) per staff member. Fifty rows is unusable; configure branch and service-area filters so a dispatcher sees their crew only.</li>
+<li><strong>Color by status, not by service type.</strong> The board supports color-coding; the question a dispatcher asks fifty times a day is "who's running late," not "which of these is a boiler job." Map colors to the appointment status flow — scheduled, en route, in progress, completed, paused — and anomalies jump out.</li>
+<li><strong>Skills and geographic zones as soft constraints.</strong> Acumatica can restrict or warn when you assign an appointment to staff missing a required skill or outside the service area. Configure them as warnings, not blocks — real dispatching is full of justified exceptions, and hard blocks teach dispatchers to stop maintaining skills data.</li>
+<li><strong>Appointment duration defaults from the service.</strong> Estimated durations on service non-stock items make dragged appointments land with realistic widths. Boards where everything is a one-hour block drift from reality by noon.</li>
+</ul>
+
+<div class="callout">
+  <strong>The board is only as live as the mobile flow</strong>
+  <p>Status colors update when technicians update statuses. If techs don't tap "en route" and "start" on the mobile app, the board is a beautifully rendered fiction. Make the mobile status flow brutally simple — the standard app screens, trimmed via mobile site map customization to just status actions, signature and photos — and the board becomes trustworthy.</p>
+</div>
+
+<h2 id="the-status-flow-and-its-automation">The status flow and its automation</h2>
+<p>Appointments run a workflow: Not Started → En Route → In Process → Completed → Closed (with Paused branches). Each transition timestamps — that's where actual-vs-estimated duration reporting comes from, and it's what makes payroll-adjacent questions answerable. Business events on these transitions do useful work with zero code: notify the customer by SMS/email when the tech goes en route, alert the dispatcher when an appointment sits In Process ninety minutes past its estimated duration, or when a scheduled appointment hasn't gone en route fifteen minutes after start time.</p>
+<p>For deeper logic, appointment DACs extend like anything else. One client needed appointments over four hours to require a second tech — a <code>RowPersisting</code> validation on the appointment graph extension:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaServiceExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class AppointmentEntryExt : PXGraphExtension&lt;AppointmentEntry&gt;
 {
-    [PXOverride]
-    public virtual void Service(Acumatica doc)
+    protected virtual void _(Events.RowPersisting&lt;FSAppointment&gt; e)
     {
-        // Custom service logic for acumatica service dispatch
-        if (doc?.Service == null) return;
-        Base.Service(doc);
+        var row = e.Row;
+        if (row == null || row.EstimatedDurationTotal &lt;= 240) return;
+
+        int staffCount = Base.AppointmentServiceEmployees
+            .Select().Count;
+        if (staffCount &lt; 2)
+            PXUIFieldAttribute.SetWarning&lt;FSAppointment.estimatedDurationTotal&gt;(
+                e.Cache, row,
+                "Appointments over 4 hours normally require two staff members.");
     }
 }</code></pre>
 </div>
-<h2 id="how-to-debug-service-in-production">How to debug service in production</h2>
-<p>In the work I have done on acumatica field service — dispatch board, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the service is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-field-service-dispatch-board-matters-in-production">Why Acumatica Field Service — Dispatch Board matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of service in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production service looks different from development service. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaServiceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Service(Acumatica doc)
-    {
-        // Custom service logic for acumatica service dispatch
-        if (doc?.Service == null) return;
-        Base.Service(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring service first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with service when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="routes-and-the-map-view">Routes and the map view</h2>
+<p>If you license the routes functionality, the board pairs with map-based views — appointments plotted by service address, and route optimization to sequence a day's visits per vehicle. My experience: the map view earns its keep immediately for density visualization (a dispatcher seeing three jobs in the same suburb schedules them consecutively without any algorithm), while full route optimization requires clean address data and realistic durations before its output beats a competent human. Geocode validation on customer locations is the unglamorous prerequisite — garbage coordinates put appointments in the ocean.</p>
+
+<h2 id="from-appointment-to-invoice">From appointment to invoice</h2>
+<p>The board's downstream payoff is billing. Completed appointments carry actual services, parts consumed, and time; the billing cycle configuration (per customer) decides whether invoices generate per appointment, per service order, or batched. Make sure techs close appointments with accurate lines <em>on the day</em> — the single biggest field-service billing failure I've seen is appointments left In Process for a week, invisible to the billing run, discovered when the month's revenue comes up short.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica field service — dispatch board. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat the calendar board as the dispatcher's cockpit: few rows, status colors, realistic durations, warnings over blocks. Wire business events to the status flow for customer notifications and exception alerts, keep the mobile flow so simple that techs actually feed the board live data, and enforce same-day appointment closure so billing sees reality. The module's mechanics are solid — the implementation work is making the humans and the board tell each other the truth.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-fs-field-service-extension/">Acumatica Field Service — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-fs-field-service-extension/">Acumatica FS Field Service Extension</a></li>
       <li><a href="/blog/acumatica-mobile-app-customization/">Acumatica Mobile App Customization</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-mobile-geolocation-capture/">Acumatica Mobile Geolocation Capture</a></li>
+      <li><a href="/blog/acumatica-mobile-offline-mode/">Acumatica Mobile Offline Mode</a></li>
+      <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

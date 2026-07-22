@@ -93,96 +93,71 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Multi-tenant data isolation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Manufacturing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>In the work I have done on acumatica manufacturing — extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Manufacturing (AM) is the module where "extension" most often means "make the system model a production process it wasn't originally configured for" — a routing with an unusual sequence, a costing method specific to the industry, or a shop floor step Acumatica's stock flow doesn't capture cleanly.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p>A production order is <code>AMProdItem</code> with operations on <code>AMProdOper</code>; the bill of material and routing that generate them live on BOM and routing maintenance screens, typically backed by DACs in the <code>AMBom*</code>/<code>AMRoute*</code> family. Material transactions post through something like <code>AMMTran</code>, and labor/time transactions through a corresponding operation transaction table. The core graphs are <code>ProductionOrderEntry</code> (or similarly named) for the production order and separate maintenance graphs for BOM and routing.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>Custom routing logic — an extra QA step that must be recorded before an operation can be marked complete, or a conditional step that only applies to certain item classes — is usually a graph extension on production order/operation entry, checking a custom field or a lookup against the routing definition before allowing an operation status change. Costing customizations (a blended standard/actual method, industry-specific overhead allocation) are higher-risk because they interact with both inventory valuation and GL, similar to the caution warranted in Fixed Assets and GL work.</p>
+
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Don't let a routing extension bypass backflush accounting</strong>
+  <p>If the plant uses backflushing (material consumption calculated automatically from the BOM as operations complete, rather than issued manually), a customization that adds a manual material entry step alongside it will double-count consumption unless it explicitly disables backflush for that material or operation. This is one of the more common and hardest-to-spot bugs in AM customizations because the error only shows up in an inventory variance report weeks later, not at the point of entry.</p>
 </div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the manufacturing is.</p>
+
+<h2 id="a-realistic-scenario-mandatory-qa-checkpoint">A realistic scenario: mandatory QA checkpoint</h2>
+<p>A frequent AM customization: certain item classes require a quality inspection record before the next routing operation can start, which isn't a stock hard-gate in the base routing engine.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'acumatica'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM acumatica
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="why-acumatica-on-a-horizontal-platform-beats-from-scratch">Why acumatica on a horizontal platform beats from-scratch</h2>
-<p>The performance of manufacturing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="channel-partner-programs-for-manufacturing">Channel partner programs for manufacturing</h2>
-<p>Production manufacturing looks different from development manufacturing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Manufacturing>
+  <div class="code-header"><span class="code-lang">C# · PRODUCTION ORDER ENTRY EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ProductionOrderEntry_QAGate_Extension : PXGraphExtension&lt;ProductionOrderEntry&gt;
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    protected virtual void AMProdOper_RowPersisting(PXCache sender, PXRowPersistingEventArgs e)
+    {
+        var oper = (AMProdOper)e.Row;
+        if (oper == null || oper.Completed != true) return;
+
+        bool requiresQA = ItemRequiresQAInspection(oper.InventoryID);
+        if (requiresQA)
+        {
+            bool hasInspection = QAInspections.Select(oper.OrderID, oper.OperationID)
+                .RowCast&lt;QAInspection&gt;().Any(q =&gt; q.Passed == true);
+            if (!hasInspection)
+            {
+                sender.RaiseExceptionHandling&lt;AMProdOper.completed&gt;(oper, oper.Completed,
+                    new PXSetPropertyException("A passed QA inspection is required before this operation can be marked complete.", PXErrorLevel.Error));
+            }
+        }
+    }
+
+    public PXSelect&lt;QAInspection&gt; QAInspections;
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring manufacturing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with manufacturing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Field and DAC names in the AM module vary more than most between Acumatica versions, since manufacturing edition history is more fragmented than core financials — confirm the operation completion field and transaction DAC names against the specific version before implementing this pattern.</p>
+
+<h2 id="wip-and-cost-rollup">WIP and cost rollup</h2>
+<p>Any change touching material or labor transactions feeds work-in-process valuation, which rolls up into the finished item's cost when the production order closes. A customization tested only against a single-level BOM can behave differently against a multi-level BOM where a sub-assembly's cost rollup happens before the parent's — test with at least one multi-level assembly before trusting the numbers.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test against a production order that uses backflushing and one that doesn't, and against at least one multi-level BOM. AM bugs concentrate at the boundary between manual and automatic material consumption, and at cost rollup through nested assemblies — a flat, single-level, manually-issued test order won't expose either.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica manufacturing — extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Manufacturing extensions carry the same costing risk as GL and Fixed Assets work, compounded by routing and BOM complexity. Respect backflush accounting, verify DAC and field names against the specific AM version in play, and test through a full multi-level production cycle before shipping.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-shop-floor-extension/">Acumatica Shop Floor — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-po-module-extension-patterns/">Acumatica PO Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-gl-module-extension-patterns/">Acumatica GL Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

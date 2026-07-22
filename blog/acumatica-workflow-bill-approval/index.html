@@ -93,112 +93,62 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>The runbook for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>AP bill approval (screen AP301000, graph <code>APInvoiceEntry</code>) is the workflow I have customized more than any other, because "approve the bill" is never actually the whole requirement — it's "approve the bill, but skip approval if it matches a PO within tolerance, and route differently for non-PO bills, and let the AP clerk override with a reason code." This post covers the bill-specific mechanics: the statuses involved, how PO-matched bills should short-circuit approval, and the two-way/three-way match interaction that trips up first attempts.</p>
+
+<h2 id="the-status-set">The status set you're actually working with</h2>
+<p>Out of the box, <code>APInvoice.status</code> includes <code>Hold</code>, <code>Balanced</code>, <code>PendingApproval</code>, <code>Open</code>, <code>Closed</code>, among others. Bill approval customizations live between <code>Balanced</code> (the bill is internally consistent — debits equal credits, required fields filled) and <code>Open</code> (approved and ready to pay). The <code>Release</code> action is the natural trigger point, but I've also seen requirements to gate approval earlier, at the point the bill leaves <code>Hold</code>, so it never becomes schedulable for payment batch selection while still pending — that changes which action you hook and forces you to think about what "still on hold" versus "pending approval" means to the AP team using the screen day to day.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public static void Configure(WorkflowContext&lt;APInvoiceEntry, APInvoice&gt; context)
+{
+    context.Graph.WithTransitions(transitions => transitions
+        .AddGroupFrom&lt;APInvoice.status.Balanced&gt;(g => g
+            .Add(t => t
+                .To&lt;APInvoice.status.PendingApproval&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                .When(APInvoice.docTotal.IsGreaterEqual(1000m)
+                      &amp; APInvoice.pOOrderNbr.IsNull()))   // non-PO bills only
+            .Add(t => t
+                .To&lt;APInvoice.status.Open&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                .When(APInvoice.pOOrderNbr.IsNotNull()      // PO-matched: skip approval
+                      | APInvoice.docTotal.IsLess(1000m)))));
+}
+</code></pre>
 </div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>In the work I have done on acumatica workflow — bill approval patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="what-acumatica-workflow-bill-approval-patterns-is-for">What Acumatica Workflow — Bill Approval Patterns is for</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="po-matched-bills-and-tolerance">PO-matched bills: approval already happened upstream</h2>
+<p>The most common bill-approval mistake is requiring a second human sign-off on a bill that already passed a three-way match against a released purchase order and its receipt. If the PO itself went through <code>acumatica-workflow-purchase-order-approval</code>-style routing, and the bill's quantities and amounts fall within the matching tolerance configured on the AP Preferences screen, re-approving the bill is redundant friction that AP staff will route around by padding the tolerance until nothing ever gets flagged. My default: condition the bill's approval transition on <code>POOrderNbr.IsNull()</code> (no PO reference — it's a non-PO, discretionary spend bill) or on a computed <code>WithinMatchTolerance</code> unbound field that a graph extension sets during the match, and only route matched, in-tolerance bills straight to <code>Open</code>.</p>
+
 <div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+  <strong>Out-of-tolerance matches still need eyes on them</strong>
+  <p>A PO-matched bill that exceeds the configured price or quantity variance should still hit approval — don't let the presence of a PO number alone bypass the gate. I compute the tolerance check in a <code>RowUpdated</code> handler on the bill and store the result in an unbound field the workflow condition reads, since <code>.When()</code> can't itself compare against the PO's tolerance settings.</p>
 </div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="override-with-reason">Letting a controller override, with an audit trail</h2>
+<p>Clients often want an escape hatch: a controller-level user can push a bill straight to Open, bypassing the approval chain, but only with a reason code logged. I implement this as a second action (a custom <code>PXAction</code> guarded by role, e.g. <code>APManualApprove</code>) wired into the same <code>PendingApproval</code> state as an additional outbound transition, rather than trying to make the approval map itself conditional on role — the approval map's job is who approves normally; the override is a deliberate escape valve and reads much more clearly as its own transition with its own trigger.</p>
+
+<h2 id="what-blocks-the-transition-silently">The silent blocker: unreleased AP subaccount restrictions</h2>
+<p>One gotcha specific to bills: if the bill's GL distribution touches a restricted subaccount the current user can't post to (row-level security on subaccounts), the <code>Release</code> action itself throws before the workflow transition is ever evaluated. This looks identical to "the approval workflow is broken" from the support ticket, but it's a security exception, not a workflow bug — check the trace for a <code>PXSetPropertyException</code ) around subaccount access before you go anywhere near the <code>Configure</code> method.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — bill approval patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Bill approval is straightforward once you stop treating every bill the same: split PO-matched from non-PO, respect match tolerance rather than the mere presence of a PO number, and give controllers an explicit, audited override action instead of a role hack buried in the approval map. Ninety percent of "our bill approval doesn't work right" tickets I get are one of those three things, not a broken transition.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-workflow-vendor-approval/">Acumatica Workflow — New Vendor Approval</a></li>
-      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount Thresholds</a></li>
-      <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
-      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
-      <li><a href="/blog/acumatica-workflow-discount-approval/">Acumatica Workflow — Discount Approval Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount</a></li>
+      <li><a href="/blog/acumatica-workflow-vendor-approval/">Acumatica Workflow — Vendor Approval</a></li>
+      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen Deep Dive</a></li>
+      <li><a href="/blog/acumatica-workflow-purchase-order-approval/">Acumatica Workflow — Purchase Order Approval</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Acumatica DAC Cross-Field Validation</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

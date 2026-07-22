@@ -94,94 +94,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation in production is 20% integration and 80% error handling. this is one of the parts of the error handling. The pattern that works is to push the workflow towards being observable, with a runbook for the failure modes that the integration tools don't cover.</p>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>The runbook for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica gives you two ways to find out something changed: have it tell you (business events pushing to a webhook) or ask it repeatedly (polling the contract-based REST API on a schedule). Most integrations default to whichever pattern the developer built last, when the right choice actually depends on latency needs, endpoint availability, and how much you trust delivery guarantees.</p>
+<h2 id="how-business-event-webhooks-work">How business event webhooks work</h2>
+<p>A business event in Acumatica watches for a condition — a document reaching a status, a field changing value — and fires a defined action when it's met. One of those actions can be an HTTP callout: Acumatica posts a payload to an external URL the moment the condition is satisfied. This gets you near-real-time notification without your integration ever asking Acumatica "did anything change." The AR Invoice released, the webhook fires seconds later, downstream systems react immediately.</p>
+<p>The catch is that Acumatica's webhook delivery is fire-and-forget in the common configuration — there's no built-in dead-letter queue or guaranteed redelivery if your endpoint is down or returns an error. If your receiving service has an outage during the exact window a webhook fires, that event can simply be lost unless you've built retry logic on the Acumatica side (via a custom notification handler) or accept the gap.</p>
+<h2 id="how-rest-polling-works">How REST polling works</h2>
+<p>Polling flips the responsibility: a scheduled job calls the contract-based REST API on an interval, filtering for records modified since the last successful run (typically using a <code>LastModifiedDateTime</code> filter), and processes whatever comes back. Nothing gets silently lost — if a poll fails, the next one picks up the same unprocessed window, as long as you're tracking the watermark correctly.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
+  <div class="code-header"><span class="code-lang">JS · POLLING LOOP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>async function pollInvoices(lastRunIso) {
+  const filter = `LastModifiedDateTime gt datetimeoffset'${lastRunIso}'`;
+  const res = await fetch(
+    `${BASE_URL}/entity/Default/23.200.001/Invoice?$filter=${encodeURIComponent(filter)}`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+  );
+  if (!res.ok) throw new Error(`Poll failed: ${res.status}`);
+  const invoices = await res.json();
+  for (const inv of invoices) {
+    await processInvoice(inv);
+  }
+  return new Date().toISOString(); // new watermark, persist this
 }</code></pre>
 </div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>In the work I have done on acumatica webhooks vs rest polling — when to use which, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="what-acumatica-webhooks-vs-rest-polling-when-to-use-which-is-for">What Acumatica Webhooks vs REST Polling — When to Use Which is for</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the webhooks is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWebhooks(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>The performance of webhooks in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>Production webhooks looks different from development webhooks. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
+<p>The trade-off is latency and cost: poll every five minutes and your worst-case delay is five minutes, poll every 30 seconds and you're hammering the API (and likely the license/session limits) for records that mostly haven't changed. Polling is inherently wasteful when nothing's happening, which is most of the time for a low-volume tenant.</p>
+<h2 id="trade-offs-at-a-glance">Trade-offs at a glance</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring webhooks first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with webhooks when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th></th><th>Webhooks (business events)</th><th>REST polling</th></tr>
+  <tr><td>Latency</td><td>Seconds</td><td>Bounded by poll interval</td></tr>
+  <tr><td>Delivery guarantee</td><td>Fire-and-forget by default</td><td>Guaranteed if watermark tracked correctly</td></tr>
+  <tr><td>Infra requirement</td><td>Public HTTPS endpoint</td><td>None — outbound calls only</td></tr>
+  <tr><td>Load on Acumatica</td><td>Minimal, event-driven</td><td>Recurring API/session cost</td></tr>
+  <tr><td>Reconciliation</td><td>Needs a separate safety net</td><td>Naturally self-healing</td></tr>
 </table>
+<h2 id="when-polling-is-the-safer-choice">When polling is the safer choice</h2>
+<p>Webhooks assume the receiving side has a stable, publicly reachable HTTPS endpoint — not always true for an on-prem integration behind a corporate firewall, or during early development when you don't want to expose anything to the internet yet. Polling also wins when you need a full reconciliation pass rather than a stream of deltas: end-of-day jobs that need to confirm every invoice is accounted for are naturally a polling problem, since "ask for everything modified since midnight" is a more complete guarantee than trusting that every webhook fired and was received.</p>
+<div class="callout callout-warn">
+  <strong>Webhooks don't survive Acumatica downtime cleanly</strong>
+  <p>If Acumatica itself is down or mid-upgrade when a business event would have fired, that event doesn't queue and retry once the instance comes back — it just doesn't happen. Any integration relying solely on webhooks needs a periodic reconciliation poll to catch what was missed during an outage window.</p>
+</div>
+<h2 id="the-hybrid-pattern">The hybrid pattern most integrations end up with</h2>
+<p>In practice, the reliable answer is both: use a webhook for near-real-time reaction to the events that matter, and run a much less frequent polling job — hourly or nightly — purely as a reconciliation safety net that catches anything the webhook missed. The webhook handles the "user expects to see this immediately" cases; the poll handles "make sure nothing fell through the cracks." Keep the reconciliation poll idempotent so reprocessing an already-handled record is harmless, and you get low latency without betting the integration's correctness on webhook delivery alone.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica webhooks vs rest polling — when to use which. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Webhooks give you speed, polling gives you certainty — pick webhooks for responsiveness and pair them with a periodic poll for reconciliation rather than treating either pattern as sufficient on its own. That combination is what actually survives an Acumatica outage or a flaky endpoint without silently dropping data.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -192,9 +146,6 @@ return items.map(item =&gt; ({
       <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -93,93 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="incident-response-for-publishing">Incident response for publishing</h2>
-<p>Incident response for publishing is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Publishing
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="what-publishing-acumatica-customizations-to-production-gives-you">What Publishing Acumatica Customizations to Production gives you</h2>
-<p>In the work I have done on publishing acumatica customizations to production, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Publishing a customization to a production Acumatica tenant is the moment your code touches live data and live users. The framework gives you the tools — customization packages, validation, and a publish log — but not a process. The safe path is boring and repeatable: freeze the package, validate it against a copy of production, publish in a maintenance window, and keep the previous package on hand so a rollback is a two-minute action rather than a panic.</p>
+
+<h2 id="what-a-package-actually-contains">What a customization package actually contains</h2>
+<p>A published package is a bundle of items: custom screens, DAC and graph code (as source or referenced compiled DLLs), generic inquiries, reports, database scripts, site map nodes, and system-locale/UI changes. Some of these change the database schema; others only add files or metadata. Before you publish anything, open the package and look at the item list — a package that includes Custom Tables or Database Scripts is a schema change, and schema changes are the ones you cannot casually undo. Knowing that up front decides how careful the release has to be.</p>
+
+<h2 id="pre-flight-checks">Pre-flight checks before you touch production</h2>
+<p>The single most valuable habit is validating on a restored copy of production, not on a clean demo tenant. A package that publishes cleanly on a fresh install can fail on production because of existing data, a conflicting ISV customization, or a field that a user already populated. The pre-flight I run:</p>
+<ul>
+  <li>Restore the current production snapshot to a staging tenant on the same build number.</li>
+  <li>Publish the exact package you intend to ship — same version, same items.</li>
+  <li>Run <strong>Validate</strong> in the Customization Project Editor and read every warning, not just errors.</li>
+  <li>Smoke-test the screens the package touches with real data volumes.</li>
+</ul>
 <div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+  <strong>Build number must match</strong>
+  <p>A customization package validated against 23R2 build X may not publish against build Y. Acumatica ties compiled extensions to the platform version. Always validate on the exact build production is running, and re-validate after any platform update, before you publish custom code on top of it.</p>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The publishing is not the question; the failure mode of the acumatica is.</p>
+
+<h2 id="packaging-a-reproducible-artifact">Packaging a reproducible artifact</h2>
+<p>Export the package to a versioned <code>.zip</code> and commit it (or its source project XML) to source control. The published-to-production artifact must be the identical file you validated on staging — not a re-export "with one small fix." If you can rebuild the same bytes from a tagged commit, you have a real release; if the package only exists inside the tenant, you have a liability. Name the file with the version and date so the rollback target is unambiguous.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "publishing_acumatica" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · RELEASE ARTIFACTS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>releases/
+  Distribution-v14.2-2026-05-12.zip   ← publishing this
+  Distribution-v14.1-2026-04-28.zip   ← rollback target
+git tag: cust/distribution-v14.2</code></pre>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: publishing
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: publishing
-  template:
-    metadata:
-      labels:
-        app: publishing</code></pre>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of acumatica in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production acumatica looks different from development acumatica. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Publishing
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+
+<h2 id="the-publish-itself">The publish step and merge behaviour</h2>
+<p>When multiple customization projects are published together, Acumatica merges them, and the merge order matters when two projects touch the same screen or DAC. Publish in a maintenance window: users off, a fresh backup taken immediately before, and the previous package staged for rollback. The publish runs a compile; if compilation fails, the tenant can be left with the old published set still active, but you do not want to discover that live. Watch the publish log to completion rather than assuming success.</p>
+
+<h2 id="the-rollback-plan">The rollback plan no one writes</h2>
+<p>Rollback splits by what the package changed. For file/metadata-only changes, re-publishing the previous package restores the prior state cleanly. For <strong>schema changes</strong>, un-publishing does not drop columns or tables that were added, and it certainly does not restore data — so your real rollback for a schema-touching release is the database backup you took before publishing. Decide which category you are in before you publish, and write the rollback steps down.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring acumatica first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add publishing on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with acumatica when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>What the package changed</th><th>Rollback</th></tr>
+  <tr><td>Screens, reports, GIs, code only</td><td>Re-publish previous package</td></tr>
+  <tr><td>Added tables/columns (schema)</td><td>Restore pre-publish DB backup</td></tr>
+  <tr><td>Data migration script ran</td><td>Restore backup; script is not reversible</td></tr>
 </table>
+
+<div class="callout">
+  <strong>Take the backup even if you are sure</strong>
+  <p>The pre-publish backup costs minutes and is the only thing standing between a bad schema change and a full restore from last night's tape. Every release I have ever regretted was one where "this one is trivial" meant no fresh backup.</p>
+</div>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on publishing acumatica customizations to production. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A safe production publish is not clever, it is disciplined: validate the exact package on a copy of production at the exact build, ship the identical versioned artifact, publish in a window with a fresh backup, and know before you start whether your rollback is a re-publish or a restore. Do that every time and publishing stops being the scary part of the release.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +150,6 @@ jobs:
       <li><a href="/blog/acumatica-rebuild-and-publish-best-practices/">Acumatica Rebuild and Publish Best Practices</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

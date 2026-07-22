@@ -93,107 +93,59 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A Generic Inquiry that took two seconds at UAT and takes forty seconds six months into production is the single most common performance ticket I get on established Acumatica instances, and it is almost never a GI designer bug — it is data growth exposing a query shape that was never going to scale, hiding behind a UI that made building it trivially easy.</p>
+
+<h2 id="get-the-real-query-first">Step one: get the actual SQL, not a guess</h2>
+<p>Every GI compiles down to a BQL query and ultimately a T-SQL statement. Guessing which join or condition is expensive wastes time; get the real query from SQL Server's Query Store or from a Profiler trace while running the GI, and work from that, not from reading the GI designer and imagining what it probably generates.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance diagnosing
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL — find the GI's query in Query Store by duration</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT TOP 20
+    qt.query_sql_text,
+    rs.avg_duration/1000.0 AS avg_duration_ms,
+    rs.count_executions,
+    rs.last_execution_time
+FROM sys.query_store_query_text qt
+JOIN sys.query_store_query q ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p ON p.query_id = q.query_id
+JOIN sys.query_store_runtime_stats rs ON rs.plan_id = p.plan_id
+WHERE qt.query_sql_text LIKE '%ARInvoice%'  -- narrow to the GI's tables
+ORDER BY rs.avg_duration DESC;</code></pre>
 </div>
-<h2 id="why-acumatica-performance-diagnosing-a-slow-gi-matters-in-production">Why Acumatica Performance — Diagnosing a Slow GI matters in production</h2>
-<p>In the work I have done on acumatica performance — diagnosing a slow gi, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="the-usual-suspects">The four things I check, in order</h2>
+<ul>
+<li><strong>Unindexed join or filter columns.</strong> A GI joining on a custom field or filtering on something other than the table's natural key hits a scan instead of a seek. Check the execution plan for a "Clustered Index Scan" or "Table Scan" on a large table — that is the single highest-value thing to find.</li>
+<li><strong>Client-side filtering hiding as a GI condition.</strong> Conditions built against calculated fields, or against fields exposed only after a join that could not be pushed into the join's <code>ON</code> clause, sometimes get evaluated after the row set is materialized rather than in the <code>WHERE</code>. The GI feels like it has a filter; the database does not agree.</li>
+<li><strong>Fan-out from one-to-many joins.</strong> A GI joining an invoice header to its lines, then to its tax details, multiplies rows at each join. If the designer's Results Grid is set to show header-level fields against that multiplied row set, you are fetching far more rows than the user ever sees after grouping/dedup in the UI.</li>
+<li><strong>Missing filter defaults on a large table.</strong> A GI over <code>GLTran</code> or <code>ARTran</code> with no default date range returns and sorts the entire history table on first load. Add a sensible default filter (a relative date range, "current period," etc.) so the unfiltered worst case never actually runs.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>The GI ran fine in UAT because UAT has 2,000 rows</strong>
+  <p>Query plans that look identical between environments behave completely differently at different table sizes — a table scan on 2,000 rows is instant; the same scan on 4 million rows is not. Never sign off a GI's performance against a UAT or sandbox copy with a fraction of production's data volume. Restore a recent production backup to a test environment (or ask Acumatica support for one on SaaS) before calling a GI production-ready.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of performance in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPerformanceExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Acumatica doc)
-    {
-        // Custom performance logic for acumatica performance diagnosing
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="fixing-what-you-find">Fixing each cause</h2>
+<p>Missing index: add one covering the join/filter columns, respecting the existing convention of leading with <code>CompanyID</code> for multi-tenant tables — coordinate with SQL Server indexing practices covered in the indexing post in this series, and script custom indexes since upgrades can silently drop unmanaged ones. Fan-out: restructure the GI to aggregate the many-side before joining (a subquery relation or a supporting projection), or split into a master GI and a detail GI rather than one flattened result. Missing default filter: add one on the Parameters tab with a sane default value, not just an optional blank parameter — optional-but-blank still lets a user run the worst case by accident.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance — diagnosing a slow gi. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Diagnose a slow GI from the actual SQL Server execution plan, not from staring at the GI designer, and always test against production-scale data before trusting the result. Index the real join/filter columns, catch join fan-out before it inflates the row count, and default every date-range parameter on large tables so nobody accidentally triggers a full-table sort.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage — Locking and Caching</a></li>
-      <li><a href="/blog/acumatica-gi-export-large-datasets/">Exporting Large Datasets from Acumatica GIs</a></li>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-connection-pooling/">Acumatica Performance — Connection Pooling</a></li>
+      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering</a></li>
+      <li><a href="/blog/acumatica-gi-export-large-datasets/">Acumatica GI — Exporting Large Datasets</a></li>
+      <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server Indexing for Acumatica</a></li>
+      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Slow Report Diagnosis</a></li>
+      <li><a href="/blog/acumatica-sql-query-store-for-acumatica/">SQL Query Store for Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

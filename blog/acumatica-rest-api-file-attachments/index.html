@@ -94,101 +94,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production APIs to know the patterns that work. They share a few traits: versioned from day one, idempotent, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>Performance: caching, batching, pagination is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Attaching a PDF, image, or document to a Sales Order or Bill through the REST API is a common integration requirement — customer-uploaded proof of delivery, a signed PO, an emailed invoice — and it's handled differently from a normal field update because a file isn't part of the entity's field contract.</p>
+
+<h2 id="files-are-children-not-fields">Files are children of an entity, not fields on it</h2>
+<p>You don't attach a file by including it in the JSON body of a PUT to the entity. Files hang off a dedicated sub-resource path: <code>/entity/{endpointName}/{version}/{entity}/{key}/files/{filename}</code>. That path takes the raw binary content of the file directly in the request body — it isn't wrapped in JSON and, on current contract versions, isn't base64-encoded inside a field.</p>
+
+<h2 id="the-attach-request">The attach request</h2>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/files/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await fileService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP · ATTACH A FILE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>PUT /entity/Default/24.200.001/SalesOrder/SO/SO006480/files/PackingSlip.pdf HTTP/1.1
+Host: yourinstance.acumatica.com
+Authorization: Bearer {access_token}
+Content-Type: application/pdf
+
+&lt;raw binary content of the PDF&gt;</code></pre>
 </div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>In the work I have done on file attachments with the acumatica rest api, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The key segments in the URL (<code>SO</code>, <code>SO006480</code> above) are the entity's own key fields, in the order the contract defines them — get that order wrong and you'll attach to nothing, or hit a 404, rather than silently attaching to the wrong record.</p>
+
+<h2 id="size-and-payload-cost">Size and payload cost</h2>
+<p>Because the file goes over the wire as part of the HTTP request body rather than a multipart form, there's no chunked-upload mechanism in the contract-based API for very large files — you're bound by whatever request-size limits IIS and the Acumatica web application are configured for on that instance. For anything beyond a few megabytes routinely, check the actual <code>maxAllowedContentLength</code>/request-size configuration on the target instance rather than assuming a default; this is an infrastructure setting, not a REST API contract, so it varies by deployment.</p>
+
+<h2 id="retrieving-vs-listing-files">Retrieving vs. listing files</h2>
+<p>A GET on the same entity with <code>$expand=files</code> (or a dedicated files sub-collection, depending on contract version) returns the list of attached file names and IDs without pulling their content — useful for checking what's already attached before uploading a duplicate. Fetching the actual bytes back out is a separate GET against the specific file path.</p>
+
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>Check for an existing file before re-attaching</strong>
+  <p>Re-running an integration that attaches the same document on every sync (a nightly job that re-uploads an invoice PDF, say) will keep adding duplicate attachments rather than replacing the old one unless you check the file list first and skip or delete-then-replace. The files sub-resource doesn't dedupe by filename automatically.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The file is not the question; the failure mode of the attachments is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /files/{id}:
-    get:
-      operationId: getFile
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="why-file-is-not-rest-anymore">Why file is not REST anymore</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="idempotency-in-attachments">Idempotency in attachments</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type FileResponse = {
-    id: string;
-    attachments: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="contract-testing-for-file">Contract testing for file</h2>
-<p>The performance of attachments in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="observability-tracing-attachments">Observability: tracing attachments</h2>
-<p>Production attachments looks different from development attachments. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/files/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await fileService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring attachments first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add file on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with attachments when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="practical-gotchas">Practical gotchas</h2>
+<p>Two things trip people up in practice: the exact URL shape for the files sub-resource changed between older and newer System Contract versions (some older instances used a slightly different path convention before the "child files" model was standardized), so confirm the pattern against the specific endpoint version you're targeting rather than copying a snippet written for a different Acumatica release; and Content-Type on the PUT should match the actual file type — sending the wrong MIME type doesn't always error, but it can affect how the file previews inside Acumatica's own file viewer later.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on file attachments with the acumatica rest api. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>File attachments are a sub-resource of the entity, keyed the same way the entity itself is keyed, carrying raw binary in the request body rather than JSON. Check the existing file list before re-attaching, and verify the exact sub-resource path against your instance's contract version rather than assuming it matches an example written for a different release.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
-      <li><a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">Generating an OpenAPI Spec from Acumatica</a></li>
-      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
-      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
+      <li><a href="/blog/acumatica-aws-s3-integration/">Acumatica AWS S3 Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-azure-blob-storage-integration/">Acumatica Azure Blob Storage Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-rest-api-versioning-upgrade-strategy/">Acumatica REST API — Versioning and Upgrade Strategy</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

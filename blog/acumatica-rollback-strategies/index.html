@@ -85,7 +85,7 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Rollback Strategies</span></nav>
-    <span class="tag">DevOps · Devops</span>
+    <span class="tag">Acumatica · DevOps</span>
     <h1>Acumatica Rollback Strategies</h1>
     <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Rollback Strategies is the Acumatica operations topic that you only get good at by doing it badly a few times.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-02">Jun 2, 2026</time><span>12 min read</span></div>
@@ -93,93 +93,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>Incident response for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A rollback strategy is what you fall back on when a customization publish or an ERP version upgrade doesn't go the way the sandbox run suggested it would. Acumatica gives you a few distinct rollback mechanisms — database snapshots, customization unpublish/revert, and full restores from scheduled backups — and they are not interchangeable. Picking the wrong one, or not having one ready before you start, is how a ten-minute publish turns into a weekend.</p>
+<h2 id="snapshots-are-the-primary-safety-net">Snapshots are the primary safety net</h2>
+<p>Before any risky production change — a major customization publish, a version upgrade, a bulk data import — take a database snapshot. On self-hosted instances this is done through the Instance Manager; on Acumatica Cloud it's the snapshot feature in the cloud portal. Either way, you get a point-in-time copy of the tenant database that you can restore to if the change goes wrong.</p>
+<p>Snapshots should be tied to events, not a calendar. A nightly snapshot schedule is fine for general safety, but it's not a substitute for taking one immediately before you touch production. The snapshot you need is the one from five minutes before the bad publish, not the one from last night.</p>
+<h2 id="customization-rollback-vs-data-rollback">Customization rollback is not data rollback</h2>
+<p>If a bad customization is causing errors but hasn't corrupted any data yet, unpublishing it — or reverting to a previously exported version of the project via the Customization Projects screen — is the fastest fix. It's a code-level change, it doesn't touch the database, and it typically takes effect in seconds.</p>
+<p>The trap is assuming that unpublishing "undoes" everything. It doesn't. If the broken customization already posted a GL batch, released a document, or wrote bad values into a DAC field while it was live, unpublishing removes the code but leaves the data damage in place. At that point you're not choosing between customization rollback and DB restore — you need the restore, and the customization fix is a separate, second step.</p>
+<div class="callout-warn">
+  <strong>A snapshot restore rolls back everyone, not just the bad change</strong>
+  <p>Restoring to a pre-publish snapshot reverts every transaction entered since that snapshot was taken — including legitimate work from other users. If detection takes two hours, you lose two hours of real invoices, receipts, and GL entries along with the bad data. Lock users out during risky publishes so the detection-to-rollback window doesn't quietly grow the blast radius.</p>
+</div>
+<h2 id="upgrade-rollback-is-higher-stakes">Upgrade rollback is higher stakes than a customization rollback</h2>
+<p>Version upgrades touch schema, stored procedures, and every customization in the instance at once, so there's no equivalent to "just unpublish it." The only realistic rollback for a bad upgrade is a snapshot restore to the pre-upgrade state, which means the snapshot has to exist and be verified before you start.</p>
+<p>Test the upgrade path on a cloned or sandbox instance first, not because it guarantees production will behave identically, but because it surfaces the customizations that won't survive the upgrade untouched — deprecated APIs, changed DAC fields, generic inquiry breakage. Fix what you can find there so production only has to absorb the unknowns.</p>
+<p>After the upgrade completes, use a documented go/no-go checkpoint — smoke-test the core screens and any customization-heavy workflows — before opening the instance back up to all users. That checkpoint is what keeps the decision to roll back from being made three hours later with three hours of new data at stake.</p>
+<h2 id="a-basic-pre-deployment-checklist">A basic pre-deployment checklist</h2>
+<p>The pattern doesn't need to be elaborate. It needs to be followed every time, including the times it feels unnecessary.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · PRE-PUBLISH CHECKLIST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Before a production customization publish or upgrade
+
+1. Announce a maintenance window, lock out non-admin users
+2. Take a snapshot via Instance Manager (self-hosted) or
+   the cloud portal snapshot tool (Acumatica Cloud) — confirm
+   it completed and note the snapshot name/timestamp
+3. Export the current customization project(s) as a backup
+   .zip from the Customization Projects screen
+4. Publish / run the upgrade
+5. Run the go/no-go smoke test against core screens and
+   any customization-dependent workflows
+6. If it fails: unpublish/revert customization first if no
+   data was written; restore the snapshot if data was
+   already touched
+7. Only reopen the instance to all users after the checkpoint
+   passes</code></pre>
 </div>
-<h2 id="what-acumatica-rollback-strategies-gives-you">What Acumatica Rollback Strategies gives you</h2>
-<p>In the work I have done on acumatica rollback strategies, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the rollback is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_rollback" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of rollback in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production rollback looks different from development rollback. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<h2 id="choosing-the-right-rollback">Choosing the right rollback option</h2>
+<p>Each rollback mechanism trades recovery time against how much you lose. Match the option to what actually broke.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rollback first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rollback when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Option</th><th>Recovery time</th><th>Data loss</th></tr>
+  <tr><td>Unpublish / revert customization</td><td>Seconds to minutes</td><td>None, if no bad transactions were posted while it was live</td></tr>
+  <tr><td>Snapshot restore</td><td>Minutes to an hour, depending on database size</td><td>All changes since the snapshot, including legitimate ones</td></tr>
+  <tr><td>Full DB restore from scheduled backup</td><td>Longest — often involves infrastructure/ops, not just Acumatica</td><td>Everything since the last backup, potentially a full day</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica rollback strategies. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>That is the working approach I use on Acumatica rollback planning. The same discipline applies whether the client is in Nairobi, Johannesburg, Kigali, Lusaka or Harare — snapshot before you touch production, know the difference between a code rollback and a data rollback, and don't let a slow detection turn a small mistake into a lost afternoon of real transactions. If you're setting up a rollback plan for an upcoming upgrade, <a href="/#contact">reach out</a> or browse more on the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +148,7 @@ jobs:
       <li><a href="/blog/acumatica-upgrade-checklist-r1-r2/">Acumatica Upgrade Checklist — R1 to R2</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

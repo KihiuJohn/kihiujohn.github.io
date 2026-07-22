@@ -93,112 +93,59 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation is mostly about how to handle the cases that don't show up in the happy path. this is one of the patterns that handles them. The pattern that works is to push the workflow towards being deterministic, testable, and observable. This article is that pattern.</p>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>From cron to events: the evolution is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Two people need to approve this, in any order, and we're done when both have" is a request that looks like it should be a small variation on single-approver routing and turns out to expose real differences in how the Assignment and Approval Maps screen models multi-approver rules versus how the Workflow engine models states. This post is specifically about getting parallel — not sequential — multi-approver behavior right.</p>
+
+<h2 id="sequential-vs-parallel-on-the-map">Sequential is the default; parallel is a deliberate map setting</h2>
+<p>On the Assignment and Approval Maps screen (EP503010), a map step with multiple approver rows defaults to requiring them one after another in row order unless you explicitly configure the step as parallel — the <em>Approve in Parallel</em> (or, on some builds, a rule-level setting distinguishing "one of" versus "all of") flag on the map step. Missing this setting is the most common reason a "parallel approval" request ships as sequential and nobody notices until an approver on vacation blocks the whole chain because they were queued third instead of notified immediately alongside the other two.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// The workflow side only needs ONE transition into the pending-approval
+// state — parallelism is entirely a property of the approval map step,
+// not something you encode in Configure(). The graph doesn't know or
+// care how many people approve; it only cares that the state's approval
+// requirement (tracked internally against EPApproval records) is satisfied.
+
+graph.WithTransitions(transitions => transitions
+    .AddGroupFrom&lt;APInvoice.status.Balanced&gt;(g => g
+        .Add(t => t
+            .To&lt;APInvoice.status.PendingApproval&gt;()
+            .IsTriggeredOn(a => a.Actions.Release)
+            .When(APInvoice.docTotal.IsGreaterEqual(25000m)))));
+</code></pre>
 </div>
-<h2 id="what-acumatica-workflow-parallel-approvals-is-for">What Acumatica Workflow — Parallel Approvals is for</h2>
-<p>In the work I have done on acumatica workflow — parallel approvals, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+
+<h2 id="all-of-vs-any-of">All-of versus any-of: get this decision explicit in requirements</h2>
+<p>"Parallel" is ambiguous until you pin down whether the document proceeds once <em>any one</em> approver acts (a race — first responder wins, useful for redundancy across equally-authorized approvers) or only once <em>all</em> approvers have acted (true joint sign-off, useful for segregation of duties like finance-plus-operations both needing to bless a large PO). These map to different settings on the approval step, and I've had to redo this configuration more than once because "parallel" was assumed to mean "all of" by the client and configured as "any of" by the implementer, which quietly let single-approver rubber-stamping through on a control the client thought required two people.</p>
+
+<div class="callout-warn callout">
+  <strong>Test with a deliberately mixed outcome</strong>
+  <p>Approve with one user and reject with the other in a test document, on an "all of" step, and confirm the document doesn't proceed and doesn't get stuck in limbo either — it should land in a rejected/returned state. This is the scenario that's easiest to configure wrong and hardest to notice in a demo where everyone just approves.</p>
 </div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="notification-timing">Everyone gets notified at once, not staggered</h2>
+<p>A side effect of true parallel configuration: all eligible approvers get their assignment and notification simultaneously when the document enters the pending state, rather than the second approver only being notified once the first has acted (which is the sequential behavior). If your email/notification templates were originally written for a sequential flow — "please review, following [Approver 1]'s sign-off" style language — they read as broken once the map is switched to parallel. Audit notification copy whenever you convert an existing sequential map to parallel; it's a content bug, not a configuration bug, but it lands the same way in a support ticket.</p>
+
+<h2 id="reassignment-and-delegation">Reassignment behavior differs under parallel maps</h2>
+<p>Delegation (an approver on leave routes their approvals to a backup) interacts differently with parallel maps than sequential ones: in a sequential chain, delegating step 2 doesn't affect step 1's already-completed approval. In an "all of" parallel step, if one of the two required parallel approvers delegates, the delegate's action counts toward the same "all of" requirement — which is usually what you want, but confirm the Employee Preferences delegation settings are configured correctly for everyone in a parallel approval group, because an approver who forgot to set up delegation before going on leave will genuinely block an "all of" step with no automatic escape.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — parallel approvals. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Parallel approval lives almost entirely in the approval map configuration, not in the workflow's <code>Configure</code> method — the graph only needs one clean transition into the pending state. Get "any of" versus "all of" explicit and tested with a mixed-outcome scenario, audit notification copy after converting from sequential, and confirm delegation is set up for everyone in a parallel group before you rely on it in production.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-workflow-engine-the-definitive-guide/">Acumatica Workflow Engine — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-      <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
-      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica Employee Self-Service — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount</a></li>
+      <li><a href="/blog/acumatica-workflow-purchase-order-approval/">Acumatica Workflow — Purchase Order Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
+      <li><a href="/blog/acumatica-workflow-state-transitions-and-conditions/">Acumatica Workflow — States, Transitions, and Conditions</a></li>
+      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order Precedence</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

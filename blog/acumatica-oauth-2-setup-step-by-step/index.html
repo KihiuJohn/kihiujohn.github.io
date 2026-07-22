@@ -94,107 +94,90 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every Acumatica integration I take over that still logs in with <code>/entity/auth/login</code> and a session cookie eventually hits the same walls: sessions pinned to one node behind a load balancer, mysterious 401s when a session expires mid-batch, and API users locked out because the password rotated. OAuth 2.0 fixes all of it, and setting it up takes about fifteen minutes once you know the screens. Here's the exact sequence I use.</p>
+
+<h2 id="step-1-connected-application">Step 1: Register a connected application</h2>
+<p>Go to <strong>Integration &gt; Connected Applications</strong> (SM303010). Create a new record:</p>
+<ul>
+<li><strong>Client Name:</strong> something identifying the consumer — "Warehouse Sync Service", not "Test".</li>
+<li><strong>OAuth 2.0 Flow:</strong> pick the flow (more on choosing below). For a server-to-server integration, choose <em>Resource Owner Password Credentials</em>; for anything acting on behalf of a human user in a browser, choose <em>Authorization Code</em>; Acumatica also supports <em>Implicit</em> (legacy, avoid) and, in recent versions, client credentials via API-user mapping.</li>
+</ul>
+<p>Save the record — Acumatica generates the <strong>Client ID</strong>, which is a GUID suffixed with the tenant name, like <code>4B1E...@CompanyTenant</code>. That suffix matters: it routes the token request to the right tenant, so don't trim it.</p>
+<p>Then, on the <strong>Secrets</strong> tab, click <em>Add Shared Secret</em>. Give it a description and an expiration date. The secret value is shown <strong>once</strong>. Copy it into your secrets manager immediately; if you lose it you'll be adding a new one, not recovering it.</p>
+
+<h2 id="step-2-choose-flow">Step 2: Choose the right flow</h2>
+<p>For 90% of ERP integrations — a Laravel backend, an Azure Function, a middleware box — the consumer is a machine, and Resource Owner Password Credentials (ROPC) with a dedicated API user is the pragmatic choice. Yes, ROPC is deprecated in the broader OAuth world; in Acumatica's context it's the supported server-to-server pattern and it's still a huge upgrade over cookie sessions. Authorization Code (with PKCE if the client is public) is correct when a real user should authenticate — say, a portal where each user's Acumatica permissions must apply.</p>
+
+<h2 id="step-3-api-user">Step 3: Create a dedicated API user</h2>
+<p>Never run integrations as a person. Create a user like <code>svc-warehouse</code>, assign it the narrowest roles that cover the entities it touches, and — critically — set its date format and locale deliberately, because responses are formatted per user settings. Also confirm the user's license type: on newer licenses, API users are a separate, unlimited category that doesn't burn an interactive seat, but they must be flagged accordingly on the Users screen.</p>
+
+<h2 id="step-4-token">Step 4: Request a token</h2>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOauthExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Oauth(Acumatica doc)
-    {
-        // Custom oauth logic for acumatica oauth setup
-        if (doc?.Oauth == null) return;
-        Base.Oauth(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>POST /identity/connect/token HTTP/1.1
+Host: yourinstance.acumatica.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password
+&amp;client_id=4B1E7A22-...@CompanyTenant
+&amp;client_secret=YOUR_SECRET
+&amp;username=svc-warehouse
+&amp;password=THE_API_USER_PASSWORD
+&amp;scope=api offline_access</code></pre>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>In the work I have done on acumatica oauth 2.0 setup — step by step, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<p>The response contains <code>access_token</code>, <code>expires_in</code> (3600 seconds by default), and — because we asked for <code>offline_access</code> — a <code>refresh_token</code>. The scopes worth knowing:</p>
+<ul>
+<li><code>api</code> — access to the contract-based REST and OData APIs.</li>
+<li><code>offline_access</code> — issues a refresh token so you can renew without re-sending credentials.</li>
+<li><code>api:concurrent_access</code> — lets the token be used by parallel requests; without it, concurrent calls on one token can trip each other into 401s. If your integration is multithreaded, request this scope.</li>
+</ul>
+
+<h2 id="step-5-use-and-refresh">Step 5: Use the token, refresh before expiry</h2>
+<p>Send <code>Authorization: Bearer eyJhbGciOi...</code> on every request. For refresh, post <code>grant_type=refresh_token</code> with the refresh token to the same endpoint. My client code refreshes proactively at 80% of <code>expires_in</code> rather than reacting to 401s — reactive refresh works, but it turns every expiry into a failed request in your logs and a retry you have to reason about.</p>
+
+<div class="callout-warn callout">
+  <strong>Gotcha: locked-out API users fail with a token error, not a clear message</strong>
+  <p>If the API user's password expires or the account locks after failed attempts, the token endpoint returns a generic invalid_grant. Set the API user's password to not expire (policy permitting) and alert on invalid_grant in your integration logs — it almost always means credentials, not code.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the oauth is.</p>
+
+<h2 id="step-6-verify">Step 6: Verify end to end</h2>
+<p>Prove the whole chain with one call:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GET /entity/Default/24.200.001/StockItem?$top=1 HTTP/1.1
+Host: yourinstance.acumatica.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The performance of oauth in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Production oauth looks different from development oauth. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOauthExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Oauth(Acumatica doc)
-    {
-        // Custom oauth logic for acumatica oauth setup
-        if (doc?.Oauth == null) return;
-        Base.Oauth(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring oauth first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with oauth when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>A 200 with one item means the connected app, secret, user, roles, and endpoint version are all aligned. A 401 here with a valid token usually means the user lacks access rights to the entity's screen; a 403/500 mentioning the endpoint usually means a version mismatch — list available endpoints at <code>/entity</code> to check what the instance actually exposes.</p>
+
+<h2 id="operational-notes">Operational notes from production</h2>
+<ul>
+<li><strong>Secret rotation:</strong> secrets take an expiry date — set one, and add the renewal to whatever calendar your team actually reads. An expired shared secret is my number-one cause of "the integration died overnight" calls.</li>
+<li><strong>One connected app per consumer.</strong> Sharing a client ID across integrations means you can't revoke one without killing the others, and you can't tell them apart in logs.</li>
+<li><strong>Tenant matters.</strong> The tenant suffix in the client ID binds the app to a tenant; multi-tenant instances need a connected app per tenant.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica oauth 2.0 setup — step by step. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The sequence is short: connected application, shared secret, dedicated API user with minimal roles, token request with <code>api offline_access</code> (plus <code>api:concurrent_access</code> if you parallelize), proactive refresh, and a smoke-test GET. Do it once properly and authentication becomes the one part of your Acumatica integration you never think about again — which is exactly what auth should be.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">Generating an OpenAPI Spec from Acumatica</a></li>
-      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
-      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
-      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
+      <li><a href="/blog/acumatica-soap-api-vs-rest-api-when-to-use/">Acumatica SOAP vs REST API — When to Use Which</a></li>
+      <li><a href="/blog/acumatica-rest-api-rate-limiting-and-retry/">Acumatica REST API — Rate Limiting and Retry</a></li>
+      <li><a href="/blog/acumatica-rest-api-versioning-upgrade-strategy/">Acumatica REST API — Versioning and Upgrade Strategy</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

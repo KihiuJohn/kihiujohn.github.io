@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Attachment Handler — Code-Side Patterns | John Kihiu</title>
-<meta name="description" content="Acumatica Attachment Handler — Code-Side Patterns is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Most Acumatica developers meet file attachments through the UI first: a paperclip icon, a drag-and-drop zone, a files tab on a screen.">
 <meta name="keywords" content="Acumatica customization, Acumatica files, Acumatica graph, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-attachment-handler-code-side/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Attachment Handler — Code-Side Patterns">
-<meta property="og:description" content="Acumatica Attachment Handler — Code-Side Patterns is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Most Acumatica developers meet file attachments through the UI first: a paperclip icon, a drag-and-drop zone, a files tab on a screen.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-attachment-handler-code-side.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-attachment-handler-code-side/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="graph">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Attachment Handler — Code-Side Patterns","description":"Acumatica Attachment Handler — Code-Side Patterns is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-attachment-handler-code-side.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-attachment-handler-code-side/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Attachment Handler — Code-Side Patterns","description": "Most Acumatica developers meet file attachments through the UI first: a paperclip icon, a drag-and-drop zone, a files tab on a screen.","image":"https://kihiujohn.github.io/assets/og/acumatica-attachment-handler-code-side.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-attachment-handler-code-side/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Attachment Handler — Code-Side Patterns","item":"https://kihiujohn.github.io/blog/acumatica-attachment-handler-code-side/"}]}
@@ -87,113 +87,96 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Attachment Handler — Code-Side Patterns</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>Acumatica Attachment Handler — Code-Side Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Attachment Handler — Code-Side Patterns is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Most Acumatica developers meet file attachments through the UI first: a paperclip icon, a drag-and-drop zone, a files tab on a screen.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most Acumatica developers meet file attachments through the UI first: a paperclip icon, a drag-and-drop zone, a files tab on a screen. What's underneath is a well-defined API surface (<code>PXNoteAttribute</code>'s file-related helpers, the <code>UploadFileMaintenance</code> graph, and the <code>PX.SM.FileInfo</code> object) that you'll eventually need directly, usually the first time a client asks for "attach a copy of the signed PO automatically when this document is approved." Here's what I've learned wiring that up from code rather than clicking it through the UI.</p>
+
+<h2 id="how-attachments-are-actually-stored">Attachments live in a shared file table, linked by NoteID</h2>
+<p>A DAC that supports attachments carries a <code>NoteID</code> field (a <code>Guid?</code>), declared through <code>PXNoteAttribute</code> on the primary key or a dedicated field. That GUID is the join key into <code>UploadFile</code> and <code>NoteDoc</code> - the actual file bytes live in a shared, DAC-agnostic table, not a column on your entity. This is why attachments survive customizations that add or remove fields on the parent DAC entirely unaffected: the relationship is indirect, by GUID, not a foreign key baked into your table's shape.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAttachmentExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrder : IBqlTable
 {
-    [PXOverride]
-    public virtual void Attachment(Acumatica doc)
-    {
-        // Custom attachment logic for acumatica attachment handler
-        if (doc?.Attachment == null) return;
-        Base.Attachment(doc);
-    }
+    [PXNote(DescriptionField = typeof(SOOrder.orderNbr))]
+    public virtual Guid? NoteID { get; set; }
+    public abstract class noteID : PX.Data.BQL.BqlGuid.Field&lt;noteID&gt; { }
 }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica attachment handler — code-side patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the attachment is.</p>
+
+<p>If your custom DAC has no <code>NoteID</code>, it cannot have attachments or notes at all, full stop - this is a common surprise for developers extending a bare custom table that was never designed with the notes/files infrastructure in mind. Adding attachment support after the fact means adding this field via a DAC extension and running through the schema sync, not writing custom storage logic.</p>
+
+<h2 id="attaching-a-file-from-code">Attaching a file programmatically</h2>
+<p>The pattern I use most often: an event handler or action that needs to attach a generated or fetched file to the current row's NoteID. <code>PXNoteAttribute.SetFileNotes</code> is not what you want here - you want <code>UploadFileMaintenance</code>, instantiated as a PXGraph and used to actually persist the bytes and create the association:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-attachment-edge-cases-i-have-shipped">The attachment edge cases I have shipped</h2>
-<p>The performance of attachment in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production attachment looks different from development attachment. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAttachmentExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void AttachGeneratedPdf(SOOrder order, byte[] pdfBytes, string fileName)
 {
-    [PXOverride]
-    public virtual void Attachment(Acumatica doc)
-    {
-        // Custom attachment logic for acumatica attachment handler
-        if (doc?.Attachment == null) return;
-        Base.Attachment(doc);
-    }
+    if (order?.NoteID == null) return;
+
+    var uploadGraph = PXGraph.CreateInstance&lt;UploadFileMaintenance&gt;();
+    var fileInfo = new PX.SM.FileInfo(fileName, null, pdfBytes);
+
+    uploadGraph.SaveFile(fileInfo);
+
+    PXNoteAttribute.SetFileNotes(
+        Base.Caches[typeof(SOOrder)],
+        order,
+        fileInfo.UID.Value);
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring attachment first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with attachment when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>The order matters: save the file first through <code>UploadFileMaintenance</code> to get a real <code>UID</code>, then link it via <code>PXNoteAttribute.SetFileNotes</code> against the owning row's cache. Reversing that order, or calling <code>SetFileNotes</code> with a UID that never actually persisted, leaves you with an attachment row that shows up in the grid but 404s when a user tries to open it - a bug I've debugged on a client instance where a developer had written to the wrong graph's cache.</p>
+
+<div class="callout-warn callout">
+  <strong>Do this inside the same transaction as the row you're attaching to, or accept it can drift</strong>
+  <p>If the attach happens in a RowPersisted handler after the parent save already committed, and the file save fails for any reason (disk full on a self-hosted instance, a transient SQL timeout), you end up with a saved document and no attachment, silently. On anything client-facing - an approval flow that's supposed to carry a signed document - I attach inside RowPersisting, before the row's own commit, so a failure there rolls back the whole save rather than leaving an inconsistent, half-linked state.</p>
+</div>
+
+<h2 id="reading-attachments-back">Reading attachments back out</h2>
+<p>Fetching files attached to a row goes through the same shared tables, queried by NoteID rather than assuming a fixed relationship to your DAC:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var files = PXSelectJoin&lt;UploadFile,
+    InnerJoin&lt;NoteDoc, On&lt;NoteDoc.fileID, Equal&lt;UploadFile.fileID&gt;&gt;&gt;,
+    Where&lt;NoteDoc.noteID, Equal&lt;Required&lt;NoteDoc.noteID&gt;&gt;&gt;&gt;
+    .Select(Base, order.NoteID);
+
+foreach (PXResult&lt;UploadFile, NoteDoc&gt; result in files)
+{
+    UploadFile file = result;
+    // file.Name, file.FileID - pass FileID to UploadFileMaintenance.GetFile to read bytes
+}</code></pre>
+</div>
+
+<p>Getting the actual bytes back out is a second call, against <code>UploadFileMaintenance.GetFile(fileID)</code> - the join above only gets you metadata (name, size, the FileID key), which is usually all a list screen needs; don't pull every file's bytes into memory just to list attachments in a grid.</p>
+
+<h2 id="deleting-and-orphans">Detaching is not the same as deleting, and that's mostly a feature</h2>
+<p>Removing the NoteDoc link (detaching) does not delete the underlying UploadFile row if other NoteDoc rows still reference the same FileID - file de-duplication is real in Acumatica's storage model, and a file attached to two different documents shares one physical blob. This is good for storage efficiency and bad for a naive "delete this attachment and free the space" assumption; don't write cleanup code that deletes UploadFile rows directly based on one document's detach action without checking for other references, or you'll corrupt an unrelated document's attachment.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica attachment handler — code-side patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Attachments hang off a DAC through NoteID into a shared UploadFile/NoteDoc pair of tables, not a column on your entity, which is exactly why they survive schema changes untouched. Save the file through UploadFileMaintenance before linking it, link inside the same transaction as the parent save when the attachment matters for correctness, and remember that detaching isn't deleting when files are shared across documents. Code-side attachment handling is a small API surface once you've seen it wired up once; the trap is always ordering and transaction boundaries, not the API itself.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order Precedence — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-mobile-photo-attachment/">Acumatica Mobile Photo Attachment — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-note-handler-programmatic/">Acumatica Note Handler — Programmatic Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

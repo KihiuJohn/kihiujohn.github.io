@@ -93,107 +93,104 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Performance and observability for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The question I get asked most often by developers new to Acumatica, almost word for word: "why isn't my event handler firing when I expect it to?" The answer is nearly always a misunderstanding of exactly when each cache event fires relative to the others, because the names sound similar but the semantics are genuinely different. This post is the explanation I give, with the firing order laid out explicitly instead of implied.</p>
+
+<h2 id="the-lifecycle-in-order">A row's life, event by event</h2>
+<p>Walk through what happens when a user adds a new line to a grid, edits a field, and saves. The events fire in this order, and getting this order wrong is the source of most "my default isn't applying" or "my validation runs at the wrong time" bugs:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaEventsExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">SEQUENCE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>User clicks "Add Row"
+  → RowInserting     (row not yet in cache; can cancel the insert)
+  → RowInserted      (row now in cache with defaults applied; too late to cancel cleanly)
+  → RowSelected       (fires immediately after insert, and again on every subsequent
+                        refresh/paint of this row)
+
+User edits a field
+  → FieldDefaulting   (only if the field is being defaulted, not user-typed)
+  → FieldVerifying    (validates the NEW value before it's committed to the row)
+  → FieldUpdated      (value is now committed; react to the change here)
+  → RowSelected       (fires again — the whole row re-evaluates)
+
+User clicks Save
+  → RowPersisting     (last chance to validate or block the save, per row,
+                        inside the transaction)
+  → [SQL executes]
+  → RowPersisted      (row is now committed; safe for side effects that must
+                        only happen after a successful save)
+</code></pre>
+</div>
+
+<p>The two confusions I see constantly: developers reach for <code>RowSelected</code> to do something that belongs in <code>RowInserted</code> (one-time setup on row creation) because RowSelected is the one they learned first, and developers put save-blocking validation in <code>RowPersisted</code> — which is too late, the row is already committed.</p>
+
+<h2 id="rowselected-vs-rowinserted">RowSelected vs RowInserted: the distinction that matters most</h2>
+<p><code>RowInserted</code> fires exactly once, at the moment a new row is created — a genuinely one-time event, the right place for logic like "set the initial status to Draft" or "copy a value from the parent record into this new child row." <code>RowSelected</code> fires constantly: on that same initial insert, yes, but also on every grid refresh, every field change anywhere on the row (because the framework re-evaluates the whole row's UI state after any field changes), and every time the user navigates back to a previously-loaded row. If you put "set the initial status" logic in <code>RowSelected</code> without a guard, you will forcibly reset the status back to Draft every time the user so much as tabs through a field — a real bug I've fixed on client instances more than once.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Correct: one-time initialization on row creation
+protected virtual void _(Events.RowInserted&lt;SOLine&gt; e)
 {
-    [PXOverride]
-    public virtual void Events(Acumatica doc)
+    if (e.Row == null) return;
+    e.Row.UsrLineStatus = "N"; // New — set once, at creation
+}
+
+// Correct: UI state that should re-evaluate on every paint
+protected virtual void _(Events.RowSelected&lt;SOLine&gt; e)
+{
+    if (e.Row == null) return;
+    // Cheap, idempotent — safe to run every time
+    PXUIFieldAttribute.SetEnabled&lt;SOLine.usrOverrideReason&gt;(cache: Base.Transactions.Cache,
+        row: e.Row, enabled: e.Row.UsrLineStatus == "H");
+}</code></pre>
+</div>
+
+<div class="callout-warn callout">
+  <strong>RowSelected fires on rows that aren't fully loaded yet, too</strong>
+  <p>During a screen's initial data bind, RowSelected can fire on rows in an intermediate state. Always null-check e.Row first, and avoid assumptions about sibling rows or aggregate totals being fully computed yet — if you need "all rows loaded" semantics, that belongs in graph-level logic after the view's Select completes, not inside a per-row RowSelected handler.</p>
+</div>
+
+<h2 id="verifying-vs-updated-vs-persisting">FieldVerifying, FieldUpdated, and RowPersisting — three different gates</h2>
+<p><code>FieldVerifying</code> is your chance to reject a value before it lands on the row — throw a <code>PXSetPropertyException</code> here and the UI shows a red error immediately, without letting the invalid value commit. <code>FieldUpdated</code> fires after the value is already accepted, and is for cascading changes — recalculating a dependent field, defaulting a related value. <code>RowPersisting</code> is the last gate before SQL executes and is where cross-field, whole-row validation belongs, because by that point every field on the row has its final value and you can validate combinations that no single field's events could see in isolation.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Cross-field validation belongs in RowPersisting, not FieldVerifying —
+// you need BOTH fields' final values, which FieldVerifying on either
+// field alone cannot guarantee.
+protected virtual void _(Events.RowPersisting&lt;SOLine&gt; e)
+{
+    if (e.Row == null) return;
+    if (e.Row.UsrLineStatus == "H" &amp;&amp; string.IsNullOrEmpty(e.Row.UsrOverrideReason))
     {
-        // Custom events logic for acumatica events explained
-        if (doc?.Events == null) return;
-        Base.Events(doc);
+        e.Cache.RaiseExceptionHandling&lt;SOLine.usrOverrideReason&gt;(
+            e.Row, e.Row.UsrOverrideReason,
+            new PXSetPropertyException("Override reason is required when the line is on hold"));
+        e.Cancel = true;
     }
 }</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on acumatica events explained — rowselected, rowinserted, and friends, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the events is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-events-edge-cases-i-have-shipped">The events edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The performance of events in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-events-in-production">How to debug events in production</h2>
-<p>Production events looks different from development events. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaEventsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Events(Acumatica doc)
-    {
-        // Custom events logic for acumatica events explained
-        if (doc?.Events == null) return;
-        Base.Events(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring events first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with events when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="rowpersisted-for-side-effects">RowPersisted: only for things that must follow a real commit</h2>
+<p><code>RowPersisted</code> fires after the transaction succeeds and is the correct — and only correct — place for side effects that must not happen if the save rolls back: sending a notification email, calling an external API, writing to an audit table outside the transaction. Putting an external call in <code>RowPersisting</code> instead means it fires even if a later row in the same save fails validation and the whole transaction rolls back, leaving you with a sent email for a save that never actually happened.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica events explained — rowselected, rowinserted, and friends. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The event names describe intent, and the firing order is not negotiable: Inserting/Inserted for one-time row creation, FieldVerifying/FieldUpdated for single-field validation and cascades, RowSelected for cheap UI state re-evaluated constantly, RowPersisting for final cross-field validation inside the transaction, and RowPersisted for side effects that must only happen after a real commit. Every "my event isn't firing right" bug I've debugged for other developers has resolved to picking the wrong one of these five, not a framework defect.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order Precedence — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-rowdeleted-vs-rowdeleting/">Acumatica RowDeleted vs RowDeleting — When to Use Each</a></li>
-      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code-Side Patterns</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order and Precedence</a></li>
+      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Acumatica DAC Validation — Cross-Field Rules</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

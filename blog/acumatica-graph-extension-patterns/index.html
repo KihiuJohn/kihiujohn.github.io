@@ -93,107 +93,104 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p><code>PXGraphExtension&lt;T&gt;</code> is the workhorse of Acumatica customization — nearly every piece of custom business logic I write lands in one — but there's a real difference between graph extensions that age well across upgrades and ones that turn into landmines the moment Acumatica ships a new base version. This is a tour of the patterns I actually reach for, and the ones I've learned to avoid the hard way.</p>
+
+<h2 id="basic-shape">The basic shape: extending events, not replacing them</h2>
+<p>A graph extension attaches to a base graph and can add data views, add actions, and — most commonly — add or override event handlers. The convention-based method-naming pattern (an underscore method named after the event and generic-typed to the row) is how the framework wires your handler in without you registering anything explicitly:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGraphExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_Extension : PXGraphExtension&lt;SOOrderEntry&gt;
 {
-    [PXOverride]
-    public virtual void Graph(Acumatica doc)
+    public static bool IsActive() =&gt; true;
+
+    protected virtual void _(Events.RowPersisting&lt;SOOrder&gt; e)
     {
-        // Custom graph logic for acumatica graph extension
-        if (doc?.Graph == null) return;
-        Base.Graph(doc);
+        if (e.Row == null) return;
+        if (e.Row.OrderTotal &gt; 1_000_000m &amp;&amp; string.IsNullOrEmpty(e.Row.UsrDirectorApproval))
+        {
+            e.Cache.RaiseExceptionHandling&lt;SOOrderExt.usrDirectorApproval&gt;(
+                e.Row, null, new PXSetPropertyException("Orders over 1,000,000 require director approval"));
+            e.Cancel = true;
+        }
     }
 }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica graph extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the graph is.</p>
+
+<p>This additive form — reacting to an event without touching base behavior — is the safest pattern in the whole framework, because it can never conflict with what the base graph does; it only runs alongside it.</p>
+
+<h2 id="overriding-methods">Overriding base methods: call base, always</h2>
+<p>Sometimes you genuinely need to change base behavior, not just react around it — overriding an action's implementation or a graph method. The rule that keeps this upgrade-safe: call the delegate (or <code>base.Method()</code>) unless you have a specific, documented reason not to:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-graph-edge-cases-i-have-shipped">The graph edge cases I have shipped</h2>
-<p>The performance of graph in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production graph looks different from development graph. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGraphExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_Extension : PXGraphExtension&lt;SOOrderEntry&gt;
 {
     [PXOverride]
-    public virtual void Graph(Acumatica doc)
+    public void ReleaseFromCreditHold(SOOrder doc, Action&lt;SOOrder&gt; baseMethod)
     {
-        // Custom graph logic for acumatica graph extension
-        if (doc?.Graph == null) return;
-        Base.Graph(doc);
+        // Custom pre-check
+        if (doc.CreditHoldOverrideReason == null)
+            throw new PXException("An override reason is required to release from credit hold.");
+
+        baseMethod(doc); // always call through — this is what keeps the base
+                          // release logic (GL impacts, notifications, status
+                          // transitions) intact across version upgrades
     }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring graph first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with graph when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Swallowing the base call — never invoking <code>baseMethod</code> — is how customizations silently lose functionality the base graph was quietly relying on other code paths to have run. I've inherited instances where a base method's side effects (a status update three fields away from anything the override author was thinking about) simply stopped happening, and nobody noticed until a downstream report went wrong months later.</p>
+
+<h2 id="multiple-extensions-same-graph">Multiple extensions on one graph: ordering is real and mostly out of your control</h2>
+<p>Large instances accumulate several independent <code>PXGraphExtension</code> classes on the same base graph — one per customization project. When two extensions both handle the same event on the same DAC, execution order depends on customization project publish order, which is not something you want to depend on for correctness. If extension A's <code>RowPersisting</code> handler needs to run before extension B's, don't rely on publish order — either consolidate the logic into one handler, or have one extension explicitly check whether the condition the other extension cares about has already been handled, using cache state rather than assumed ordering.</p>
+
+<div class="callout">
+  <strong>IsActive() is your feature-flag mechanism — use it</strong>
+  <p>Every graph extension (and DAC extension) should implement <code>IsActive()</code> deliberately, not just return true unconditionally out of habit. Tie it to a feature license, a company-level setting, or a customization flag, and an extension you don't currently need simply doesn't attach its handlers — no runtime cost, no risk of interfering with unrelated logic on multi-tenant or multi-branch instances where not every entity wants your customization active.</p>
+</div>
+
+<h2 id="data-views-and-actions">Adding data views and actions cleanly</h2>
+<p>A graph extension can add its own <code>PXSelect</code> views and <code>PXAction</code> buttons without touching the base graph's declared views at all — the cleanest form of extension, because there's nothing to conflict with:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_Extension : PXGraphExtension&lt;SOOrderEntry&gt;
+{
+    public PXSelect&lt;SOOrderApprovalLog,
+        Where&lt;SOOrderApprovalLog.orderNbr, Equal&lt;Current&lt;SOOrder.orderNbr&gt;&gt;&gt;&gt; ApprovalLog;
+
+    public PXAction&lt;SOOrder&gt; ViewApprovalHistory;
+    [PXUIField(DisplayName = "Approval History")]
+    [PXButton]
+    protected virtual IEnumerable viewApprovalHistory(PXAdapter adapter)
+    {
+        // navigate to a related screen, or throw a PXRedirectRequiredException
+        throw new PXRedirectRequiredException(Base, "Approval History") { Mode = PXBaseRedirectException.WindowMode.NewWindow };
+    }
+}</code></pre>
+</div>
+
+<h2 id="when-to-subclass-instead">When a graph extension is the wrong tool</h2>
+<p>Graph extensions attach behavior to an existing screen's graph. When the requirement is actually a brand new screen with its own workflow — not a modification of an existing one — subclassing <code>PXGraph</code> directly (or building an entirely new graph) is correct instead, and trying to force new-screen logic into an extension of an unrelated existing graph produces a confusing, hard-to-navigate customization. The <code>PXGraph vs PXGraphExtension</code> decision deserves its own dedicated look, but the short version: extend when you're modifying behavior on a screen that already exists and should keep existing; write a new graph when you're building something genuinely new.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica graph extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The patterns that keep graph extensions upgrade-safe: prefer additive event handlers over method overrides where possible; when you must override, always call the base delegate; gate every extension with a deliberate <code>IsActive()</code>; and don't rely on cross-extension execution order for correctness. The extensions that survive years of Acumatica upgrades without a rescue mission are, almost without exception, the ones that follow these rules from the first commit rather than getting refactored into them after the first upgrade breaks something.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension — Choosing the Right Tool</a></li>
-      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code-Side Patterns</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order and Precedence</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-dac-extension-multiple-extensions/">Acumatica DAC Extensions — Managing Multiple Extensions</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,98 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Memory, context, and state management is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Traditional customer segmentation buckets accounts into a handful of fixed tiers — small/mid/enterprise, or RFM quartiles — computed by a scheduled batch job. An LLM agent's contribution isn't a better clustering algorithm; it's the ability to segment dynamically, in natural language, against whatever question a marketing or sales team actually asks, without a data team rebuilding a query for every new criterion.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>In the work I have done on ai agent for customer segmentation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the customer is.</p>
+<h2 id="segmentation-as-a-query-translation-problem">Treat it as translating intent into a query, not classification</h2>
+<p>When someone asks "show me accounts that upgraded in the last quarter but haven't used the new feature," that's a database query with a natural-language wrapper. The agent's real job is translating that request into a structured filter against your actual account and usage data — via a tool call that runs a parameterized query — not attempting to reason its way to a list of accounts from memory or general knowledge about what such customers might look like.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · TOOL DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def query_segment(
+    plan_tier: str | None = None,
+    upgraded_within_days: int | None = None,
+    feature_usage: dict | None = None,  # {"feature": "x", "used": False}
+    min_account_value: float | None = None,
+) -> list[dict]:
+    """Runs a parameterized query against the account/usage
+    tables. The agent fills these fields from the natural-
+    language request; it never generates account lists itself."""
+    ...</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="fixed-fields-vs-open-ended-requests">Fixed fields cover most requests; free text covers the rest</h2>
+<p>Most segmentation requests map cleanly onto a handful of dimensions — plan tier, industry, account age, usage trend, contract value. Define those as an explicit, closed schema the agent fills in via function calling, which keeps segmentation fast, cheap, and fully deterministic once the parameters are set. For the long tail of open-ended requests that don't fit the schema ("accounts that seem confused about billing based on their support tickets"), fall back to a slower retrieval-based approach over ticket text, and be explicit with the user about which path was used — the confidence and cost profile of the two are very different.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Structured filters should never go through the LLM's reasoning at query time</strong>
+  <p>Once the agent has extracted plan_tier="enterprise" and upgraded_within_days=90 from the request, that filter runs as a normal SQL or API query. Don't have the model re-read every account record and judge membership itself — it's slower, more expensive, and introduces classification inconsistency a database WHERE clause doesn't have.</p>
 </div>
-<h2 id="prompt-patterns-that-work-for-customer">Prompt patterns that work for customer</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>The performance of customer in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Production customer looks different from development customer. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="explaining-segment-membership">Explaining why an account landed in a segment</h2>
+<p>Segments used for outreach campaigns need to be defensible — a sales rep or compliance reviewer may ask why a specific account is in a "high churn risk" or "upsell candidate" list. Since membership comes from the structured query, this is straightforward: surface the exact filter values that matched, not a generated explanation the model invents after the fact. This also makes segment definitions reusable and auditable rather than a one-off natural-language answer that can't be regenerated identically later.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="freshness-and-caching">Balancing freshness against the cost of re-querying</h2>
+<p>Segmentation against live transactional data can be expensive to run on every request if the underlying tables are large. For segments used repeatedly (e.g. a weekly campaign list), materialize the result and cache it with a clear "as of" timestamp rather than re-running the full query on every view. For one-off exploratory requests, query live — the cost tradeoff is different for a marketing team iterating on campaign criteria versus a dashboard refreshed hourly.</p>
+
+<h2 id="evaluating-segment-quality">Evaluating whether segments are actually useful, not just correctly filtered</h2>
+<p>A segment can be technically correct (every account in it matches the stated filter) and still useless if the filter doesn't capture what the requester actually meant. Track how often generated segments get manually adjusted before a campaign goes out — a consistently high edit rate on a particular type of request signals the natural-language-to-filter translation is missing nuance, not that the underlying data is wrong.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring customer first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with customer when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Request type</th><th>Handling</th></tr>
+  <tr><td>Fits fixed dimensions (tier, usage, value)</td><td>Structured query, deterministic and fast</td></tr>
+  <tr><td>Open-ended / text-based criteria</td><td>Retrieval over relevant text, slower, flagged as such</td></tr>
+  <tr><td>Repeated campaign segments</td><td>Materialized and cached with a timestamp</td></tr>
+  <tr><td>One-off exploratory requests</td><td>Live query, no caching needed</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for customer segmentation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The agent's value in segmentation is in the translation layer — turning a natural-language request into a precise, reusable, auditable query — not in the LLM directly deciding segment membership. Keep the filter logic structured and deterministic, and reserve the model's judgment for the harder cases that genuinely need it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,8 +147,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-lead-scoring/">AI Agent for Lead Scoring in Acumatica CRM</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
     
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">

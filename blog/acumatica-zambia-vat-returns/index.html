@@ -93,82 +93,29 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough fiscalisation projects to know the patterns that work. They share a few traits: the device stores its private key in a vault, the offline buffer is sized for the worst case, and the audit trail is the source of truth. This article is the patterns.</p>
-<h2 id="clock-sync-and-acumatica">Clock sync and acumatica</h2>
-<p>Clock sync and acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Zambia VAT is a standard credit-invoice VAT administered by the Zambia Revenue Authority, with returns filed monthly through ZRA's Tax Online e-services portal. For an Acumatica implementer the interesting part is not the rate — it is making sure the tax engine produces a return that reconciles to the general ledger without a spreadsheet stitching the two together every month end.</p>
+<h2 id="tax-zone-and-category-setup">Tax zone and category setup</h2>
+<p>A standard Zambia VAT configuration needs at minimum a standard-rated category, a zero-rated category (for qualifying exports and specified goods), and an exempt category, each mapped through <strong>Tax Zones (TX206000)</strong> and <strong>Tax Categories (TX205500)</strong> to their own GL output/input tax accounts. Keep zero-rated and exempt as genuinely separate categories even though both produce zero tax on the invoice line — they behave differently for input tax recovery and for what appears in different boxes of the return, and collapsing them into one category is a common shortcut that breaks the return later.</p>
+<h2 id="the-monthly-return-workflow">The monthly return workflow</h2>
+<p>Zambia VAT returns are due by the 18th of the month following the tax period. The mechanical steps in Acumatica: close the AP and AR sub-ledgers for the period, run the tax reports (<strong>Tax Report Preview</strong> and eventually the finalised tax transactions), and reconcile total output tax and input tax against the GL tax liability accounts before anything gets filed. Any manual journal entry that touched a tax account outside the AP/AR tax engine — a common source of drift — has to be traced and either reclassified or explained before the return is submitted.</p>
+<div class="callout-warn">
+  <strong>Manual GL entries break tax reconciliation</strong>
+  <p>If someone books a journal entry directly to the VAT output or input account instead of running it through an AP bill or AR invoice, that amount is invisible to the tax engine's transaction report but visible in the GL balance. The two numbers stop matching and the finance team ends up reconciling by hand every month. Lock down direct posting to tax GL accounts and route everything through the sub-ledgers.</p>
+</div>
+<h2 id="withholding-vat-considerations">Withholding VAT considerations</h2>
+<p>Zambia operates a VAT withholding regime for certain designated withholding agents (typically larger taxpayers and government entities), who withhold a portion of VAT on payment to suppliers and remit it directly. If your tenant is a designated agent, AP bill processing needs an additional withholding calculation and a separate remittance certificate issued to the vendor — modeled similarly to a withholding tax extension on the AP Bill screen, with its own GL clearing account distinct from standard input VAT.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · RECONCILIATION CHECKLIST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Before filing the Zambia VAT return:
+  1. AP and AR sub-ledgers closed for the period
+  2. Tax Report Preview run — output vs input tax by category
+  3. GL tax payable/receivable balances match tax engine totals
+  4. No direct journal postings to tax GL accounts this period
+  5. Withholding VAT certificates issued (if designated agent)
+  6. Zero-rated exports have supporting export documentation on file</code></pre>
 </div>
-<h2 id="the-audit-trail-for-zambia">The audit trail for zambia</h2>
-<p>In the work I have done on acumatica zambia vat returns — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the zambia is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="what-acumatica-zambia-vat-returns-a-complete-guide-is-for">What Acumatica Zambia VAT Returns — A Complete Guide is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>The performance of zambia in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>Production zambia looks different from development zambia. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring zambia first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with zambia when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica zambia vat returns — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of this is exotic tax logic — it is disciplined configuration plus a reconciliation habit that catches drift before it reaches ZRA. Keep categories properly separated, keep tax postings inside the sub-ledgers, and the monthly filing becomes a report run rather than a reconstruction project. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +126,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-tanzania-vat-returns/">Acumatica Tanzania VAT Returns — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

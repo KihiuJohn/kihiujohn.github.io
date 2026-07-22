@@ -93,100 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS companies that survive the first three years are the ones that measure the right metrics. this is one of the metrics that separates the survivors from the deadpools. This article is the field-tested patterns, with the benchmarks and the common misinterpretations.</p>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>How to calculate it correctly is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>I get pulled into subcontractor compliance projects from both directions — GCs who need to enforce compliance against the subs they hire, and subcontractors themselves running Acumatica who need to manage their own compliance documents (insurance, licenses, bonding) for the GCs they work under. This post is the GC side, which is where most of the customization actually happens, because compliance tracking without enforcement is just a filing cabinet with extra steps.</p>
+
+<h2 id="tracking-vs-enforcing">Acumatica tracks compliance documents; enforcing them is a decision you build</h2>
+<p>Construction Edition stores and tracks insurance certificates, lien waivers, bonds, and similar compliance documents by vendor and project, with automated alerts before expiration. That is real and useful on its own — a compliance manager gets a dashboard of what is expiring this month instead of a shared spreadsheet. What is not automatic is stopping a payment or a commitment from proceeding when a document has lapsed; that enforcement is configurable, typically as a hold placed on the vendor or a validation on the AP release process, and it is the piece GCs actually need but often assume ships turned on.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · BLOCK PO RELEASE ON EXPIRED COI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void POOrder_RowPersisting(PXCache cache, PXRowPersistingEventArgs e)
+{
+    var order = (POOrder)e.Row;
+    if (order == null || order.Status != POOrderStatus.Open) return;
+
+    var vendor = Vendor.Select(Base, order.VendorID);
+    if (vendor != null &amp;&amp; HasExpiredInsurance(vendor.BAccountID, Base.Accessinfo.BusinessDate))
+    {
+        cache.RaiseExceptionHandling&lt;POOrder.vendorID&gt;(order, order.VendorID,
+            new PXSetPropertyException("Certificate of insurance expired — PO release blocked until renewed.",
+                PXErrorLevel.Error));
+    }
+}</code></pre>
 </div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>In the work I have done on subcontractor management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<h2 id="onboarding-workflow">New subcontractor onboarding is where compliance gets missed first</h2>
+<p>The most common gap is not an expired document on an existing sub — it is a brand-new subcontractor added mid-project without their compliance documents entered at all, because the field team needed them on-site today and paperwork followed later, if ever. I typically build a lightweight onboarding checklist requirement — the vendor record cannot move from "prospective" to "approved for commitment" status without the core documents (COI, W-9 equivalent, license if applicable) attached — enforced with a status-transition validation rather than trusting a procedure document.</p>
+
+<div class="callout-warn callout">
+  <strong>Alerts fatigue is real — tune the lead time deliberately</strong>
+  <p>Default expiration alert windows are often too generic for how insurance renewals actually work in practice — a 90-day warning on every one of 200 subs generates a wall of noise the compliance manager starts ignoring. I tune alert lead times per document type (30 days for COI, 60 for bonding, since bonding renewals take longer to process) and route them to the specific compliance owner rather than a shared inbox. An ignored alert is functionally the same as no alert.</p>
 </div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>When the work moves from design to production, the questions change. The subcontractor is not the question; the failure mode of the management is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, management, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="why-subcontractor-is-the-first-thing-to-look-at">Why subcontractor is the first thing to look at</h2>
-<p>The performance of management in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="how-management-distorts-the-picture">How management distorts the picture</h2>
-<p>Production management looks different from development management. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring management first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add subcontractor on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with management when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on subcontractor management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Compliance document tracking is a solid native feature; compliance enforcement is the customization a GC actually needs to make it worth anything, and it is usually a modest amount of validation logic on the PO/commitment and payment release graphs rather than a large build. Pair it with an onboarding gate so new subs cannot get on a job before the paperwork exists, and tune alerts so people actually read them.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-civil-engineering-acumatica/">Civil Engineering Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction on Acumatica</a></li>
       <li><a href="/blog/vertical-saas-construction-contract-acumatica/">Construction Contract Management on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Rental Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-trades-acumatica/">Trades Contractors on Acumatica</a></li>
+      <li><a href="/blog/acumatica-business-events-deep-dive/">Acumatica Business Events — Deep Dive</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Acumatica DAC Cross-Field Validation Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

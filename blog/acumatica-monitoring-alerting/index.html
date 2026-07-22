@@ -92,93 +92,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="slos-and-error-budgets-for-monitoring">SLOs and error budgets for monitoring</h2>
-<p>SLOs and error budgets for monitoring is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Monitoring an Acumatica instance is really three separate problems wearing one name: is the server up, is the application behaving, and are the business processes running to completion. Most teams only ever build the first one — a ping check on the URL — and then get blindsided when the app pool is technically alive but every AP bill posting is silently failing, or an integration scenario has been throwing errors for six hours with nobody watching. This is the setup I actually use to close that gap, split across infrastructure, application, and business-process layers.</p>
+<h2 id="the-three-layers-you-actually-need">The three layers you actually need</h2>
+<p>Infrastructure monitoring covers IIS app pool health, SQL Server wait stats and blocking, disk space on the database and file-attachment volumes, and application pool recycle events. On Acumatica Cloud (SaaS), this layer is mostly Acumatica's responsibility — you don't get RDP access to tune it, so your job shifts almost entirely to the layers above it. On self-hosted or IaaS deployments (Azure VMs, on-prem), it's still yours, and it's the layer most likely to be ignored until a disk fills up over a weekend.</p>
+<p>Application monitoring is Acumatica watching itself: the trace log under <strong>System &gt; Monitoring and Maintenance</strong>, license compliance warnings, import/export scenario run history, and the Automation Schedules screen, which shows you every scheduled process that failed silently overnight. Business-process monitoring is the layer almost nobody builds — alerts on conditions like "this AP bill has been on Hold for 3 days" or "this sales order hasn't shipped in 48 hours" — and it's the layer that actually matters to the business, not just to IT.</p>
+<h2 id="business-events-as-the-native-alerting-engine">Business Events as the native alerting engine</h2>
+<p>Acumatica's Business Events feature (under <strong>System &gt; Automation &gt; Business Events</strong>) is the built-in way to turn a data condition into a notification, without writing a customization. You define a trigger — a DAC field change, a screen action, or a schedule — and attach subscribers that send an email, create a notification, or run a business process. For monitoring purposes, the schedule-based trigger is the useful one: run a generic inquiry every 15 minutes that flags bills stuck in Hold past a threshold, or integration records that failed and never retried, and email the result to whoever owns that process.</p>
+<p>This is deliberately not APM. It won't tell you CPU usage or query latency. What it gives you is business-condition alerting that lives inside the same screens your accounting and ops teams already use, which means the people who actually need to act on the alert are the ones who see it — not a Slack channel full of infrastructure noise they'll learn to ignore.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>In the work I have done on acumatica monitoring and alerting, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="what-acumatica-monitoring-and-alerting-gives-you">What Acumatica Monitoring and Alerting gives you</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the monitoring is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_monitoring" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
+  <div class="code-header"><span class="code-lang">C# · PXTRACE LOGGING IN A GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class APInvoiceEntry_Extension : PXGraphExtension&lt;APInvoiceEntry&gt;
+{
+    protected virtual void _(Events.RowPersisted&lt;APInvoice&gt; e)
+    {
+        if (e.Row == null || e.TranStatus == PXTranStatus.Aborted)
+            return;
+
+        if (e.Row.Hold == true)
+        {
+            PXTrace.WriteWarning(
+                $"AP Bill {e.Row.RefNbr} entered Hold status " +
+                $"(Vendor {e.Row.VendorID}, Amount {e.Row.CuryOrigDocAmt})");
+        }
+
+        // Long-running post-processing goes through PXLongOperation so it
+        // shows up in the Processing screen instead of blocking the UI
+        // and disappearing from view if it fails.
+        PXLongOperation.StartOperation(Base, () =>
+        {
+            // integration push, PDF generation, etc.
+        });
+    }
 }</code></pre>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+<h2 id="integration-and-import-scenario-failures">Integration and import scenario failures</h2>
+<p>REST/SOAP integrations and Import Scenarios each keep their own error logs, but neither pages anyone by default. For anything pushing data to an external system — Azure Service Bus, a webhook, a middleware layer — build retry with backoff on the sending side, and treat repeated failures past N retries as dead-letter: log it somewhere durable and raise a Business Event or an external alert rather than letting it fail silently on attempt 47. The worst integration failures I've dealt with weren't caused by the integration breaking; they were caused by it breaking quietly three weeks before anyone noticed the numbers didn't reconcile.</p>
+<div class="callout-warn">
+  <strong>Acumatica has no built-in health-check endpoint</strong>
+  <p>There's no dedicated <code>/health</code> route you can point a load balancer or uptime service at. The practical workaround is a synthetic transaction: a scheduled script that logs in and loads a lightweight screen (or hits a simple generic inquiry via REST) every few minutes, and alerts if it fails or times out. Treat this as your uptime proxy, not a substitute for application-layer monitoring.</p>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The performance of monitoring in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>Production monitoring looks different from development monitoring. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<h2 id="alert-tiering-so-people-dont-tune-out">Alert tiering so people don't tune out</h2>
+<p>The fastest way to make monitoring useless is to route every alert to the same channel at the same urgency. I split alerts into three tiers: critical (site down, database unreachable, integration completely stopped) goes to phone or SMS; warning (a bill stuck on Hold, a scheduled process that failed once) goes to Teams or Slack; informational (license usage climbing, disk space trending down) goes to email only, reviewed weekly. If everything pages someone's phone at 2 AM, the on-call person starts ignoring the phone, and that's worse than not having alerting at all.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring monitoring first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with monitoring when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>What it watches</th><th>Typical tool</th></tr>
+  <tr><td>Infrastructure</td><td>IIS, SQL Server waits/blocking, disk space, app pool recycles</td><td>Azure Monitor / Application Insights, Windows perf counters</td></tr>
+  <tr><td>Application</td><td>Trace log, license compliance, import scenario runs, Automation Schedules</td><td>Built-in Acumatica screens under System &gt; Monitoring and Maintenance</td></tr>
+  <tr><td>Business process</td><td>Bills on Hold, stalled orders, failed integration records</td><td>Business Events + generic inquiries</td></tr>
+  <tr><td>Uptime proxy</td><td>Login + screen load succeeding at all</td><td>Scheduled synthetic transaction</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica monitoring and alerting. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of this needs to be elaborate to be useful — a handful of Business Events and a synthetic login check will catch most of what actually goes wrong in production. I've set this up for clients across Nairobi, Johannesburg, Kigali, Lusaka and Harare, usually after a failure that a dashboard would have caught weeks earlier. If you're trying to figure out what to monitor on your own instance, <a href="/#contact">reach out</a> or browse the rest of the <a href="/blog/">Acumatica blog</a> for related posts.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -189,9 +152,7 @@ jobs:
       <li><a href="/blog/acumatica-business-events-monitoring/">Acumatica Business Events Monitoring</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

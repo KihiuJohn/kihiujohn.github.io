@@ -93,107 +93,89 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A client once asked me why their custom "landed cost markup" field, computed as a percentage and multiplied against a currency amount, was off by fractions of a cent on thousands of transactions — enough to fail their auditor's reconciliation. The root cause was a mismatched decimal precision between two attributes three customizations apart. Precision bugs in Acumatica are quiet: they don't throw exceptions, they just silently produce numbers that are subtly wrong, and they compound. Here's what I've learned about the attributes that control this.</p>
+
+<h2 id="pxdbdecimal-basics">PXDBDecimal: precision is the argument, not a database-level default</h2>
+<p><code>PXDBDecimal(n)</code> declares how many digits after the decimal point the field stores and rounds to. This is not automatically inherited from the underlying SQL column's actual precision — the attribute enforces its own rounding on assignment, independent of what the column could technically hold:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAttributesExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Attributes(Acumatica doc)
-    {
-        // Custom attributes logic for acumatica attributes decimal
-        if (doc?.Attributes == null) return;
-        Base.Attributes(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXDBDecimal(2)]                    // rounds to 2 places: currency-style
+public decimal? UnitPrice { get; set; }
+
+[PXDBDecimal(4)]                    // rounds to 4 places: unit cost, exchange rates
+public decimal? UnitCost { get; set; }
+
+[PXDBDecimal(6)]                    // rounds to 6 places: some quantity conversions
+public decimal? ConvFactor { get; set; }
+</code></pre>
 </div>
-<h2 id="how-to-debug-attributes-in-production">How to debug attributes in production</h2>
-<p>In the work I have done on acumatica field attributes — decimal precision and the ones that bite, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<p>The trap: when you compute a new field from two existing fields with different precisions and don't explicitly control rounding on the result, you inherit whatever precision the target field's own attribute declares — sometimes silently truncating precision your calculation actually needed. A markup percentage stored as <code>PXDBDecimal(2)</code> applied against a <code>PXDBDecimal(4)</code> unit cost, multiplied and reassigned into another <code>PXDBDecimal(2)</code> field, rounds twice: once implicitly by whichever intermediate field held the value, and once on final assignment. Two roundings compound differently than one.</p>
+
+<div class="callout-warn callout">
+  <strong>CommitChanges and currency-aware fields add a second layer</strong>
+  <p>Fields using <code>PXDBCurrency</code> (as opposed to plain <code>PXDBDecimal</code>) tie precision to the currency's configured decimal places via <code>CurySource</code>, which can differ per currency — some currencies round to zero decimal places. If your custom calculation mixes a plain PXDBDecimal field with a PXDBCurrency field and assumes both round to 2 places, multi-currency clients will surface the bug the first time someone transacts in a currency with different rounding rules.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the attributes is.</p>
+
+<h2 id="pxuifield-vs-storage-precision">PXUIField's display formatting is cosmetic, not authoritative</h2>
+<p>A common misunderstanding: developers assume <code>PXUIField</code>'s display formatting controls precision. It does not — it only controls how many digits the UI shows, entirely independent of what's actually stored and used in calculations:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXDBDecimal(4)]                                  // stores 4 decimal places
+[PXUIField(DisplayName = "Rate", DisplayMask = "0.00")]  // shows only 2
+public decimal? UsrCommissionRate { get; set; }
+</code></pre>
 </div>
-<h2 id="why-acumatica-field-attributes-decimal-precision-and-the-ones-that-bite-matters-in-production">Why Acumatica Field Attributes — Decimal Precision and the Ones That Bite matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<p>This is legitimate and common — you often want more precision stored than displayed, especially for rates and factors that compound over many transactions. The bug pattern is the reverse assumption: a developer sees a field displaying 2 decimal places and assumes it's safe to compare or round it to 2 places elsewhere in code, when the actual stored value carries 4 or 6. Always check the <code>PXDBDecimal</code> argument, never the display mask, when reasoning about what a field actually holds.</p>
+
+<h2 id="pxdefault-and-nullability">PXDefault interacts with precision in a way that bites on inserts</h2>
+<p>Because every DAC decimal property must be nullable (<code>decimal?</code>), a field without an explicit <code>PXDefault</code> can enter the cache as null and stay null through several event handlers before any arithmetic touches it — and null-times-anything in a naive calculation throws, or worse, is silently coerced to zero depending on how the arithmetic is written:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Fragile — throws on null Qty or UnitPrice during row creation,
+// before FieldDefaulting has run for those fields
+e.Row.UsrExtPrice = e.Row.Qty.Value * e.Row.UnitPrice.Value;
+
+// Correct — explicit null handling, precision-aware rounding
+e.Row.UsrExtPrice = decimal.Round(
+    (e.Row.Qty ?? 0m) * (e.Row.UnitPrice ?? 0m), 2, MidpointRounding.AwayFromZero);
+</code></pre>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of attributes in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production attributes looks different from development attributes. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAttributesExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Attributes(Acumatica doc)
-    {
-        // Custom attributes logic for acumatica attributes decimal
-        if (doc?.Attributes == null) return;
-        Base.Attributes(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring attributes first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with attributes when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>Acumatica's own base fields handle this defensively throughout the framework; custom calculation code frequently doesn't, because it's easy to test only with fully-populated rows and never exercise the moment a row is freshly inserted with nulls still in flight.</p>
+
+<h2 id="rounding-mode-matters">MidpointRounding is not a formality</h2>
+<p>.NET's default <code>Math.Round</code> behavior is banker's rounding (round-half-to-even), which does not match how most accounting systems and most humans expect currency to round (round-half-away-from-zero). Acumatica's own currency-aware attributes handle this correctly internally, but custom calculations using bare <code>decimal.Round</code> without specifying <code>MidpointRounding.AwayFromZero</code> will occasionally disagree with the ERP's own totals by a cent — exactly the kind of discrepancy that makes an auditor's reconciliation fail and takes hours to trace back to a rounding-mode default nobody thought to specify.</p>
+
+<h2 id="checklist">A short checklist before shipping a calculated decimal field</h2>
+<ul>
+<li>Does the target field's <code>PXDBDecimal(n)</code> precision match what the calculation actually needs, not just what looks fine in the grid?</li>
+<li>Is rounding explicit, with <code>MidpointRounding.AwayFromZero</code>, rather than relying on implicit truncation from an attribute's storage precision?</li>
+<li>Does the calculation null-guard every operand, given every decimal property on a DAC is nullable?</li>
+<li>If currency is involved, does the field use <code>PXDBCurrency</code> so it follows the transaction currency's actual configured precision, rather than a hardcoded assumption of 2 places?</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica field attributes — decimal precision and the ones that bite. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Decimal precision bugs in Acumatica don't crash anything — they just make numbers quietly wrong in ways that only surface during reconciliation, months after the customization shipped. Treat the <code>PXDBDecimal</code> argument as the actual source of truth for stored precision (never the display mask), null-guard every operand explicitly, and set rounding mode deliberately rather than trusting the runtime default. It's a five-minute discipline that prevents a very unpleasant audit conversation.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
+      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">Acumatica CS Attributes — Screen vs DAC</a></li>
+      <li><a href="/blog/acumatica-custom-attributes-on-pxselect/">Acumatica Custom Attributes on PXSelect</a></li>
+      <li><a href="/blog/acumatica-usdefined-fields-udfs-vs-custom-dac/">Acumatica UDFs vs Writing a Custom DAC Extension</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

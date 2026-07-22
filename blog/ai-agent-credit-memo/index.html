@@ -93,98 +93,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>How to evaluate agent in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>A credit memo decision touches revenue directly, which puts it in a different category from most agentic automation candidates: the agent can prepare and recommend, but the moment it's empowered to actually issue a credit, you've handed a financial approval to a system that can hallucinate. The workable design keeps the agent firmly on the recommendation side of that line.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on ai agent for credit memo decisions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-credit-in-the-agent-loop">The role of credit in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the credit is.</p>
+<h2 id="what-the-agent-actually-decides">What the agent decides versus what it recommends</h2>
+<p>Split the workflow into two distinct steps: gathering and structuring the facts (the original invoice amount, the return or dispute reason, the customer's credit history, any applicable policy limit), and recommending an action within policy. The agent does both, but only the first step is "decided" by the agent outright — the recommended credit amount and reason always route to a human approver before anything posts to the ledger, regardless of how confident the model's output looks.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · TOOL DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def recommend_credit_memo(
+    invoice_id: str,
+    reason_code: str,
+    amount: float,
+    policy_limit: float,
+    justification: str,
+) -> dict:
+    """Creates a DRAFT credit memo recommendation.
+    Never posts to the ledger. amount must not exceed
+    policy_limit without an explicit override flag."""
+    if amount > policy_limit:
+        return {"status": "requires_manager_approval", "amount": amount}
+    return {"status": "pending_approval", "amount": amount}</code></pre>
 </div>
-<h2 id="what-ai-agent-for-credit-memo-decisions-actually-does">What AI Agent for Credit Memo Decisions actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="grounding-the-amount-in-the-original-transaction">Grounding the credit amount in the original transaction, not an estimate</h2>
+<p>The credit amount should come directly from a tool call that reads the original invoice or order line — never from the model computing or estimating a figure from the case description. If a customer disputes a $340 charge, the agent looks up the actual invoice line, confirms the $340, and proposes a credit against that specific figure. A model asked to "figure out how much to credit" from a support ticket's prose description, without a grounding lookup, will occasionally invent a plausible-but-wrong number.</p>
+<div class="callout-warn">
+  <strong>Cap the automation to the policy's actual limits</strong>
+  <p>Most companies already have a credit approval policy — a support rep can approve up to $X, a manager up to $Y. Encode those thresholds as hard tool-level checks, not prompt instructions the model might not follow under pressure from an unusual case description.</p>
+</div>
+
+<h2 id="pattern-detection-for-abuse">Using the agent to catch patterns a single case review misses</h2>
+<p>One legitimate return is unremarkable. The same customer filing five "damaged in transit" claims in two months is a pattern a rep handling cases one at a time won't necessarily notice. Where the agent adds real value beyond speed is a lightweight retrieval step — pull the customer's credit memo history alongside the current case — and surface the pattern to the approver rather than silently approving or silently ignoring it.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Surface the pattern, don't auto-deny</strong>
+  <p>A flagged pattern is a prompt for human judgment, not grounds for automatic denial — there are legitimate reasons a customer files multiple claims. Keep the agent's role to surfacing the signal.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of credit in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production credit looks different from development credit. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="audit-trail">The audit trail is the actual deliverable</h2>
+<p>Every recommendation the agent produces should log the source invoice, the reason code, the policy check result, and the approver's final decision (approved as-is, amount adjusted, rejected). This is what makes the system auditable to finance and defensible if a customer disputes the credit later — and it's also your evaluation dataset for measuring whether the agent's recommendations are actually holding up against human review over time.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring credit first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with credit when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Step</th><th>Agent's role</th></tr>
+  <tr><td>Look up original transaction</td><td>Grounded tool call, exact figures only</td></tr>
+  <tr><td>Check against policy limit</td><td>Deterministic rule, not model judgment</td></tr>
+  <tr><td>Detect abuse pattern</td><td>Surface to approver, never auto-deny</td></tr>
+  <tr><td>Post credit to ledger</td><td>Human approval required, always</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for credit memo decisions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A credit memo agent earns its keep by doing the tedious lookup and drafting work fast and accurately, while leaving the actual financial approval where it belongs. Ground every dollar figure in the original transaction, encode policy limits as hard checks rather than prompt suggestions, and log everything — the audit trail matters as much as the recommendation itself.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,8 +151,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-acumatica-integration/">AI Agent + Acumatica Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
     
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">

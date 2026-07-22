@@ -93,107 +93,82 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A performance ticket landed on my desk a while back: a Sales Order screen that had gotten progressively slower over two years of incremental customization. No single change was the culprit. The cause was a dozen <code>PXCacheExtension</code> classes, each individually reasonable, collectively pulling in far more data per row than the screen needed. This is the overfetch trap, and it is one of the easiest ways to quietly wreck an Acumatica screen's performance without a single obviously bad line of code.</p>
+
+<h2 id="how-a-dac-extension-adds-cost">Every extension field rides along on every query</h2>
+<p>When you add a field to a DAC via <code>PXCacheExtension&lt;T&gt;</code>, that field becomes part of the base table's row shape for every query against that DAC — not just the screen you built it for. A field you added for a specialized invoice-approval workflow gets selected on every AR Invoice load, every GI built over <code>ARInvoice</code>, every REST API call against the Invoices entity, whether or not the caller cares about it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaDacExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public sealed class ARInvoiceExt : PXCacheExtension&lt;ARInvoice>
 {
-    [PXOverride]
-    public virtual void Dac(Acumatica doc)
-    {
-        // Custom dac logic for acumatica dac extensions
-        if (doc?.Dac == null) return;
-        Base.Dac(doc);
-    }
+    public static bool IsActive() =&gt; true;
+
+    // Fine on its own — one decimal column
+    [PXDBDecimal(2)]
+    [PXUIField(DisplayName = "Approval Threshold")]
+    public decimal? UsrApprovalThreshold { get; set; }
+    public abstract class usrApprovalThreshold : PX.Data.BQL.BqlDecimal.Field&lt;usrApprovalThreshold&gt; { }
 }</code></pre>
 </div>
-<h2 id="how-to-debug-dac-in-production">How to debug dac in production</h2>
-<p>In the work I have done on acumatica dac extensions — avoiding the overfetch trap, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the dac is.</p>
+
+<p>One field like this costs nothing measurable. The trap is additive: ten customizations over a few years, each adding two or three fields to the same heavily-trafficked DAC, and suddenly every <code>ARInvoice</code> row carries forty extra columns that 95% of call sites never read. SQL Server does not care that you didn't need the column in your <code>SELECT *</code>-equivalent BQL projection — Acumatica's default select behavior for a DAC pulls the full declared row shape unless you explicitly project a subset.</p>
+
+<h2 id="the-worse-version-computed-fields">The worse version: unbound fields computed on every RowSelected</h2>
+<p>The overfetch trap gets meaningfully worse when the added field is not a stored column but an unbound, calculated one populated in a <code>RowSelected</code> handler that runs a BQL select of its own:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-dac-extensions-avoiding-the-overfetch-trap-matters-in-production">Why Acumatica DAC Extensions — Avoiding the Overfetch Trap matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of dac in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production dac looks different from development dac. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaDacExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowSelected&lt;ARInvoice&gt; e)
 {
-    [PXOverride]
-    public virtual void Dac(Acumatica doc)
-    {
-        // Custom dac logic for acumatica dac extensions
-        if (doc?.Dac == null) return;
-        Base.Dac(doc);
-    }
-}</code></pre>
+    if (e.Row == null) return;
+    var ext = e.Row.GetExtension&lt;ARInvoiceExt&gt;();
+    // Runs once PER ROW, every grid paint, every refresh
+    var openCount = PXSelect&lt;ARInvoice,
+        Where&lt;ARInvoice.customerID, Equal&lt;Required&lt;ARInvoice.customerID&gt;&gt;,
+        And&lt;ARInvoice.released, Equal&lt;False&gt;&gt;&gt;&gt;
+        .Select(Base, e.Row.CustomerID).Count;
+    ext.UsrOpenInvoiceCount = openCount;
+}
+</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring dac first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with dac when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>This is the pattern that turns a 50-row grid into fifty extra round trips on every screen paint. It is also the single most common root cause I find when a client says "the invoice screen used to be fast."</p>
+
+<div class="callout-warn callout">
+  <strong>RowSelected fires far more often than beginners expect</strong>
+  <p>RowSelected fires on initial load, on every field change anywhere on the row (because the whole row gets re-evaluated), on grid refresh, and again after save. Anything with real cost inside it — a BQL select, an external call, string formatting over a large collection — gets paid repeatedly per row per interaction. Treat RowSelected as a place to set UI state cheaply, not a place to compute things.</p>
+</div>
+
+<h2 id="fixes-that-work">Practical fixes, roughly in order of effort</h2>
+<ul>
+<li><strong>Project only what the screen needs.</strong> If a grid or GI only displays five fields, select those five via a BQL projection or a dedicated view rather than relying on the DAC's full row shape — cheap wins on wide tables with many extensions.</li>
+<li><strong>Cache expensive lookups.</strong> If <code>RowSelected</code> needs a value like "open invoice count," compute it once per graph instance in a dictionary keyed by customer ID rather than once per row per paint, and invalidate it deliberately rather than on every event.</li>
+<li><strong>Move heavy computation out of RowSelected entirely.</strong> Field defaulting belongs in <code>FieldDefaulting</code>; persisted computed values belong in <code>RowPersisting</code> or a scheduled recalculation, not a live query on every UI refresh.</li>
+<li><strong>Audit accumulated extensions periodically.</strong> On a mature instance, list every <code>PXCacheExtension</code> against your busiest DACs (<code>ARInvoice</code>, <code>SOOrder</code>, <code>INTran</code>, <code>GLTran</code>) and ask, honestly, whether each field is still used. Dead extension fields left from a decommissioned integration are pure overhead with zero benefit.</li>
+<li><strong>Prefer unbound fields with no backing query when a value can be derived from fields already on the row.</strong> A calculated discount percentage from two existing decimal fields costs nothing extra; a calculated field requiring its own database round trip costs real money on every load.</li>
+</ul>
+
+<h2 id="measuring-it">How to actually find the overfetch, not guess at it</h2>
+<p>Turn on the Trace screen (or the built-in performance profiler on the affected screen) and look for two signatures: a SQL statement whose column list has grown suspiciously wide compared to what the grid displays, and a repeated near-identical query executed once per visible row. The first tells you which DAC extensions to audit; the second tells you exactly which RowSelected handler to fix. Guessing which customization is the culprit from memory, on an instance with a decade of accumulated changes, wastes far more time than five minutes with the profiler open.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica dac extensions — avoiding the overfetch trap. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>DAC extensions are cheap individually and expensive collectively, because every field you add rides along on every query against that table forever, and every RowSelected handler you write runs far more often than intuition suggests. Project narrowly, cache expensive lookups at the graph level, keep RowSelected free of anything that touches the database, and revisit old extensions with the same scrutiny you'd give new ones — the overfetch trap is almost always a decade of individually-reasonable decisions, not one bad commit.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-field-level-attribs-decimal-precision/">Acumatica Field Attributes — Decimal Precision and the Ones That Bite</a></li>
+      <li><a href="/blog/acumatica-dac-extension-multiple-extensions/">Acumatica DAC Extensions — Managing Multiple Extensions</a></li>
+      <li><a href="/blog/acumatica-usdefined-fields-udfs-vs-custom-dac/">Acumatica UDFs vs Writing a Custom DAC Extension</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

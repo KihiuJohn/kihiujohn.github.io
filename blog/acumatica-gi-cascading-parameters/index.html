@@ -93,107 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Performance and observability for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A parameter that filters "Country" is easy. A parameter that filters "State", where the list of valid states depends on which country was picked one field earlier, is where most GI parameter setups fall apart, because the GI Designer does not give you a first-class "cascading dropdown" widget the way a modern web form framework would. You build the cascade out of selector conditions instead.</p>
+
+<h2 id="how-selectors-restrict-themselves">Selectors that filter against another parameter</h2>
+<p>Each GI parameter with a selector-type control (a DAC-backed lookup) can carry its own Conditions, scoped to that selector's underlying data view rather than the GI's main result set. The trick is referencing an <em>earlier</em> parameter's current value inside a later parameter's selector condition:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCascadingExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Cascading(Acumatica doc)
-    {
-        // Custom cascading logic for acumatica cascading parameters
-        if (doc?.Cascading == null) return;
-        Base.Cascading(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PARAMETER SELECTOR CONDITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Parameter 1:  @Country     (selector on Country DAC)
+Parameter 2:  @State       (selector on State DAC)
+              Condition:  State.CountryID  Equals  =[@Country]</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on acumatica gi cascading parameters — dependent filters, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the cascading is.</p>
+
+<p>Order matters — parameters evaluate top to bottom on the Parameters tab, and a parameter can only reference parameters declared above it. Acumatica does not auto-refresh the second dropdown's cached list when the first one changes in every build; on some versions the user has to reopen the selector for the filtered list to take effect, which is a real usability wrinkle worth testing before you promise a slick cascading UX to a client.</p>
+
+<h2 id="cascading-into-the-main-filter">Cascading into the result set, not just the selector</h2>
+<p>The more common real requirement is not "filter one dropdown by another" but "use the second parameter to filter the main GI results, with its own valid-value list narrowed by the first". That is two separate mechanisms working together: the selector condition above narrows what the user is <em>offered</em>, and a normal Conditions-tab entry on the main data source narrows what gets <em>returned</em>:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">MAIN CONDITIONS TAB</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>InventoryItem.CountryOfOrigin  Equals  =[@Country]
+InventoryItem.StateID          Equals  =[@State]   (only applied if @State is not empty)</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>For the "only applied if not empty" behavior, use the standard optional-parameter pattern: wrap the condition so an empty parameter effectively matches everything, typically by pairing the equals condition with an <code>IsNull</code>/blank check joined by Or, or by using the built-in "allow blank" semantics the designer offers per condition row depending on version. Test the blank case explicitly — a cascading filter that silently returns zero rows when the second parameter is left empty is the single most common bug report I get on these builds.</p>
+
+<h2 id="three-plus-levels">When the cascade goes three levels deep</h2>
+<p>Country → State → City is where I stop trusting the designer's selector conditions alone and instead build a small supporting projection or rely on the Acumatica generic selectors already provided for address-style cascades (Country/State are standard system DACs with this relationship built in). For a genuinely custom three-level business hierarchy — say Region → Territory → Branch on a custom dimension — I put the parent keys directly on the child DAC (denormalized) rather than requiring a chained join at filter time, because chained selector conditions three levels deep get slow to populate interactively and are painful to debug when something in the middle is misconfigured.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Test with a user who has restricted values</strong>
+  <p>Cascading parameters interact with row-level security. A branch-restricted user whose parameter selector is not also scoped to their allowed branches can pick a branch they cannot see data for, and the GI silently returns zero rows — which reads as a bug report, not a permissions explanation, unless you test it deliberately.</p>
 </div>
-<h2 id="the-cascading-edge-cases-i-have-shipped">The cascading edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The performance of cascading in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-cascading-in-production">How to debug cascading in production</h2>
-<p>Production cascading looks different from development cascading. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCascadingExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Cascading(Acumatica doc)
-    {
-        // Custom cascading logic for acumatica cascading parameters
-        if (doc?.Cascading == null) return;
-        Base.Cascading(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cascading first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cascading when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi cascading parameters — dependent filters. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cascading parameters in GIs are built from two separate pieces — selector conditions that narrow what a dropdown offers, and main Conditions-tab entries that narrow what the query returns — and both need to be wired for a genuinely cascading experience. Keep cascades to two levels where you can, test the empty-parameter path explicitly, and denormalize parent keys onto child DACs when a hierarchy runs three levels deep.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
-      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-gi-parameters-and-default-values/">Acumatica GI Parameters and Default Values</a></li>
+      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering</a></li>
+      <li><a href="/blog/acumatica-gi-self-service-config/">Acumatica GI Self-Service Configuration</a></li>
+      <li><a href="/blog/acumatica-report-parameters-vs-prompts/">Acumatica Report Parameters vs Prompts</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

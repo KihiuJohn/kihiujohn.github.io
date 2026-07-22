@@ -93,96 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A three-outlet coffee chain asked me to "put Acumatica on the tills." I had to talk them out of it in the first meeting. Acumatica is not a point-of-sale system, and it has no ambition to be one — there is no till screen, no receipt printer driver, no tender workflow anywhere in the standard product. What Acumatica is very good at, for a cafe business, is everything behind the counter: multi-location inventory, recipe-based costing for what a flat white actually costs to make, and consolidated financials across outlets. Getting the boundary right between the till and the ERP is the entire project.</p>
+
+<h2 id="pos-is-a-bridge-not-a-build">The POS integration is a bridge, not a feature request</h2>
+<p>Acumatica does sell "Acumatica Point of Sale, powered by Heuristyc," but it is explicitly positioned for counter/wholesale sales scenarios rather than a hospitality quick-service register, and it is not what most cafes already running Square, Toast, or a regional POS want to rip out. The realistic architecture for an existing cafe is: keep the POS the baristas already know, and build a nightly (or near-real-time) sync of sales summaries and inventory depletion into Acumatica via the contract-based REST API, landing as a summarized AR/cash transaction and an inventory issue against the recipe's ingredients — not a line-by-line replica of every till transaction, which would be both pointless and a performance problem.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CafeExt : PXCacheExtension<Coffee>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · RECIPE-BASED DEPLETION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Sold item (from POS):    Flat White 12oz
+Maps to BOM:              BOM-FLATWHITE-12
+  Components:              Espresso shot x2 (from ROASTED-COFFEE-KG)
+                            Milk 200ml (from MILK-FRESH-L)
+Nightly job:               POS sales summary -> Acumatica REST API
+                            -> Inventory Issue against BOM components
+                            -> AR cash transaction for the day's till total</code></pre>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on cafe and coffee shop vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The cafe is not the question; the failure mode of the coffee is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'cafe'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-cafe-on-a-horizontal-platform-beats-from-scratch">Why cafe on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="why-a-bom-for-coffee">Why a cafe needs BOMs at all</h2>
+<p>The thing that makes this a genuine Manufacturing-flavoured build rather than plain Distribution: a cafe does not sell milk and coffee beans, it sells a flat white, and the only way to know true margin — not "revenue minus COGS estimated by category" but "this exact drink costs 43 shillings in ingredients" — is a BOM-based cost rollup per recipe. I typically enable light manufacturing functionality (or use inventory kits for the simplest cases) specifically for this costing purpose, even though there is no physical production floor. It feels like overkill until the client asks why oat-milk drinks are quietly losing money at current pricing, and the BOM rollup answers it in one report instead of a guess.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Kits are not always enough</strong>
+  <p>Acumatica's simpler Kit Assembly feature can substitute for a full BOM when a "recipe" is a fixed, non-variable bundle. It falls short the moment recipes have substitutions (oat milk vs regular, extra shot pricing) or waste factors (spilled shots, over-pour). At that point a real BOM with a routing, even a trivial one-step routing, is worth the extra setup because it gives you variance reporting kits do not.</p>
 </div>
-<h2 id="channel-partner-programs-for-coffee">Channel partner programs for coffee</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM cafe
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-cafe">Marketplace listing for cafe</h2>
-<p>The performance of coffee in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-coffee">SOC 2 and ISO 27001 for coffee</h2>
-<p>Production coffee looks different from development coffee. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CafeExt : PXCacheExtension<Coffee>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring coffee first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cafe on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with coffee when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="multi-location-consolidation">What Acumatica is unambiguously right for</h2>
+<p>Where this stops being a compromise and becomes a clear win: three outlets each running their own POS produce three separate pictures of the business unless something consolidates them. Acumatica's multi-branch structure, with each outlet as a branch sharing one chart of accounts, gives ownership a same-day consolidated P&L instead of three spreadsheets reconciled by an accountant on the 5th of the following month. That consolidation is the actual value proposition for a cafe chain — the POS bridge is the price of admission to get there.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cafe and coffee shop vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Do not try to make Acumatica be the till. Let the POS the staff already use stay, bridge it via REST API into recipe-based inventory depletion and summarized cash transactions, and spend the real engineering effort on BOM-based recipe costing and multi-branch consolidation — that is where the ERP earns its keep for a cafe business.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-nightclub-acumatica/">Nightclub and Bar Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-restaurant-acumatica/">Restaurant Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
+      <li><a href="/blog/vertical-saas-restaurant-acumatica/">Restaurant Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-bakery-acumatica/">Bakery and Patisserie Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-catering-acumatica/">Catering Business Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-gi-dashboard-best-practices/">Acumatica GI Dashboard Best Practices</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

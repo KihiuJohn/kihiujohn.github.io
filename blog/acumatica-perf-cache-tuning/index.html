@@ -92,100 +92,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On a SaaS P&L, this is rarely the headline. The headline is revenue and churn. this is the metric that tells you whether the headline is going up or down. This article is how to measure it correctly and how to act on it.</p>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>Cohort cuts that reveal the truth is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Cache tuning" in Acumatica means two genuinely different things depending on who is asking, and conflating them wastes time: there is <strong>PXCache</strong>, the per-graph, per-request in-memory object cache that every DAC row passes through, and there is <strong>IIS output/static caching</strong>, the HTTP-level caching of static assets and, on some builds, response output. Neither is Redis, and neither is a general-purpose distributed cache you configure once and forget — I will cover the actual gap where Redis fits, or does not, in the Redis-specific post in this series.</p>
+
+<h2 id="pxcache-is-not-optional">PXCache is not a knob, it is the data access layer</h2>
+<p>Every BQL <code>Select</code> against a graph's data views goes through <code>PXCache</code>, which holds recently touched rows in memory for the life of the graph instance and dedupes repeated selects against the same key within a request. You do not "enable" PXCache — it is always on — but you can defeat its benefit or actively fight it:</p>
+<ul>
+<li><strong>Re-selecting the same row repeatedly with a fresh <code>PXSelect</code> instead of reading it once and reusing the cached instance</strong> re-hits the query pipeline even though the cache would have served it. This is the single most common inefficiency I find in custom event handlers — a <code>RowUpdated</code> handler that does <code>PXSelect&lt;...&gt;.Select(this, key)</code> when the row it needs is already sitting in <code>e.Row</code> or reachable via <code>cache.Current</code>.</li>
+<li><strong>Calling <code>cache.Clear()</code> mid-operation</strong> for reasons unrelated to genuinely needing a fresh read discards everything PXCache was holding for that graph, forcing full re-fetches on the next access. I have seen this used as a blunt fix for a stale-data symptom that had a different real cause — it "fixes" the symptom by making everything after it slower.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">C# — reuse what is already cached</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Wasteful: re-queries a row the cache already has
+protected virtual void SOOrder_RowUpdated(PXCache cache, PXRowUpdatedEventArgs e)
+{
+    var order = (SOOrder)PXSelect&lt;SOOrder,
+        Where&lt;SOOrder.orderNbr, Equal&lt;Required&lt;SOOrder.orderNbr&gt;&gt;&gt;&gt;
+        .Select(Base, ((SOOrder)e.Row).OrderNbr);
+    // ...
+}
+
+// Better: the row is already in hand
+protected virtual void SOOrder_RowUpdated(PXCache cache, PXRowUpdatedEventArgs e)
+{
+    var order = (SOOrder)e.Row;
+    // ...
+}</code></pre>
 </div>
-<h2 id="the-cohort-retention-curve-for-acumatica">The cohort retention curve for acumatica</h2>
-<p>In the work I have done on acumatica performance — cache tuning, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<h2 id="cache-invalidation-across-graphs">Cross-graph cache invalidation: the part people forget</h2>
+<p>PXCache is per-graph-instance, not a single shared store — which means a change made through one graph does not automatically appear in another already-instantiated graph's cache within the same request pipeline unless you explicitly propagate it. Customizations that manipulate a sibling graph's data directly (rather than through its own actions/events) can leave that sibling graph's cache holding stale rows for the remainder of the transaction. Use <code>PXCache.Update</code>/<code>Insert</code> through the owning graph's own cache, not a raw SQL-adjacent shortcut, so the invalidation actually happens where it needs to.</p>
+
+<div class="callout-warn callout">
+  <strong>PXLongOperation runs in its own graph context</strong>
+  <p>A long-running processing operation started via <code>PXLongOperation.StartOperation</code> executes against its own graph instance, separate from the UI thread's graph. If the UI-side graph is still holding cached rows the long operation modifies, the user's screen can display stale data until they navigate away and back, refreshing the cache. This is expected behavior, not a bug — but it is worth setting user expectations for during UAT rather than fielding a "the record didn't update" ticket after the fact.</p>
 </div>
-<h2 id="when-acumatica-is-a-leading-indicator-vs-a-lagging-one">When acumatica is a leading indicator vs a lagging one</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="what-acumatica-performance-cache-tuning-actually-measures">What Acumatica Performance — Cache Tuning actually measures</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, performance, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>The performance of performance in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="iis-output-caching">The other cache: IIS static/output caching</h2>
+<p>Separately, IIS static content caching (for the compiled JS/CSS bundles, images, fonts under the site's static folders) should be on with a long <code>max-age</code>, since Acumatica versions its static asset URLs on upgrade, invalidating the cache automatically when the version changes. This is unrelated to PXCache and is pure network/browser-level caching — worth checking with the same browser dev-tools network tab used for the compression post in this series, looking for <code>Cache-Control</code> headers on static assets.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance — cache tuning. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>"Cache tuning" on Acumatica mostly means writing customization code that respects PXCache instead of fighting it — reuse rows you already have, avoid indiscriminate <code>cache.Clear()</code>, and propagate changes through the owning graph. IIS static asset caching is a separate, simpler win. Neither of these is a distributed cache layer; if the requirement is genuinely a shared cache across app servers, that is custom integration territory, covered in the Redis post.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
+      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">Acumatica PXCache vs PXSelect — Choosing</a></li>
+      <li><a href="/blog/acumatica-perf-graph-event-loop/">Acumatica Performance — Graph Event Loop</a></li>
       <li><a href="/blog/acumatica-perf-redis-caching-strategy/">Acumatica Performance — Redis Caching Strategy</a></li>
-      <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
-      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
-      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage — Locking and Caching</a></li>
+      <li><a href="/blog/acumatica-iis-application-pool-tuning/">Acumatica IIS Application Pool Tuning</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

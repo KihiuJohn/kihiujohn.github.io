@@ -93,107 +93,98 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-modern-edge-cases-i-have-shipped">The modern edge cases I have shipped</h2>
-<p>The modern edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Building a Modern UI screen from a blank slate — not extending an existing one, a genuinely new screen for a genuinely new graph — has more moving parts than the marketing material suggests, but they compose in a predictable order. This is the sequence I actually follow, using a simple "Expense Approval Queue" screen as the running example, from graph to sitemap entry.</p>
+
+<h2 id="step-1-graph-first">Step 1: the graph exists independent of any UI — build and test it first</h2>
+<p>A genuinely useful habit that pays off regardless of which UI you'll eventually build: write and unit-test the <code>PXGraph</code> before touching any frontend code at all. The graph doesn't know or care whether Modern UI or classic ASPX will eventually render it — it's the same <code>PXSelect</code> views, actions, and event handlers either way:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaModernExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ExpenseApprovalEntry : PXGraph&lt;ExpenseApprovalEntry&gt;
 {
-    [PXOverride]
-    public virtual void Modern(Acumatica doc)
+    public PXSelect&lt;ExpenseClaim,
+        Where&lt;ExpenseClaim.status, Equal&lt;ExpenseClaimStatus.pendingApproval&gt;&gt;&gt; PendingClaims;
+
+    public PXAction&lt;ExpenseClaim&gt; Approve;
+    [PXUIField(DisplayName = "Approve")]
+    [PXButton]
+    protected virtual IEnumerable approve(PXAdapter adapter)
     {
-        // Custom modern logic for acumatica modern screen
-        if (doc?.Modern == null) return;
-        Base.Modern(doc);
+        foreach (ExpenseClaim claim in adapter.Get&lt;ExpenseClaim&gt;())
+        {
+            claim.Status = "A";
+            PendingClaims.Update(claim);
+        }
+        Actions.PressSave();
+        return adapter.Get();
     }
 }</code></pre>
 </div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>In the work I have done on acumatica modern ui screen — from scratch, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="how-to-debug-modern-in-production">How to debug modern in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the modern is.</p>
+
+<h2 id="step-2-typescript-screen-class">Step 2: the TypeScript screen class declares the view shape</h2>
+<p>In <code>FrontendSources</code>, a new screen class uses <code>@graphInfo</code> to bind to the graph by its full type name and primary view, then declares view factories mirroring the graph's <code>PXSelect</code> shape:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="why-acumatica-modern-ui-screen-from-scratch-matters-in-production">Why Acumatica Modern UI Screen — From Scratch matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of modern in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Production modern looks different from development modern. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaModernExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Modern(Acumatica doc)
-    {
-        // Custom modern logic for acumatica modern screen
-        if (doc?.Modern == null) return;
-        Base.Modern(doc);
-    }
+  <div class="code-header"><span class="code-lang">TYPESCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { createCollection, graphInfo, PXScreen, PXView, createField, PXFieldState } from "client-controls";
+
+@graphInfo({ graphType: "MyNamespace.Graphs.ExpenseApprovalEntry", primaryView: "PendingClaims" })
+export class ExpenseApprovalScreen extends PXScreen {
+  PendingClaims = createCollection(ExpenseClaimRow);
+}
+
+class ExpenseClaimRow extends PXView {
+  ClaimNbr = createField&lt;PXFieldState&lt;string&gt;&gt;({});
+  EmployeeName = createField&lt;PXFieldState&lt;string&gt;&gt;({});
+  ClaimTotal = createField&lt;PXFieldState&lt;number&gt;&gt;({ displayFormat: "0.00" });
+  Status = createField&lt;PXFieldState&lt;string&gt;&gt;({});
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring modern first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with modern when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="step-3-layout-markup">Step 3: layout markup composes qp-* components against the view</h2>
+<p>A separate layout definition (HTML-flavored markup using the <code>qp-*</code> web component family) declares the actual visual structure — a grid bound to <code>PendingClaims</code>, an approve button bound to the graph's <code>Approve</code> action:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">HTML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;qp-grid view="PendingClaims" adjust-page-size="true"&gt;
+  &lt;qp-grid-column field="ClaimNbr"&gt;&lt;/qp-grid-column&gt;
+  &lt;qp-grid-column field="EmployeeName"&gt;&lt;/qp-grid-column&gt;
+  &lt;qp-grid-column field="ClaimTotal"&gt;&lt;/qp-grid-column&gt;
+  &lt;qp-grid-column field="Status"&gt;&lt;/qp-grid-column&gt;
+&lt;/qp-grid&gt;
+&lt;qp-toolbar&gt;
+  &lt;qp-button action="Approve" caption="Approve Selected"&gt;&lt;/qp-button&gt;
+&lt;/qp-toolbar&gt;</code></pre>
+</div>
+
+<h2 id="step-4-build-and-register">Step 4: the npm build compiles TypeScript to the bundle the browser loads</h2>
+<p>The <code>FrontendSources</code> project's build (npm/webpack, wired into the platform's own build pipeline) compiles every registered screen's TypeScript into the JavaScript bundles the app actually serves. During active development this runs in watch mode for fast iteration; for deployment, the compiled output packages into the customization project alongside your graph and DAC assemblies — Modern UI screens deploy through the same customization mechanism as everything else, not a separate release process.</p>
+
+<div class="callout-warn callout">
+  <strong>A screen ID needs registering in three places before it's reachable — miss one and you get a confusing blank result</strong>
+  <p>The screen needs: a screen ID (e.g. <code>EP301500</code>-style, following the module's numbering convention) registered against the graph type; a sitemap entry (Site Map screen, same as any classic screen) pointing at that screen ID; and the compiled TypeScript bundle actually containing the screen class with a matching <code>@graphInfo</code> registration. Miss the sitemap entry and the screen exists but nobody can navigate to it. Miss the bundle registration and the sitemap entry resolves to a blank or error page. I've chased both of these independently on first-time Modern UI screens before learning to check all three every time.</p>
+</div>
+
+<h2 id="step-5-test-the-whole-loop">Step 5: test save, validation, and action invocation end to end, not just that it renders</h2>
+<p>A screen rendering correctly proves the TypeScript-to-graph binding works for reads; it proves nothing about writes. Before calling a new screen done, I explicitly test: editing a bound field and confirming the server-side <code>FieldUpdated</code>/<code>RowPersisting</code> logic fires as expected, invoking the custom action button and confirming it reaches the graph's action method, and a full save-and-reload cycle to confirm nothing about the round trip is silently dropping data. Screens that "look right" in a first pass but haven't been through this checklist are where most first-Modern-UI-screen bugs surface during actual client testing.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica modern ui screen — from scratch. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Building a Modern UI screen from scratch is graph first (independent of any UI concerns), then a TypeScript screen class mirroring the graph's view shape with <code>@graphInfo</code>, then layout markup composing <code>qp-*</code> components against those views, then a build that bundles it all — and three separate registration points (screen ID, sitemap entry, bundle) that all need to line up before the screen is actually reachable. The graph-first discipline is the part experienced classic-UI developers most often skip when they're excited about a new UI framework, and it's the part that saves the most debugging time later.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-modern-ui-adding-custom-screens/">Acumatica Modern UI — Adding Custom Screens</a></li>
-      <li><a href="/blog/acumatica-modern-ui-custom-control/">Acumatica Modern UI Custom Control — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-modern-ui-master-detail/">Acumatica Modern UI Master-Detail Pattern</a></li>
-      <li><a href="/blog/acumatica-modern-ui-vs-classic-ui-development/">Acumatica Modern UI vs Classic UI — A Developer Comparison</a></li>
+      <li><a href="/blog/acumatica-modern-ui-vs-classic-ui-development/">Acumatica Modern UI vs Classic UI Development</a></li>
+      <li><a href="/blog/acumatica-modern-ui-master-detail/">Acumatica Modern UI Master-Detail Screens</a></li>
+      <li><a href="/blog/acumatica-modern-ui-form-validation/">Acumatica Modern UI Form Validation</a></li>
+      <li><a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-screen-editor-vs-code-editor/">Acumatica Screen Editor vs Code Editor</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

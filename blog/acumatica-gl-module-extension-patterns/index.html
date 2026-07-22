@@ -92,107 +92,73 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaModuleExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Module(Acumatica doc)
-    {
-        // Custom module logic for acumatica module extension
-        if (doc?.Module == null) return;
-        Base.Module(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica gl module — extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>General Ledger sits underneath every other financial module, which makes GL extensions unusually high-stakes: a bug here doesn't stay contained to one screen, it shows up in every module that posts a batch. Most GL customization work is about allocation logic and validation, not the ledger structure itself, which is deliberately left alone in almost every implementation.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p><code>Batch</code> and <code>GLTran</code> are the two DACs that matter — a batch is the posting unit, and <code>GLTran</code> rows are its individual debit/credit lines. Manual entry happens on the Journal Transactions screen (GL301000), and the graph is <code>JournalEntry</code>. Recurring and allocation batches run through their own scheduled processes but ultimately produce the same <code>Batch</code>/<code>GLTran</code> structure as manual entries.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>A <code>PXGraphExtension&lt;JournalEntry&gt;</code> is where custom validation on batch release typically lives — enforcing a segment combination rule, requiring a custom field before a batch can post, or blocking postings to a closed sub-period the stock period-close logic doesn't already catch for a given scenario. Custom allocation logic (splitting a cost center's overhead across departments by headcount, for example) is usually its own graph or graph extension on the Allocations screen rather than a hack layered onto <code>JournalEntry</code>.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Financial period validation is already enforced — don't duplicate it</strong>
+  <p>Acumatica checks the batch's financial period against open/closed status and against the module's own period-close state before allowing posting. A custom validation that re-checks period status independently risks disagreeing with the platform's own check after a version upgrade changes internal logic slightly. If you need an additional restriction (say, a "soft close" that only finance can override), add a condition on top of the existing check rather than reimplementing period validation from scratch.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the module is.</p>
+
+<h2 id="a-realistic-scenario-custom-allocation-rule">A realistic scenario: custom allocation rule</h2>
+<p>A recurring GL ask is allocating a shared cost (rent, IT, insurance) across departments using a driver that isn't one of the stock allocation methods — say, square footage occupied rather than a fixed percentage or headcount. This is implemented as a custom allocation processing screen or extension that reads the driver values from a small custom DAC and produces <code>GLTran</code> lines through the standard batch creation API, rather than hand-writing rows into the table.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-module-edge-cases-i-have-shipped">The module edge cases I have shipped</h2>
-<p>The performance of module in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production module looks different from development module. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaModuleExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · CUSTOM ALLOCATION PROCESSING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SquareFootageAllocation : PXGraph&lt;SquareFootageAllocation&gt;
 {
-    [PXOverride]
-    public virtual void Module(Acumatica doc)
+    public PXSelect&lt;AllocationDriver&gt; Drivers;
+
+    public virtual void RunAllocation(string sourceAccount, string sourceSubID, decimal totalAmount)
     {
-        // Custom module logic for acumatica module extension
-        if (doc?.Module == null) return;
-        Base.Module(doc);
+        JournalEntry je = PXGraph.CreateInstance&lt;JournalEntry&gt;();
+        Batch batch = je.BatchModule.Insert(new Batch { Module = BatchModule.GL });
+
+        decimal totalSqFt = Drivers.Select().RowCast&lt;AllocationDriver&gt;().Sum(d =&gt; d.SquareFeet ?? 0);
+        foreach (AllocationDriver d in Drivers.Select())
+        {
+            decimal share = totalSqFt == 0 ? 0 : totalAmount * (d.SquareFeet ?? 0) / totalSqFt;
+            GLTran line = new GLTran
+            {
+                AccountID = d.TargetAccountID,
+                SubID = d.TargetSubID,
+                DebitAmt = share
+            };
+            je.GLTranModuleBatNbr.Insert(line);
+        }
+        je.Save();
     }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring module first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with module when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Building the batch through <code>JournalEntry</code>'s own insert path keeps the allocation subject to the same validation, numbering, and audit trail as a manually entered journal entry, rather than being a special case that finance can't reconcile against everything else.</p>
+
+<h2 id="reversing-and-recurring-batches">Reversing and recurring batches</h2>
+<p>If the allocation needs to run every period, look at whether Acumatica's recurring transactions feature covers it before building a custom scheduled process — recurring batches already handle period advancement, reversal, and history in a way a bespoke scheduler would need to reimplement.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test any GL extension against a batch that spans multiple branches or ledgers if the client uses either — inter-branch and multi-ledger postings have their own balancing rules, and a validation written against a single-branch test batch can pass in dev and fail the first time it hits a real multi-entity posting.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gl module — extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>GL extensions carry more blast radius than almost any other module because every subledger eventually posts through it. Route allocation logic through the standard batch creation API, layer custom validation on top of existing period and posting checks rather than replacing them, and test against multi-branch data before calling it done.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-fa-fixed-assets-extension/">Acumatica Fixed Assets — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-cash-management-extension/">Acumatica Cash Management — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Cross-Field DAC Validation in Acumatica</a></li>
+      <li><a href="/blog/acumatica-multicurrency-dac-handling/">Multi-Currency DAC Handling in Acumatica</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

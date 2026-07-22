@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica TransactionScope — Usage and Pitfalls | John Kihiu</title>
-<meta name="description" content="Acumatica TransactionScope — Usage and Pitfalls is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Acumatica manages its own transaction boundaries around graph saves — you rarely need to open a TransactionScope by hand.">
 <meta name="keywords" content="Acumatica customization, Acumatica sql, Acumatica transactions, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-transactionscope-usage-and-pitfalls/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica TransactionScope — Usage and Pitfalls">
-<meta property="og:description" content="Acumatica TransactionScope — Usage and Pitfalls is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Acumatica manages its own transaction boundaries around graph saves — you rarely need to open a TransactionScope by hand.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-transactionscope-usage-and-pitfalls.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-transactionscope-usage-and-pitfalls/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="transactions">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica TransactionScope — Usage and Pitfalls","description":"Acumatica TransactionScope — Usage and Pitfalls is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-transactionscope-usage-and-pitfalls.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-transactionscope-usage-and-pitfalls/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica TransactionScope — Usage and Pitfalls","description": "Acumatica manages its own transaction boundaries around graph saves — you rarely need to open a TransactionScope by hand.","image":"https://kihiujohn.github.io/assets/og/acumatica-transactionscope-usage-and-pitfalls.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-transactionscope-usage-and-pitfalls/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica TransactionScope — Usage and Pitfalls","item":"https://kihiujohn.github.io/blog/acumatica-transactionscope-usage-and-pitfalls/"}]}
@@ -87,106 +87,69 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica TransactionScope — Usage and Pitfalls</span></nav>
     <span class="tag">Tax / Fiscal · Customization</span>
     <h1>Acumatica TransactionScope — Usage and Pitfalls</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica TransactionScope — Usage and Pitfalls is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica manages its own transaction boundaries around graph saves — you rarely need to open a TransactionScope by hand.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough fiscalisation projects to know the patterns that work. They share a few traits: the device stores its private key in a vault, the offline buffer is sized for the worst case, and the audit trail is the source of truth. This article is the patterns.</p>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>Cross-border considerations for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>I once inherited a customization where a developer, coming from a plain ADO.NET background, wrapped a chunk of custom persistence logic in a raw <code>System.Transactions.TransactionScope</code> around several <code>PXCache.Persist</code> calls, on top of Acumatica's own internal transaction handling. It worked in testing. Under real concurrent load it produced intermittent deadlocks that took two days to trace, because two separate transaction management systems were both trying to own the same connection's isolation semantics. TransactionScope in Acumatica is one of those tools that is genuinely necessary sometimes and actively dangerous most of the time.</p>
+
+<h2 id="graph-already-manages-transactions">PXGraph already wraps your Persist in a transaction, most of the time you don't need one</h2>
+<p>When you call <code>Base.Save.Press()</code> or a graph's <code>Persist()</code>, Acumatica already opens a database transaction covering every dirty row across every cache in that graph, runs RowPersisting for each, and commits or rolls back the whole batch atomically. This is the guarantee that makes "one exception anywhere rolls back the entire save" true. If your custom logic's data changes go through the graph's normal cache-and-persist flow, you already have transactional atomicity, adding an explicit <code>TransactionScope</code> around that flow does nothing except create a second transaction context wrapping the first, with its own isolation level and its own connection enlistment behavior that can conflict with what the graph is already doing.</p>
+
+<div class="callout-warn callout">
+  <strong>Nested TransactionScope around a graph Persist is the most common misuse I see</strong>
+  <p>Wrapping <code>Base.Save.Press()</code> in your own <code>TransactionScope</code> because "I want to be sure it's transactional" is redundant at best, it already is, and at worst introduces distributed transaction promotion (MSDTC) if the ambient scope's isolation settings don't match what the underlying connection expects, which is a much heavier and slower code path than a plain local transaction, and a common source of timeouts under load that never show up in single-user testing.</p>
+</div>
+
+<h2 id="when-you-actually-need-it">The legitimate case: multiple independent graph instances that must succeed or fail together</h2>
+<p>TransactionScope earns its place when you are coordinating persistence across multiple separate <code>PXGraph</code> instances, each with its own independent transaction boundary, and the business requirement is that all of them commit together or none do. A classic example: a custom process that creates a Sales Order via one graph and a related Case via another graph, where a failure in the second must roll back the first, something Acumatica's own per-graph transaction handling cannot do for you since each graph instance normally commits independently.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>using (var ts = new PX.Data.PXTransactionScope())
+{
+    SOOrderEntry orderGraph = PXGraph.CreateInstance&lt;SOOrderEntry&gt;();
+    // ... build and persist the order via orderGraph.Save.Press() ...
+
+    CRCaseMaint caseGraph = PXGraph.CreateInstance&lt;CRCaseMaint&gt;();
+    // ... build and persist the related case via caseGraph.Save.Press() ...
+
+    ts.Complete(); // both graphs' work commits together, or neither does
+}
+</code></pre>
 </div>
-<h2 id="what-acumatica-transactionscope-usage-and-pitfalls-is-for">What Acumatica TransactionScope — Usage and Pitfalls is for</h2>
-<p>In the work I have done on acumatica transactionscope — usage and pitfalls, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the transactionscope is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>Note the type: Acumatica ships its own <code>PX.Data.PXTransactionScope</code>, specifically built to coordinate correctly with PXGraph's internal connection and transaction handling, rather than the raw <code>System.Transactions.TransactionScope</code>. Using the platform's own wrapper is what avoids the MSDTC promotion and deadlock issues that show up when a bare framework TransactionScope tries to manage a connection Acumatica's data layer is also managing.</p>
+
+<h2 id="connection-scope-and-nesting">Nesting scopes correctly, and why nested Persist calls surprise people</h2>
+<p>A <code>PXTransactionScope</code> can legitimately nest, an outer scope wrapping several graphs, each doing its own internal Persist, and the outer scope determines the actual commit point. What surprises developers moving from a simpler ORM is that a graph's own internal <code>Persist</code> call, inside an active outer scope, does not commit immediately, it enlists in the ambient scope and only actually commits when the outermost scope calls <code>Complete()</code> and disposes cleanly. If an exception is thrown anywhere after a graph's Persist has run but before the outer scope completes, that graph's changes roll back too, even though the Persist call itself appeared to succeed without throwing. Code that assumes "Persist succeeded, so that data is now safely committed" inside a multi-graph TransactionScope is making a false assumption that eventually produces a very confusing partial-state bug report.</p>
+
 <div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
+  <strong>Keep the scope as narrow as possible, and never span a scope across an external call</strong>
+  <p>A TransactionScope open around an outbound HTTP call, a call to an external tax engine, a payment gateway, a webhook, holds a database transaction and its locks open for however long that external call takes, which under any real network latency or an unresponsive external service turns a fast operation into a lock-holding liability for every other user touching the same rows. Do the external call first, keep only the database persistence inside the scope, and treat "the scope now spans a network call" as a design smell worth stopping and reconsidering, not a detail to fix later.</p>
 </div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>The performance of transactionscope in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>Production transactionscope looks different from development transactionscope. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring transactionscope first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with transactionscope when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="isolation-level">Isolation level defaults matter more than people check</h2>
+<p><code>PXTransactionScope</code>'s default isolation level is tuned to work correctly with how Acumatica's own data layer expects to read and lock rows; overriding it to something looser or stricter without understanding why the default was chosen is how deadlocks and phantom-read bugs get introduced by well-meaning developers trying to "fix" an unrelated performance complaint. If a specific operation genuinely needs a different isolation level, that decision deserves a code comment explaining why, because the next developer reading it will otherwise assume it was an accident.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica transactionscope — usage and pitfalls. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Most Acumatica customizations never need an explicit TransactionScope at all, because PXGraph's own Persist already provides atomicity across every cache in that graph. Reach for <code>PX.Data.PXTransactionScope</code>, not the raw framework type, only when coordinating commits across genuinely separate graph instances, keep the scope as narrow as possible, never let it span an external network call, and remember that a Persist call inside an active outer scope has not actually committed until that outer scope completes. The deadlocks and partial-state bugs I have debugged in this area have, without exception, come from ignoring one of those rules.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-dac-extension-on-view-not-table/">DAC Extension on a View, Not a Table in Acumatica</a></li>
-      <li><a href="/blog/acumatica-pxdatabase-insert-vs-cache-insert/">PXDatabase.Insert vs Cache.Insert in Acumatica</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-saga-pattern-transactions/">Acumatica Saga Pattern for Transactions</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-recurring-transactions-templates/">Acumatica Recurring Transactions and Templates</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

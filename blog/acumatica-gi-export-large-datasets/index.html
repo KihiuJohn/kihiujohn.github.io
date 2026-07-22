@@ -93,107 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Export to Excel" on a GI is deceptively simple until someone runs it against a 300,000-row transaction history GI and either the browser hangs, the export times out server-side, or the resulting file is too large for the recipient to actually open. Large-dataset export is a genuinely different problem from interactive on-screen paging, and the GI's default behavior is tuned for the latter.</p>
+
+<h2 id="how-export-differs-from-on-screen-paging">Grid paging protects the server; export bypasses it</h2>
+<p>The results grid pages server-side — scrolling through a GI with a million matching rows only ever fetches the visible page. Export to Excel does not respect that same windowing; it is designed to pull the full filtered result set (or a large chunk of it) in one pass so the exported file is complete. That means an unfiltered or loosely filtered GI that feels perfectly responsive on screen can be genuinely dangerous to export — the query that took 200ms to return one page takes minutes to return everything, and ties up an app server thread for the duration.</p>
+
+<div class="callout-warn callout">
+  <strong>Cap the exportable range with a required parameter</strong>
+  <p>The most effective single mitigation is making a bounding parameter (date range, status) required with no "show all" default, so there is no unfiltered worst case to export in the first place. A parameter that defaults to a sensible range is good; a parameter that is actually mandatory, with the GI refusing to run until it is set, is better for any GI over a large history table that gets exported regularly.</p>
+</div>
+
+<h2 id="scheduled-export-instead-of-interactive">Move large exports to a schedule</h2>
+<p>For genuinely large, regularly-needed extracts — a full year's transaction detail for an auditor, say — interactive export is the wrong tool regardless of tuning. Automation Schedules can run a GI (or a processing screen wrapping one) off-hours and drop the result as a file to an FTP location, email attachment, or shared folder. This removes the concurrency and timeout risk entirely because it runs once, at 2 a.m., competing with nothing:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ExportingLargeExt : PXGraphExtension<ExportingEntry>
-{
-    [PXOverride]
-    public virtual void Large(Exporting doc)
-    {
-        // Custom large logic for exporting large datasets
-        if (doc?.Large == null) return;
-        Base.Large(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">AUTOMATION SCHEDULE — CONCEPTUAL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Schedule:  Nightly 02:00
+Screen:    KG-ARHistoryExport (GI-backed export processing screen)
+Output:    Excel attachment via notification template
+Recipients: finance-team@client.com</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on exporting large datasets from acumatica gis, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-large-edge-cases-i-have-shipped">The large edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The exporting is not the question; the failure mode of the large is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for exporting
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-exporting-changes">Migration path when exporting changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="how-to-debug-large-in-production">How to debug large in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-exporting-that-works">The version of exporting that works</h2>
-<p>The performance of large in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-exporting-large-datasets-from-acumatica-gis-matters-in-production">Why Exporting Large Datasets from Acumatica GIs matters in production</h2>
-<p>Production large looks different from development large. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ExportingLargeExt : PXGraphExtension<ExportingEntry>
-{
-    [PXOverride]
-    public virtual void Large(Exporting doc)
-    {
-        // Custom large logic for exporting large datasets
-        if (doc?.Large == null) return;
-        Base.Large(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring large first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add exporting on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with large when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="chunking-very-large-pulls">When the destination is another system, chunk it</h2>
+<p>If the "export" is really machine-to-machine — feeding a data warehouse or another application — do not use the Excel export path at all; use the OData feed with explicit pagination (covered in depth in the data-warehouse-feed pattern) and pull in bounded pages from the client side. This gives you resumability: if page 40 of 200 fails, you retry page 40, not the whole 300,000-row pull from scratch. A giant single Excel export has no such recovery point — if it fails at 90%, you start over.</p>
+
+<h2 id="row-and-column-discipline">Trim columns before you trim rows</h2>
+<p>People instinctively reach for date-range filters to shrink an export, but wide GIs with unnecessary joined columns cost real time and memory even at the same row count — every additional joined table is a wider row multiplied across however many rows match. Before tuning filters, check whether the export GI actually needs every column it selects; a GI built for on-screen browsing and then repurposed for bulk export often carries lookup columns (descriptions, names) that could be resolved once in the destination system instead of denormalized into every exported row.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on exporting large datasets from acumatica gis. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Export bypasses the paging that makes interactive GI use safe, so treat large exports as a distinct design problem: make bounding parameters mandatory rather than optional, move genuinely large or regular extracts to a schedule instead of interactive export, and use paginated OData pulls rather than one-shot Excel export for machine-to-machine transfers where resumability matters.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage — Locking and Caching</a></li>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Diagnosing a Slow GI</a></li>
-      <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
+      <li><a href="/blog/acumatica-gi-concurrent-usage/">Acumatica GI Concurrent Usage</a></li>
+      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
+      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Acumatica REST API — Bulk Data Load</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

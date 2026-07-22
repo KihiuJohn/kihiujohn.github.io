@@ -93,107 +93,66 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-acumatica-report-designer-vs-birt-when-to-use-each-matters-in-production">Why Acumatica Report Designer vs BIRT — When to Use Each matters in production</h2>
-<p>Why Acumatica Report Designer vs BIRT — When to Use Each matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
+    <p>Every few months a client asks me whether they should build their document layouts in the Acumatica Report Designer or in BIRT, usually because a developer on their team knows BIRT from a previous ERP (it ships as the default reporting tool with several systems). The honest answer is that inside Acumatica this is rarely a close call — but the reasoning is worth writing down, because the same reasoning applies to any external reporting engine you might bolt on.</p>
+
+<h2 id="what-each-tool-is">What each tool actually is</h2>
+<p>The <strong>Acumatica Report Designer</strong> is a Windows desktop application that produces <code>.rpx</code> files. An <code>.rpx</code> is an XML definition — schema, relations, parameters, layout sections — that the Acumatica server renders natively. Reports deploy inside customization projects, appear in the sitemap, respect access rights, print from processing screens, attach to email templates, and can be invoked from graph code via <code>PXReportRequiredException</code>.</p>
+<p><strong>BIRT</strong> (Business Intelligence and Reporting Tools) is an Eclipse-based open-source engine. It knows nothing about Acumatica. To use it you point BIRT at a data source — for Acumatica that realistically means the OData feed over a Generic Inquiry, the contract-based REST API, or (against all advice for SaaS instances) a database connection you do not have. BIRT then renders and distributes reports entirely outside the ERP.</p>
+<p>That asymmetry drives everything: one is a first-class citizen of the platform, the other is an external consumer of its APIs.</p>
+
+<h2 id="when-report-designer-wins">Where the embedded Report Designer wins</h2>
+<ul>
+<li><strong>Transactional documents.</strong> Invoices, sales orders, purchase orders, statements, picking lists. These need to print from the document screen, respect the current company's branding per branch, attach to the email activity, and version with your customization project. BIRT can technically produce an invoice PDF, but wiring it to the "Print Invoice" action means custom code calling an external service — pure liability.</li>
+<li><strong>Security for free.</strong> An <code>.rpx</code> report runs under the requesting user's session: branch security, restriction groups, and row-level security all apply. A BIRT report runs under whatever integration credential you gave it, which is usually broader than any single user.</li>
+<li><strong>Multi-tenant and localisation.</strong> Report Designer picks up the tenant's base currency, number formats, and can be localised with Acumatica's translation dictionaries. You rebuild all of that by hand externally.</li>
+<li><strong>Deployment.</strong> Reports travel in the customization package with everything else. Your CI/CD pipeline for Acumatica already handles them.</li>
+</ul>
+
+<h2 id="when-birt-wins">Where BIRT (or any external engine) has a case</h2>
+<p>I will grant BIRT three legitimate scenarios:</p>
+<ol>
+<li><strong>Cross-system reports.</strong> If the report joins Acumatica data with a warehouse-management system and an e-commerce database, the ERP's designer cannot help you — its data source is Acumatica DACs, full stop. An external engine querying multiple sources is the right architecture. (Though in 2026 I would reach for Power BI or a small Laravel reporting service before BIRT.)</li>
+<li><strong>Existing BIRT estate.</strong> A team migrating from an ERP with fifty polished BIRT layouts and deep BIRT skills can defensibly keep the engine and repoint data sources at Acumatica OData feeds during transition. Budget for rework anyway — the data shapes never match.</li>
+<li><strong>Very heavy scheduled output.</strong> Rendering thousands of large PDFs on a schedule competes with interactive users for app-server resources. Offloading bulk rendering to an external engine reading from a replica or OData keeps the ERP responsive. Acumatica's own scheduler handles moderate volume fine; this matters at the extreme end.</li>
+</ol>
+
+<div class="callout-warn callout">
+  <strong>Do not query the database directly</strong>
+  <p>On SaaS you cannot, and on private cloud you should not point BIRT at the Acumatica database. The schema is an implementation detail: <code>CompanyID</code> discrimination, <code>DeletedDatabaseRecord</code> flags, and denormalised balance tables will produce confidently wrong numbers, and upgrades will break your queries without notice. Go through a GI + OData so the platform applies tenancy and soft-delete filtering for you.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica report designer vs birt — when to use each, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the report is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of report in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production report looks different from development report. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report designer
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
-</div>
+
+<h2 id="decision-table">The decision in one table</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring report first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with report when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+<tr><th>Requirement</th><th>Report Designer</th><th>BIRT / external</th></tr>
+<tr><td>Invoice / PO / document print</td><td>Yes — always</td><td>No</td></tr>
+<tr><td>Runs from a screen action or workflow</td><td>Yes</td><td>Only with custom glue code</td></tr>
+<tr><td>User-context security required</td><td>Built in</td><td>Rebuild it yourself</td></tr>
+<tr><td>Joins non-Acumatica data</td><td>No</td><td>Yes — its actual strength</td></tr>
+<tr><td>Pixel-heavy analytical packs</td><td>Workable but tedious</td><td>Comfortable</td></tr>
+<tr><td>Team already owns the tool</td><td>Learnable in days</td><td>Legitimate transitional reason</td></tr>
 </table>
+
+<h2 id="practical-advice">Practical advice if you keep both</h2>
+<p>Some clients end up with both engines, and that is fine if you draw the line clearly: <em>documents and anything security-sensitive live in Report Designer; cross-system analytics live outside.</em> Publish the external reports' data through named Generic Inquiries with <em>Expose via OData</em>, one GI per report, so you can see exactly what each external report consumes and can version those GIs deliberately. Give the external engine its own API user with rights scoped to those GIs and nothing else.</p>
+<p>And resist the temptation to route around Report Designer because the desktop tool feels dated. It is dated — it is also the only tool that renders inside the security and deployment model you already paid for. I have replaced more than one BIRT-based invoice pipeline with a plain <code>.rpx</code> and deleted a Windows service, a cron job, and two credentials in the process. Less moving machinery, fewer 3 a.m. calls.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica report designer vs birt — when to use each. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Use the embedded Report Designer for everything that lives inside Acumatica's workflow — which is nearly everything a typical implementation needs. Reach for BIRT or another external engine only when the report genuinely spans systems or the rendering load genuinely needs to leave the app tier. When you do go external, consume GIs over OData, never the raw database.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-formula-evaluation-context/">Acumatica Formula Evaluation Context</a></li>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
-      <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-report-designer-the-definitive-guide/">Acumatica Report Designer — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-report-ssrs-vs-embedded/">Acumatica Report — SSRS vs Embedded Designer</a></li>
+      <li><a href="/blog/acumatica-report-designer-guide/">Acumatica Report Designer Guide</a></li>
+      <li><a href="/blog/acumatica-subreports-hierarchical-data/">Acumatica Subreports for Hierarchical Data</a></li>
+      <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector Setup</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

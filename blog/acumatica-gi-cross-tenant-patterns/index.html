@@ -93,107 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Can we get one GI that shows data across all our tenants" is a request I get from multi-entity clients running separate tenants for separate legal entities or regional subsidiaries, and the honest first answer is: not the way you are picturing it, because a GI runs inside one tenant's context, using that tenant's login session and its <code>CompanyID</code>/tenant scoping. There is no native "query across tenants" mode in the GI Designer.</p>
+
+<h2 id="why-tenants-are-a-hard-boundary">Why tenant isolation is not just row-level security</h2>
+<p>Branches and companies within a single tenant share a database and are separated by <code>CompanyID</code> discrimination that the platform applies transparently — a GI author mostly does not think about it, and cross-branch/cross-company GIs (with appropriate access rights) are entirely normal. A tenant is a different, harder boundary: multi-tenant Acumatica deployments partition data more strictly, and depending on your deployment (single database with tenant discrimination versus fully separate databases per tenant on some private-cloud setups), a session authenticated against Tenant A simply has no query path to Tenant B's data at all. A GI cannot join across that boundary because BQL never gets a connection to the other tenant's data in the first place.</p>
+
+<div class="callout-warn callout">
+  <strong>Confirm your deployment topology before promising anything</strong>
+  <p>"Multi-tenant" in Acumatica has two very different meanings depending on setup: logical tenants within one Acumatica instance and database, versus entirely separate instances (sometimes separate installs) that happen to be branded consistently. The second case is not a GI problem at all — it is an integration problem, full stop. Confirm which one you are dealing with before scoping any of this as GI work.</p>
+</div>
+
+<h2 id="patterns-that-actually-work">What actually works: consolidate outside the GI layer</h2>
+<p>For logical same-instance tenants, the realistic patterns are:</p>
+<ul>
+<li><strong>Per-tenant scheduled export, external consolidation.</strong> Schedule the same GI (or its OData feed) to run in each tenant context, land results in a shared external database or data warehouse table tagged with a tenant identifier column you add yourself, and build the cross-tenant view there — Power BI, a small reporting database, whatever the client already has. This is the pattern I use in nearly every case; it is boring and it works because it does not fight the platform's isolation.</li>
+<li><strong>REST/OData pull from an external orchestrator.</strong> Instead of scheduling exports, have an external job (a small script, an integration platform) call each tenant's OData-exposed GI endpoint with tenant-specific credentials and merge results in memory or in a staging table. Functionally similar to the export pattern but pull-based and easier to run on demand.</li>
+<li><strong>A dedicated consolidation tenant fed by integration, not by GI.</strong> For clients who genuinely need near-real-time group-level reporting, I have set up a lightweight "group" tenant that receives summarized transactions via Business Events/webhooks or a scheduled sync from each operating tenant, and then build normal, single-tenant GIs against that consolidated data. This is real integration work, not a GI trick, and I scope it accordingly.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCrossExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Cross(Acumatica doc)
-    {
-        // Custom cross logic for acumatica cross tenant
-        if (doc?.Cross == null) return;
-        Base.Cross(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ODATA PULL PER TENANT — CONCEPTUAL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>for tenant in [KE-Co, UG-Co, TZ-Co]:
+    GET https://instance.acumatica.com/odata/{tenant}/KG-SalesSummary
+        Authorization: Basic {tenant-scoped credentials}
+    append rows, tag with TenantCode = tenant
+-- merged result lands in a staging table or Power BI dataset,
+-- not in any single Acumatica GI</code></pre>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>In the work I have done on acumatica gi cross-tenant patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the cross is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The performance of cross in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Production cross looks different from development cross. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCrossExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Cross(Acumatica doc)
-    {
-        // Custom cross logic for acumatica cross tenant
-        if (doc?.Cross == null) return;
-        Base.Cross(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cross first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cross when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="setting-expectations">Setting expectations early</h2>
+<p>The number one way this goes wrong on a project is scoping "a cross-tenant dashboard" as if it were a GI task and then discovering three weeks in that it needs an integration component and an external database. I now always ask the tenant-topology question in the first conversation, before any GI design starts, specifically because the answer determines whether this is a half-day GI task or a multi-week integration project.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi cross-tenant patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A single GI cannot natively query across Acumatica tenants — that boundary is enforced below the BQL layer. Real cross-tenant reporting means exporting or pulling from each tenant separately and consolidating externally, or feeding a dedicated consolidation tenant via integration. Confirm your actual tenant topology before scoping this as GI work; it rarely is, on its own.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
-      <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters — Dependent Filters</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
+      <li><a href="/blog/acumatica-gi-row-level-security-patterns/">Acumatica GI Row-Level Security — Patterns That Work</a></li>
+      <li><a href="/blog/acumatica-branch-vs-company-vs-tenant/">Acumatica Branch vs Company vs Tenant</a></li>
+      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
+      <li><a href="/blog/acumatica-gi-audit-trail/">Acumatica GI Audit Trail</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

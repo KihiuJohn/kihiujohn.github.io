@@ -93,100 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The SaaS playbook in 2026 has stabilised. this is one of the metrics that the playbook tracks. The benchmark is the median for your stage; the goal is to be above the benchmark. This article is the benchmark, the goal, and how to improve.</p>
-<h2 id="when-acumatica-is-a-leading-indicator-vs-a-lagging-one">When acumatica is a leading indicator vs a lagging one</h2>
-<p>When acumatica is a leading indicator vs a lagging one is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A GI that runs fine for one user in testing and then times out or drags the whole app tier down once fifty people open it during month-end close is not a rare story — it is close to the default outcome for anything built without thinking about concurrency. Generic Inquiries do not have their own connection pool or caching layer; they run as ordinary queries against the shared application database, competing with every posting, every screen load, and every other GI in flight.</p>
+
+<h2 id="what-actually-contends">What actually contends under load</h2>
+<p>Three resources get shared across concurrent GI executions, and each fails differently:</p>
+<ul>
+<li><strong>Database connections / worker threads.</strong> Acumatica's app pool has a bounded connection pool. A GI with a genuinely slow query (missing filter pushed to SQL, a fan-out join) holds a connection for the duration. Enough concurrent slow GIs and the pool exhausts, and unrelated screens start queueing behind it — the symptom users report is "the whole system is slow", not "this one report is slow".</li>
+<li><strong>Locks on hot tables.</strong> A GI reading uncommitted-adjacent data during a heavy posting batch (period close, mass AR runs) can be blocked by locks the posting graphs hold, or — worse on some isolation configurations — can itself hold read locks that make posting wait. This is the scenario I have seen cause real month-end pain: a "live" dashboard GI querying <code>GLTran</code> while a GL batch release is in progress.</li>
+<li><strong>App-tier CPU/memory for rendering</strong> a large result grid to many browsers simultaneously, particularly for GIs with computed/formula columns evaluated per row.</li>
+</ul>
+
+<h2 id="mitigations-that-work">Mitigations, roughly in order of effort</h2>
+<p>The cheapest fix is almost always pushing filters into the schema so the database does less work per execution — covered in depth elsewhere, but it matters double under concurrency because it shrinks both the query time and the lock footprint. Beyond that:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">GI CONDITIONS — BOUND THE WORST CASE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GLTran.TranDate  Greater or Equal  =[@FromDate]  (default: first day of current period)
+GLTran.TranDate  Less or Equal     =[@ToDate]    (default: today)</code></pre>
 </div>
-<h2 id="what-acumatica-gi-concurrent-usage-locking-and-caching-actually-measures">What Acumatica GI Concurrent Usage — Locking and Caching actually measures</h2>
-<p>In the work I have done on acumatica gi concurrent usage — locking and caching, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<p>A default date range that bounds an unfiltered request matters more for concurrency than for any single user's experience — it caps how expensive the worst-case simultaneous execution can be, even if most users would have typed a narrower range anyway.</p>
+
+<div class="callout-warn callout">
+  <strong>Read committed is not free of contention</strong>
+  <p>Acumatica's default isolation generally avoids GI reads blocking on row locks the way old-school "read committed with locking" would, but heavy concurrent reads against tables under active write load still compete for the same buffer pool and I/O, and reporting-style full or large partial scans against <code>GLTran</code>/<code>ARTran</code> during a batch release are a realistic way to slow the release down. If a GI needs to run heavily during close, test it during a close rehearsal, not in isolation.</p>
 </div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the concurrent is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, concurrent, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>The performance of concurrent in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>Production concurrent looks different from development concurrent. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring concurrent first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with concurrent when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>For genuinely popular dashboard-facing GIs, the real answer is often to stop querying live transactional tables at all — materialize a summary table via a scheduled processing screen or a snapshot job, and point the high-concurrency GI at that instead. This trades some staleness for taking the concurrency problem off the transactional tables entirely; see the realtime-vs-snapshot tradeoff for when that is worth it.</p>
+
+<h2 id="scheduling-and-off-hours">Move the expensive, infrequent case off-hours</h2>
+<p>Not every concurrency problem needs architecture. A GI that fifty people query interactively but that only needs to be current as of last night can be scheduled to export to a file or email at 6 a.m. via Automation Schedules, taking it out of the interactive concurrency picture entirely. I use this constantly for "give everyone a daily snapshot" style requirements — it is boring, and it works.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi concurrent usage — locking and caching. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Concurrent GI usage fails through shared database resources, not through anything specific to the GI engine itself: connection pool exhaustion, lock contention with posting processes, and app-tier rendering load. Bound the worst case with default filters, avoid querying hot transactional tables from high-traffic dashboards, and move genuinely expensive, staleness-tolerant reports to a schedule rather than fighting for concurrency headroom during month-end.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-export-large-datasets/">Exporting Large Datasets from Acumatica GIs</a></li>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
-      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Diagnosing a Slow GI</a></li>
-      <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI Realtime vs Snapshot</a></li>
+      <li><a href="/blog/acumatica-gi-export-large-datasets/">Acumatica GI — Exporting Large Datasets</a></li>
+      <li><a href="/blog/acumatica-gi-dashboard-best-practices/">Acumatica GI Dashboard Best Practices</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

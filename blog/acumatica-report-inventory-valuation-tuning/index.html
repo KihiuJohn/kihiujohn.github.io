@@ -93,107 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Acumatica implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Inventory valuation reports have a bottleneck that's specific to how Acumatica actually tracks cost: under FIFO or specific-lot costing, an item's value isn't one number, it's the sum of however many open cost layers exist for it (<code>INTran</code> cost layer records for each receipt not yet fully consumed). An item with a thousand small receipts over a decade of history and slow-moving stock can carry a genuinely long layer chain, and a valuation report that walks layers per item, per warehouse, at render time is going to feel that.</p>
+
+<h2 id="layer-count-is-the-real-driver">The real cost driver is layer count, not item count or transaction volume</h2>
+<p>People tune inventory valuation reports by looking at total transaction volume and conclude the report needs a faster index on <code>INTran</code>. The actual driver is how many <em>unconsumed</em> cost layers each item is carrying at valuation time. Under average costing this is a non-issue — value is item quantity times a single rolling average cost, one row per item per warehouse, cheap to sum. Under FIFO or lot/serial-specific costing, a slow-moving item can accumulate dozens of open layers, each with its own remaining quantity and unit cost, and the report has to sum across all of them. Before tuning anything, find out which costing method the report's slowest items actually use — the fix is completely different depending on the answer.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory valuation
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SCHEMA — VALUATION SUMMED FROM COST LAYERS, FILTERED TO OPEN QTY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Base:   INTran (cost layer detail) WHERE QtyOnHand &lt;&gt; 0  -- exclude fully consumed layers
+Group:  by InventoryID, SiteID
+Sum:    Value = SUM(QtyOnHand * UnitCost)</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on acumatica inventory valuation report — tuning guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+<p>That <code>QtyOnHand &lt;&gt; 0</code> filter is the single highest-leverage change on any FIFO valuation report — without it, the schema fetches every receipt line the item ever had, fully consumed or not, and sums a value that should be zero for the consumed ones instead of never fetching them.</p>
+
+<h2 id="snapshot-vs-live">As-of-date valuation needs the snapshot tables, not a live recompute</h2>
+<p>Acumatica maintains inventory valuation snapshots specifically because computing "what was inventory worth on the last day of the prior fiscal year" from live cost layers, walking backward through every receipt and issue since, is expensive and gets more expensive the further back you go. If a report needs valuation as of a historical date, point it at the snapshot mechanism (run via the Inventory Valuation Snapshot process, INxxxxxx screens) rather than reconstructing history from transaction detail in the report schema. Building your own historical reconstruction in a report is redoing work Acumatica already has a purpose-built process for.</p>
+<div class="callout-warn callout">
+  <strong>Negative on-hand quantities break layer-sum valuation silently</strong>
+  <p>If the instance allows negative inventory (oversells before a receipt posts) even temporarily, a naive sum-the-open-layers valuation can produce a wrong or negative value for that item until the receipt catches up and the system reconciles the layers. If negative inventory is allowed anywhere in the instance, the report needs to either exclude negative-on-hand items with a flagged caveat or explicitly document that those rows are estimates, rather than silently including a nonsensical negative valuation in the grand total.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the inventory is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of inventory in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-inventory-edge-cases-i-have-shipped">The inventory edge cases I have shipped</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory valuation
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica inventory valuation report — tuning guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Diagnose by costing method before touching anything — average cost valuation is cheap by nature, FIFO/lot-specific valuation cost scales with open layer count, which is the number to actually look at. Filter to non-zero remaining quantity in the schema, use the built-in valuation snapshot for any as-of-date requirement instead of reconstructing history yourself, and handle negative on-hand items as a deliberate exception rather than letting them silently distort the total.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
-      <li><a href="/blog/acumatica-gi-server-side-filtering/">Acumatica GI Server-Side Filtering — Best Practices</a></li>
       <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
-      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
-      <li><a href="/blog/acumatica-report-aged-payables-tuning/">Acumatica Aged Payables Report — Tuning Guide</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-report-bom-cost-rollup/">Acumatica BOM Cost Rollup Report</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

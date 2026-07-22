@@ -93,78 +93,40 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real vertical SaaS projects, this is rarely the question. The question is the multi-tenant data isolation, the feature flags, the channel partner program. This article is the implementation.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>AP invoice automation is the workflow where an AI agent's ROI is easiest to prove and easiest to get wrong: the volume is high, the format variance is real, and the cost of a wrong number reaching a payment run is unacceptable. The architecture that works treats the LLM as an extraction and classification layer, never as the thing that decides what gets paid.</p>
+<h2 id="the-pipeline-extract-match-flag">The pipeline: extract, match, flag</h2>
+<p>A working AP automation agent has three stages. First, extraction: a vision-capable model (or a dedicated OCR service) pulls vendor name, invoice number, line items, and totals from a scanned or emailed PDF into structured JSON. Second, matching: deterministic code — not the LLM — looks up the vendor in Acumatica, checks for an existing PO via the REST API, and attempts a three-way match against the PO and receipt. Third, flagging: anything that doesn't match cleanly (price variance, missing PO, duplicate invoice number) gets routed to a human queue instead of auto-posted.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AgentExt : PXCacheExtension<Invoice>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · EXTRACTION CALL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from anthropic import Anthropic
+
+client = Anthropic()
+resp = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=1024,
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
+            {"type": "text", "text": "Extract vendor name, invoice number, invoice date, "
+                                      "line items, and total as JSON. If a field is unclear, "
+                                      "return null rather than guessing."}
+        ]
+    }]
+)</code></pre>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on ai agent for ap invoice automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+<h2 id="why-extraction-should-never-decide-payment">Why extraction should never decide payment</h2>
+<p>The extraction step's output is a proposal, not a fact. Once the JSON comes back, deterministic validation code checks the total against the sum of line items, checks the vendor exists in Acumatica's vendor master, and checks the invoice number hasn't already been posted — all things a regex and a database lookup do reliably and an LLM does not. Only after those checks pass does the bill get created as a draft in Acumatica via the AP Bill entity, still unreleased, still requiring a human to approve.</p>
+<div class="callout-warn">
+  <strong>Never let the model autofill a GL account or amount it wasn't given</strong>
+  <p>If the extracted invoice is missing a field, the correct behavior is to flag it for human review, not have the model infer a plausible value from the vendor's historical pattern. An LLM asked to "fill in a reasonable amount" will do so confidently and wrongly often enough to matter when the number represents real money leaving the business.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the invoice is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'agent'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-agent-on-a-horizontal-platform-beats-from-scratch">Why agent on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="channel-partner-programs-for-invoice">Channel partner programs for invoice</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM agent
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-agent">Marketplace listing for agent</h2>
-<p>The performance of invoice in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-invoice">SOC 2 and ISO 27001 for invoice</h2>
-<p>Production invoice looks different from development invoice. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AgentExt : PXCacheExtension<Invoice>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring invoice first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with invoice when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="the-three-way-match-in-acumatica-terms">The three-way match in Acumatica terms</h2>
+<p>Acumatica's AP module already models the PO, the receipt, and the bill as linked entities — the automation's job is to fetch all three via the REST API for a given PO number, compare quantities and unit prices programmatically, and only auto-approve the bill if the variance is within a configured tolerance (commonly a few percent, tuned per client). Anything outside tolerance routes to an approver with the discrepancy highlighted, not buried in a wall of extracted text.</p>
+<h2 id="measuring-whether-its-working">Measuring whether it's working</h2>
+<p>Track straight-through-processing rate (invoices that reach a posted bill with zero human touches) separately from extraction accuracy. A model can have excellent field-level accuracy and still have a low straight-through rate if your matching tolerances are too strict — and a high straight-through rate with sloppy accuracy is worse than no automation, because errors compound silently.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for ap invoice automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The AI part of AP automation is genuinely useful for turning unstructured PDFs into structured data. Everything downstream of that — matching, tolerance checks, approval routing — should be the same boring deterministic logic you'd write without an LLM in the picture at all. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +137,6 @@ public class AgentExt : PXCacheExtension<Invoice>
       <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

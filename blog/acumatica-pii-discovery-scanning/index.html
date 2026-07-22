@@ -93,81 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real data teams, this is rarely the question. The question is the failure mode: what happens when the upstream schema changes, when the downstream consumer breaks, when the data quality test fails. This article is the patterns.</p>
-<h2 id="the-testing-pyramid-for-pii">The testing pyramid for pii</h2>
-<p>The testing pyramid for pii is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="backfills-and-rollbacks-for-acumatica">Backfills and rollbacks for acumatica</h2>
-<p>In the work I have done on acumatica pii discovery and scanning, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Before you can encrypt, mask, or honor a deletion request for personal data in Acumatica, you first have to know where it lives — and in most instances that map does not exist. PII accumulates in predictable places (Contacts, Employees, CRM records) and in unpredictable ones (a custom <code>UsrNationalID</code> field bolted onto a DAC three customizations ago, a scanned passport sitting in a Case attachment). Discovery is the unglamorous first step every data protection program skips, and it is the one that determines whether a subject access request takes an afternoon or a month.</p>
+<h2 id="where-pii-actually-lives-in-acumatica">Where PII actually lives in Acumatica</h2>
+<p>Structured PII is concentrated in a small set of DACs: <code>Contact</code> and <code>BAccount</code> hold names, emails, and phone numbers for customers and vendors; <code>EPEmployee</code> and the HR module hold national ID numbers, bank account details, and salary history; CRM Leads and Opportunities duplicate a lot of the same contact data outside the core AR/AP tables. Each of these is easy to inventory because the schema is known and stable.</p>
+<p>The harder problem is unstructured PII: free-text Notes on any record, Activities logged against a Case, and file attachments — scanned IDs, signed contracts, email threads pasted into a support ticket. None of it is indexed as personal data by Acumatica itself, so a column-based inventory will miss all of it.</p>
+<h2 id="the-usr-field-blind-spot">The Usr field blind spot</h2>
+<p>The single most common gap I find on real instances is a custom field added years ago by a customization that nobody documented as sensitive. A field like <code>UsrPassportNo</code>, <code>UsrKraPin</code>, or <code>UsrNextOfKinPhone</code> gets added to a DAC extension to solve an immediate business need, ships, and is never revisited. Nobody adds it to a data classification list because there wasn't one at the time.</p>
+<p>This is why discovery has to run against the live schema, not against tribal knowledge of "what the system does." Every developer who has inherited an Acumatica instance with five years of customizations behind it has found at least one field like this.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Schema drift breaks your inventory silently</strong>
+  <p>A PII inventory built once and never refreshed goes stale the moment the next customization adds a field. Wire a scheduled job or Business Event that flags newly added custom fields matching PII-like name patterns, so the inventory tracks the schema instead of a point-in-time snapshot.</p>
 </div>
-<h2 id="what-acumatica-pii-discovery-and-scanning-is-for">What Acumatica PII Discovery and Scanning is for</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the pii is.</p>
+<h2 id="a-discovery-pass-with-a-generic-inquiry">A discovery pass with a Generic Inquiry</h2>
+<p>You don't need a third-party DLP tool to get a first-pass inventory. A read-only Generic Inquiry (or direct SQL against a reporting replica, with sign-off from whoever hosts the database) against the system catalog will surface every column whose name looks like PII, structured or custom:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.acumatica > 0).groupBy("pii").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · SCHEMA DISCOVERY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Run against a read-only replica, not production
+SELECT
+  t.TABLE_NAME,
+  c.COLUMN_NAME,
+  c.DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS c
+JOIN INFORMATION_SCHEMA.TABLES t
+  ON t.TABLE_NAME = c.TABLE_NAME
+WHERE c.COLUMN_NAME LIKE '%Email%'
+   OR c.COLUMN_NAME LIKE '%Phone%'
+   OR c.COLUMN_NAME LIKE '%NationalID%'
+   OR c.COLUMN_NAME LIKE '%Passport%'
+   OR c.COLUMN_NAME LIKE '%KraPin%'
+   OR c.COLUMN_NAME LIKE '%SSN%'
+   OR c.COLUMN_NAME LIKE 'Usr%'   -- catches undocumented custom fields
+ORDER BY t.TABLE_NAME, c.COLUMN_NAME;</code></pre>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_acumatica') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The performance of pii in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>Production pii looks different from development pii. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<p>Every row that comes back under the <code>Usr%</code> filter needs a human to look at it and decide: is this PII, and if so, does it need masking or encryption. That triage step is manual by necessity — name matching gets you the candidate list, not the verdict.</p>
+<h2 id="scanning-unstructured-content">Scanning unstructured content</h2>
+<p>Notes, Activities, and attachments require content scanning rather than schema scanning, because the PII is embedded in free text or in files rather than in a typed column. There's no built-in scanner for this in Acumatica, so it typically means exporting Case Activities and attachment text (via OCR if they're scanned images or PDFs) and running them through regex patterns tuned for the identifiers your customer base actually uses: email regex, phone number patterns for the markets you operate in, and national ID formats — Kenya's national ID and KRA PIN format, for example, are structured enough to match reliably, as are most East African formats.</p>
+<p>This pass is noisier than the schema scan and produces false positives, but it's the only way to catch PII that support agents pasted into a ticket rather than entered into a proper field.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pii first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pii when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Screen / DAC</th><th>Typical PII</th></tr>
+  <tr><td>Contacts (Contact / BAccount)</td><td>Name, email, phone, physical address</td></tr>
+  <tr><td>Customers / Vendors</td><td>Contact details, tax IDs, banking details</td></tr>
+  <tr><td>Employees (HR module)</td><td>National ID, bank account, salary, next of kin</td></tr>
+  <tr><td>CRM Leads / Opportunities</td><td>Name, email, phone, duplicated contact data</td></tr>
+  <tr><td>Case Activities &amp; attachments</td><td>Free-text notes, scanned IDs, emails, contracts</td></tr>
+  <tr><td>Custom Usr* fields</td><td>Whatever the customization author put there — often undocumented</td></tr>
 </table>
+<h2 id="why-this-matters-for-compliance">Why this matters for compliance</h2>
+<p>Kenya's Data Protection Act (enforced by the ODPC), Nigeria's NDPA, and Rwanda's data protection law all share the same precondition: you cannot honor a subject access or erasure request, and you cannot demonstrate compliance to a regulator, if you don't know where personal data is stored. Discovery isn't the compliance program — it's the prerequisite that makes the rest of the program possible. Once you have an accurate inventory, the natural next step is deciding which fields need field-level encryption or masking, and which can be handled with access restrictions alone.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica pii discovery and scanning. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +152,7 @@ LIMIT 100;</code></pre>
       <li><a href="/blog/sbom-software-bill-of-materials/">SBOM for Production Software</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -93,100 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have worked with enough SaaS founders to know the metrics that matter. this is one of them, but only if you measure it correctly. The common misinterpretations are the ones that get the team off-track. This article is the correct measurements and the common traps.</p>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>Common misinterpretations is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Consulting firms are the textbook case Acumatica's Projects module was built for, and it shows in the fact that consultants, engineering firms, and marketing companies show up explicitly in Acumatica's own positioning of the Project Accounting module. The interesting part is not whether it fits — it does — but which of the several available billing patterns actually matches how a given firm sells work, because getting that wrong produces a system everyone routes around within a quarter.</p>
+
+<h2 id="three-billing-shapes">Three billing shapes, one module</h2>
+<p>Consulting firms usually sell some blend of three patterns, and Acumatica's Billing Rules (PM207000) can express all three, often on the same project:</p>
+<ul>
+<li><strong>Time and material</strong> — bill actual hours at resolved rates. The straightforward case; the only real decision is rate resolution order (employee override, then project-task rate, then a default labor-item rate).</li>
+<li><strong>Fixed-fee / milestone</strong> — bill a contracted amount on task completion or a defined percentage schedule. Configured as Progress billing steps against defined milestones on the Project Tasks screen (PM302000).</li>
+<li><strong>Retainer</strong> — bill a recurring amount, draw down against it with time, true-up any overage. This is the one that needs the most care: model it as a recurring billing schedule with a running balance check against consumed time, not as a plain recurring invoice, or nobody notices when a client blows through their retainer in week two of the month.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">PM207000 · RETAINER DRAWDOWN PATTERN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Contract line: Retainer — $8,000/month, recurring
+Billing step:  Time and Material, rate = 0 (already prepaid)
+Reporting:     GI comparing MTD time value (at standard rate)
+               against the $8,000 line — surfaces overage before
+               month-end, not after the invoice run</code></pre>
 </div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>In the work I have done on consulting firm management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>When the work moves from design to production, the questions change. The consulting is not the question; the failure mode of the firm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="budget-vs-actual">Budget vs actual is the whole value proposition</h2>
+<p>The reason a consulting firm outgrows QuickBooks-plus-spreadsheets and moves to Acumatica is almost always budget-to-actual visibility mid-engagement, not the invoicing itself. Set project budgets at the task level (PM302000) at kickoff, and the Project Status inquiry gives a live burn-rate view — hours consumed against budgeted hours, cost against budgeted cost — without anyone building a spreadsheet. The discipline this requires: someone has to actually enter a budget at project setup, which sounds obvious and is the step I see skipped under deadline pressure more than any other, at which point the "insight" the client bought the software for silently stops existing.</p>
+
+<h2 id="utilization">Utilization reporting for the bench</h2>
+<p>Firms with a bench of consultants care about utilization — billable hours over available hours, per consultant, per week. This is not a stock dashboard; it's a GI joining <code>PMTimeActivity</code> to employee calendar/availability data, exposed on a dashboard. Simple to build, worth building early, because it's usually the first report a managing partner asks for once the system is live and the honest answer without it is "we don't actually know."</p>
+
 <div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+  <strong>Multi-currency engagements need the base-currency check early</strong>
+  <p>A firm billing a US client in USD while paying a Nairobi-based consultant in KES needs the project's base currency and each contract line's currency confirmed before the first timesheet is entered, not after — reclassifying time entries across currencies after the fact is a manual cleanup, not a button. Set this in the Customer's currency and the Project's base currency at creation.</p>
 </div>
-<h2 id="why-consulting-is-the-first-thing-to-look-at">Why consulting is the first thing to look at</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, firm, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-firm-distorts-the-picture">How firm distorts the picture</h2>
-<p>The performance of firm in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>Production firm looks different from development firm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring firm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add consulting on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with firm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on consulting firm management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Consulting is close to the ideal Projects-module fit — the risk isn't whether Acumatica can do it, it's configuring the billing rules to match how the firm actually sells (T&M, fixed-fee, retainer, or blended) and insisting on budgets being entered at kickoff so the burn-rate reporting that justified the purchase actually exists.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-accounting-firm-acumatica/">Accounting Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-it-services-acumatica/">IT Services Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-legal-practice-acumatica/">Legal Practice Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-task-screen/">Acumatica Project Task Screen</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Report — Project Status</a></li>
+      <li><a href="/blog/vertical-saas-it-services-acumatica/">IT Services Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

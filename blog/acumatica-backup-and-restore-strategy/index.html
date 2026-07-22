@@ -93,93 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="what-acumatica-backup-and-restore-strategy-gives-you">What Acumatica Backup and Restore Strategy gives you</h2>
-<p>What Acumatica Backup and Restore Strategy gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>In the work I have done on acumatica backup and restore strategy, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the backup is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_backup" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>An Acumatica backup that has never been restored is a hypothesis, not a backup. A working recovery plan for an on-premises or private-cloud Acumatica instance has three moving parts that must be captured as a set: the SQL Server database, the site's file storage, and the IIS/application configuration. Miss any one and the restore fails at the worst possible time. This is the strategy I actually use, and the drill that proves it.</p>
+
+<h2 id="what-to-back-up">The three things that make up an instance</h2>
+<p>Acumatica SaaS handles this for you; if you self-host, you own it. A complete instance is: the <strong>application database</strong> in SQL Server (all business data, customizations published into it, and the file blobs if you store attachments in the database); the <strong>file storage</strong> if you configured file attachments to go to disk instead of the DB; and the <strong>web.config plus the site folder</strong>, which hold the connection string, the instance version, and any hand-edited settings. If you restore only the database onto a fresh site of a different build number, it will not start — the database schema is tied to the exact Acumatica build.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Match the build number</strong>
+  <p>The Acumatica build that created the backup must match the site you restore into. Record the exact version (visible in the login footer and in the ERP Configuration Manager) alongside every database backup. Restoring a 23R2 database onto a 24R1 site is the most common self-inflicted recovery failure.</p>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="database-backup">Backing up the database</h2>
+<p>The database is the core. Use SQL Server's native backup — a full backup on a schedule plus transaction-log backups if you run in the full recovery model and need point-in-time recovery. A nightly full is the floor; if losing a day of transactions is unacceptable, add log backups every 15–30 minutes.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · T-SQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Nightly full backup, compressed, with checksum verification
+BACKUP DATABASE [AcumaticaProd]
+TO DISK = N'D:\Backups\AcumaticaProd_full.bak'
+WITH COMPRESSION, CHECKSUM, INIT,
+     NAME = N'AcumaticaProd-Full';
+
+-- Log backup (only if database is in FULL recovery model)
+BACKUP LOG [AcumaticaProd]
+TO DISK = N'D:\Backups\AcumaticaProd_log.trn'
+WITH COMPRESSION, CHECKSUM;</code></pre>
 </div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The performance of backup in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production backup looks different from development backup. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<p><code>CHECKSUM</code> makes SQL Server verify page integrity as it writes, so a corrupt backup fails loudly instead of silently. Ship the <code>.bak</code> files off the database server — to a file share, then to object storage or a second site — because a backup that lives only on the machine you are trying to recover from is not disaster recovery.</p>
+
+<h2 id="rpo-rto">Setting RPO and RTO to real numbers</h2>
+<p>Two numbers drive every decision here. <strong>RPO</strong> (recovery point objective) is how much data you can afford to lose, measured in time — it sets your backup frequency. <strong>RTO</strong> (recovery time objective) is how long you can be down — it sets how much standby infrastructure you pay for. A distributor that can tolerate losing an hour of orders and being down for four hours needs hourly log backups and a documented restore runbook, not an expensive hot standby. Decide these with the business, not in IT, because they are business risk decisions with a cost attached.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring backup first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with backup when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Business tolerance</th><th>RPO / RTO</th><th>What it requires</th></tr>
+  <tr><td>Can lose a day, down overnight</td><td>24h / 8h</td><td>Nightly full, restore drill</td></tr>
+  <tr><td>Can lose an hour, down half a day</td><td>1h / 4h</td><td>Full + log backups, offsite copy</td></tr>
+  <tr><td>Near-zero loss, minutes down</td><td>~0 / &lt;1h</td><td>Always On availability group, warm site</td></tr>
 </table>
+
+<h2 id="file-storage">File attachments and configuration</h2>
+<p>If attachments are stored on disk (not in the database), that folder needs its own backup on the same schedule as the database, and the two must be restorable to a consistent point — an invoice row that references a PDF the file backup does not have is a broken record. Simplest is to keep attachments in the database so a single SQL backup captures everything; it costs database size but removes an entire class of "the file is missing" support tickets. Also snapshot the site folder and <code>web.config</code> after every customization publish, since that is when the moving parts change.</p>
+
+<h2 id="restore-drill">The restore drill that proves it works</h2>
+<p>Schedule a restore, do not just hope for one. Quarterly, restore the latest full backup onto a spare or throwaway server, bring up the Acumatica site against it, log in, and confirm the data is current and the customizations are present. Time the whole thing — that stopwatch number is your real RTO, and it is almost always longer than people guess. The drill catches the failures that matter: a mismatched build number, a missing file share, an expired service-account password, a connection string pointing at the old server.</p>
+<div class="callout callout-warn">
+  <strong>Untested backups fail silently for months</strong>
+  <p>The worst recovery stories are not "we had no backup" — they are "we had backups every night for a year and none of them restored" because the job had been writing zero-byte files since a disk filled up. Monitor backup job success, verify file size, and periodically run <code>RESTORE VERIFYONLY</code>. A green backup job is not proof; a completed restore is.</p>
+</div>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica backup and restore strategy. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A dependable Acumatica recovery plan is database plus files plus configuration, captured together, copied offsite, and restored on a schedule to prove it works. Pin the build number to every database backup, set RPO/RTO with the business rather than guessing, and treat the quarterly restore drill as the actual deliverable. If you are designing recovery for a self-hosted instance and want a second opinion, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +150,6 @@ jobs:
       <li><a href="/blog/acumatica-customization-upgrade-survival-guide/">Acumatica Customization Upgrade Survival Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

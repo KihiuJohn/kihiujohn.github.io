@@ -93,98 +93,37 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="the-role-of-openai-in-the-agent-loop">The role of openai in the agent loop</h2>
-<p>The role of openai in the agent loop is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Azure OpenAI Service is the common choice for Acumatica customers already standardized on Microsoft's stack — Entra ID for auth, Azure Functions for the integration layer, and now a regionally-hosted GPT deployment instead of a call to OpenAI's public endpoint. The agent architecture underneath doesn't change; what changes is where the model lives and how it's provisioned.</p>
+<h2 id="deploying-a-model-not-just-calling-an-api">Deploying a model, not just calling an API</h2>
+<p>Unlike OpenAI's API, Azure OpenAI requires you to provision a deployment of a specific model version in a specific region first, then call it by deployment name rather than model name directly. That extra step is also the point: it gives you data residency guarantees, private networking through VNet integration, and Azure RBAC controlling who can call the deployment — meaningful for ERP customers in regulated industries or jurisdictions with data residency requirements.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · AZURE OPENAI CLIENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from openai import AzureOpenAI
 
-def list_azure(query: str) -> str:
-    """List azure matching the query."""
-    response = requests.get(
-        f"https://api.example.com/azure",
-        params={"q": query}
-    )
-    return response.json()
+client = AzureOpenAI(
+    azure_endpoint="https://your-resource.openai.azure.com/",
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
 
-tools = [Tool(name="azure", func=list_azure, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="what-azure-openai-with-acumatica-a-complete-guide-actually-does">What Azure OpenAI with Acumatica — A Complete Guide actually does</h2>
-<p>In the work I have done on azure openai with acumatica — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>When the work moves from design to production, the questions change. The azure is not the question; the failure mode of the openai is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
+resp = client.chat.completions.create(
+    model="gpt-4o-ap-automation",  # deployment name, not model name
+    messages=[{"role": "user", "content": "Summarize this AR aging for review."}],
+    tools=[get_ar_aging_tool_spec]
 )</code></pre>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+<h2 id="function-calling-works-the-same-way">Function calling works the same way</h2>
+<p>Azure OpenAI's function-calling (tool-use) shape mirrors OpenAI's own API — the model returns a <code>tool_calls</code> array with a function name and JSON arguments, your code executes it against Acumatica's REST API, and the result goes back in the next message. The same discipline applies regardless of host: narrow tool schemas, read/write separation, and human approval before anything posts a transaction in Acumatica.</p>
+<div class="callout-warn">
+  <strong>Content filtering can silently reject legitimate ERP text</strong>
+  <p>Azure OpenAI applies content-filtering policies by default that can flag business text containing terms around "collections," "write-off," or aggressive customer language as a false positive. Test your prompts against the default filter configuration before launch, and adjust the content filter policy for the specific deployment rather than working around it by rephrasing prompts unpredictably.</p>
 </div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The performance of openai in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Production openai looks different from development openai. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_azure(query: str) -> str:
-    """List azure matching the query."""
-    response = requests.get(
-        f"https://api.example.com/azure",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="azure", func=list_azure, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring openai first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add azure on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with openai when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="entra-id-for-service-to-service-auth">Entra ID for service-to-service auth</h2>
+<p>Instead of managing an API key, Azure OpenAI supports Entra ID (Azure AD) token-based authentication for service principals — useful if your Acumatica integration layer already authenticates to other Azure services (Blob Storage, Service Bus) the same way. It keeps one fewer long-lived secret in your integration's configuration.</p>
+<h2 id="cost-tracking-per-workload">Cost tracking per workload</h2>
+<p>Azure Cost Management can attribute spend to a specific OpenAI deployment and resource group, which matters if you're running several agent workloads (AP automation, AR collections drafting, bank reconciliation) against the same Azure subscription and need to know which one is actually earning its token cost.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on azure openai with acumatica — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Azure OpenAI is the same function-calling architecture as the native OpenAI API with a deployment and networking layer wrapped around it for enterprise compliance. Choose it when Entra ID, VNet isolation, or data residency are already requirements for your Acumatica customer — not because the model behaves differently. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +134,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-function-calling/">Function Calling Patterns with Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

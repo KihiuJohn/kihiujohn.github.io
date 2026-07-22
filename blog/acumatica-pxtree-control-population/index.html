@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica PXTree Control — Population and Events | John Kihiu</title>
-<meta name="description" content="Acumatica PXTree Control — Population and Events is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="A client needed a category picker for a custom catalog structure - parent categories, subcategories, several levels deep - and wanted it presented the way Acumatica presents its.">
 <meta name="keywords" content="Acumatica customization, Acumatica modernui, Acumatica screens, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-pxtree-control-population/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica PXTree Control — Population and Events">
-<meta property="og:description" content="Acumatica PXTree Control — Population and Events is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="A client needed a category picker for a custom catalog structure - parent categories, subcategories, several levels deep - and wanted it presented the way Acumatica presents its.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-pxtree-control-population.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-pxtree-control-population/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="screens">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica PXTree Control — Population and Events","description":"Acumatica PXTree Control — Population and Events is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxtree-control-population.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxtree-control-population/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica PXTree Control — Population and Events","description": "A client needed a category picker for a custom catalog structure - parent categories, subcategories, several levels deep - and wanted it presented the way Acumatica presents its.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxtree-control-population.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxtree-control-population/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica PXTree Control — Population and Events","item":"https://kihiujohn.github.io/blog/acumatica-pxtree-control-population/"}]}
@@ -87,113 +87,92 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica PXTree Control — Population and Events</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>Acumatica PXTree Control — Population and Events</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica PXTree Control — Population and Events is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A client needed a category picker for a custom catalog structure - parent categories, subcategories, several levels deep - and wanted it presented the way Acumatica presents its.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A client needed a category picker for a custom catalog structure - parent categories, subcategories, several levels deep - and wanted it presented the way Acumatica presents its own Company Tree or Account Groups: an actual expandable tree control, not a flattened dropdown pretending to show hierarchy through indentation. <code>PXTree</code> is the control for that, and it's one of the less-documented corners of the framework, mostly because so few customizations actually need real hierarchical UI. Here's what I learned building it.</p>
+
+<h2 id="self-referencing-dac">The data model underneath is a self-referencing DAC, nothing exotic</h2>
+<p>A tree control needs a DAC where each row optionally points to its own parent - the same self-referencing foreign key pattern used for Company Tree nodes and Account Groups internally. Nothing about the DAC itself is tree-specific; the hierarchy comes entirely from a nullable parent ID field and the tree control's own logic for interpreting it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPxtreeExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · A self-referencing category DAC</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[Serializable]
+[PXCacheName("Catalog Category")]
+public class CatalogCategory : IBqlTable
 {
-    [PXOverride]
-    public virtual void Pxtree(Acumatica doc)
-    {
-        // Custom pxtree logic for acumatica pxtree control
-        if (doc?.Pxtree == null) return;
-        Base.Pxtree(doc);
-    }
-}</code></pre>
+    #region CategoryID
+    [PXDBIdentity(IsKey = true)]
+    public virtual int? CategoryID { get; set; }
+    public abstract class categoryID : PX.Data.BQL.BqlInt.Field&lt;categoryID&gt; { }
+    #endregion
+
+    #region ParentCategoryID
+    [PXDBInt]
+    [PXSelector(typeof(CatalogCategory.categoryID))]
+    [PXUIField(DisplayName = "Parent Category")]
+    public virtual int? ParentCategoryID { get; set; } // null = root node
+    public abstract class parentCategoryID : PX.Data.BQL.BqlInt.Field&lt;parentCategoryID&gt; { }
+    #endregion
+
+    #region Name
+    [PXDBString(60, IsUnicode = true)]
+    [PXUIField(DisplayName = "Category Name")]
+    public virtual string Name { get; set; }
+    public abstract class name : PX.Data.BQL.BqlString.Field&lt;name&gt; { }
+    #endregion
+}
+</code></pre>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>In the work I have done on acumatica pxtree control — population and events, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the pxtree is.</p>
+
+<h2 id="the-view-and-attribute">PXTree needs a view shaped for hierarchy, not a flat select</h2>
+<p>The screen-side wiring pairs a normal <code>PXSelect</code> view with tree-aware markup on the ASPX (or the equivalent Modern UI container), where the tree control is told which field is the node's own ID and which field is its parent pointer. The graph itself doesn't need special logic to make hierarchy work - the tree control walks the parent/child relationship client-side from whatever rows the view returns.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">ASPX · Tree control bound to the self-referencing fields</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;px:PXTreeDataMember runat="server" ID="ds" DataMember="Categories"
+    Style="Full" NavigateUrlFormat="~/Main.aspx?CategoryID={0}" /&gt;
+&lt;px:PXTreeView runat="server" ID="tree" DataSourceID="ds"
+    ...
+    ValueField="CategoryID" ParentField="ParentCategoryID"
+    TextField="Name" /&gt;
+</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+
+<h2 id="population-order-matters">Population order: parents must exist in the result set before children make sense</h2>
+<p>The tree control builds its structure from whatever the view returns in a single pass, matching each row's parent field against other rows' ID field in that same result set. If your view filters out root nodes (parent is null) for some reason - a poorly written WHERE clause meant to exclude something else that accidentally excludes roots too - every remaining row becomes effectively orphaned, and the control either shows nothing or shows every node flattened as if it were a root, depending on how the specific tree implementation handles missing parents. This was the actual bug in my first pass at the catalog picker: a status filter I'd added to hide inactive categories also filtered out an inactive root category that several active subcategories still pointed to, orphaning an entire branch.</p>
+
+<div class="callout-warn callout">
+  <strong>Filtering a tree's source view can silently break the hierarchy, not just hide rows</strong>
+  <p>A WHERE clause on a flat grid just hides rows you don't want to see - nothing else depends on them being present. On a tree, hiding a node also orphans every descendant of that node unless your filter logic accounts for ancestry. If you need to filter a tree (show only active categories, for instance), filter by ensuring the entire ancestor chain to any visible node is also included, not just the node itself.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-pxtree-edge-cases-i-have-shipped">The pxtree edge cases I have shipped</h2>
-<p>The performance of pxtree in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Production pxtree looks different from development pxtree. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPxtreeExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Pxtree(Acumatica doc)
-    {
-        // Custom pxtree logic for acumatica pxtree control
-        if (doc?.Pxtree == null) return;
-        Base.Pxtree(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pxtree first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pxtree when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="lazy-vs-full-population">Full-tree load vs on-demand expansion</h2>
+<p>For a genuinely large hierarchy - thousands of nodes, many levels deep - loading the entire tree in one BQL select on screen open is wasteful when a user will only ever expand a handful of branches in a session. PXTree supports on-demand population, where child nodes are fetched only when a parent node is expanded, driven by a callback rather than one upfront select. I only reach for this once the flat-load approach actually shows a measurable delay on real data; for the catalog picker's few hundred categories, a single upfront select was simpler and fast enough, and I'd recommend starting there rather than building lazy-load complexity speculatively.</p>
+
+<h2 id="selecting-a-node-into-a-field">Using the tree as a picker, not just a navigator</h2>
+<p>When the tree is meant to select a value into another screen's field (as opposed to being a pure navigation control like Company Tree), the selection event needs to write the chosen node's ID back into the target DAC field through the normal cache-driven update path - same FieldUpdated-triggered cascade you'd use for any other selector, just fed by a tree click instead of a grid row click or a PXSelector lookup.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica pxtree control — population and events. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>PXTree's data model is nothing more exotic than a self-referencing parent ID on an ordinary DAC - the complexity lives entirely in getting the source view's population right, not in any tree-specific graph logic. Watch filtering carefully: excluding a node from a tree's source view orphans its descendants unless the filter accounts for the full ancestor chain, and that's the bug that actually costs time, not the control's setup.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-modern-ui-adding-custom-screens/">Acumatica Modern UI — Adding Custom Screens</a></li>
-      <li><a href="/blog/acumatica-modern-ui-custom-control/">Acumatica Modern UI Custom Control — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-modern-ui-master-detail/">Acumatica Modern UI Master-Detail Pattern</a></li>
-      <li><a href="/blog/acumatica-modern-ui-screen-from-scratch/">Acumatica Modern UI Screen — From Scratch</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

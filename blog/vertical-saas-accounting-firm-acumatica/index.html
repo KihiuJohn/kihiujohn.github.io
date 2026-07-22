@@ -93,100 +93,58 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS companies that survive the first three years are the ones that measure the right metrics. this is one of the metrics that separates the survivors from the deadpools. This article is the field-tested patterns, with the benchmarks and the common misinterpretations.</p>
-<h2 id="why-accounting-is-the-first-thing-to-look-at">Why accounting is the first thing to look at</h2>
-<p>Why accounting is the first thing to look at is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>An accounting or bookkeeping firm evaluating Acumatica is usually not shopping for a general ledger — they already know general ledgers cold. What they are actually testing is whether the Projects module can run their real business model: client engagements billed by the hour against a budget, recurring compliance work billed flat, and a partner group that wants realization and utilization numbers every Friday, not at month end.</p>
+
+<h2 id="engagements-are-projects">Treat every engagement as a Project, not a customer</h2>
+<p>The instinct to model each client as an AR customer and stop there is the most common setup mistake I see. It gets you invoicing, but it throws away the one thing Acumatica's Projects module (PM301000, PM302000) is actually good at: tracking budgeted hours against actual hours per engagement, per task, per staff member. A tax return is a Project with a task per return type; a monthly bookkeeping retainer is a Project with a recurring billing schedule; an audit is a Project with tasks for planning, fieldwork, and review, each with its own budget.</p>
+<p>This matters the first time a partner asks "are we losing money on the Henderson audit" — with engagements-as-projects that is a Project Status report (PM640000-class inquiry) pulled in thirty seconds. With engagements-as-customers-only it is a manual spreadsheet reconstruction from timesheets.</p>
+
+<h2 id="billing-rules">Billing rules: the actual decision that matters</h2>
+<p>Acumatica's Billing Rules (PM207000) support time-and-material steps and progress/fixed-fee billing on the same project, which maps directly onto how accounting firms actually price work — T&M for advisory and cleanup engagements, flat fee for recurring compliance:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">PM207000 · BILLING RULE STEP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Step 1 — Time and Material
+  Source: Time Activities (EP), Expense Claims
+  Rate resolution order: Employee override rate
+                          -> Project Task rate
+                          -> Labor Item rate
+  Markup: 0% (rate table already includes margin)
+
+Step 2 — Progress (fixed-fee compliance work)
+  Billing Method: Completed Percentage
+  Trigger: Task marked Completed on task PM302000
+  Amount: Contract line amount for the task</code></pre>
 </div>
-<h2 id="how-firm-distorts-the-picture">How firm distorts the picture</h2>
-<p>In the work I have done on accounting firm management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>When the work moves from design to production, the questions change. The accounting is not the question; the failure mode of the firm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="the-cohort-retention-curve-for-accounting">The cohort retention curve for accounting</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>The gotcha that catches firms migrating off QuickBooks Online or a practice-management tool: Acumatica bills off the <em>rate resolved at time-entry</em>, not a rate you can silently change after the fact on the invoice screen. If a partner rate changes mid-engagement, back-dated time entries keep the old rate unless you explicitly rebill — which is usually the correct behavior for a firm, but it surprises people expecting Excel-style "just change the number".</p>
+
+<h2 id="realization-and-utilization">Realization and utilization, not just billable hours</h2>
+<p>The metric partners actually care about is realization — billed amount divided by standard rate value of hours worked — and Acumatica gets you most of the way there because time activities carry both the billable rate and, if you configure a separate "value" rate on the Earning Type or Labor Item, the comparison is a GI away. Out of the box there isn't a dedicated "realization dashboard"; I typically build one Generic Inquiry joining <code>PMTimeActivity</code> to the billing rule's rate resolution and expose it on a dashboard widget per partner. That is a half-day of GI work, not a customization project.</p>
+
 <div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+  <strong>Write-downs need a real workflow, not a delete</strong>
+  <p>When a partner writes down an engagement's fees before billing, the correct move in Acumatica is a billing adjustment on the pro forma invoice (PM304500-class screen) that preserves the original time value for realization reporting, not deleting or editing time entries. Deleting time entries destroys the utilization numbers you need for the next comp review. Train staff on pro forma review before release, every time.</p>
 </div>
-<h2 id="when-accounting-is-a-leading-indicator-vs-a-lagging-one">When accounting is a leading indicator vs a lagging one</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, firm, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="what-accounting-firm-management-vertical-on-acumatica-actually-measures">What Accounting Firm Management Vertical on Acumatica actually measures</h2>
-<p>The performance of firm in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Production firm looks different from development firm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring firm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add accounting on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with firm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="what-doesnt-fit">Where it doesn't fit cleanly</h2>
+<p>Trust accounting for client funds — if the firm also holds client money in a fiduciary capacity, which is more of a legal-practice pattern — is not something Acumatica models natively; see the legal-practice post for that gap and workaround, the same segregation problem applies if an accounting firm handles client trust funds. And practice-management niceties — engagement letters, PBC (prepared-by-client) request tracking, workpaper sign-off — live in dedicated tools (Karbon, Suralink, etc.); the sane architecture integrates those via the REST API rather than trying to rebuild them in Acumatica screens.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on accounting firm management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>For a firm with real project-costing needs — multiple staff levels, budgets that matter, mixed T&M and fixed-fee billing — Acumatica's Projects module is a legitimate, not a forced, fit. The setup work is mostly discipline: model engagements as projects with real tasks and budgets from day one, resist the urge to skip straight to invoicing, and build the one or two realization GIs the partners will actually look at every week.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-it-services-acumatica/">IT Services Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-legal-practice-acumatica/">Legal Practice Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica PM Projects Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Report — Project Status</a></li>
+      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

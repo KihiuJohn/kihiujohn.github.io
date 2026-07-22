@@ -93,98 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Memory, context, and state management is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Every fleet-optimisation pitch that leads with "the LLM plans the routes" is wrong in a way that shows up the first week in production. Vehicle routing is a hard combinatorial optimization problem — the kind with decades of operations-research literature and purpose-built solvers behind it — and an LLM asked to reason its way to an efficient route across 40 stops will produce something plausible-looking and measurably worse than what a solver returns in milliseconds. The LLM's job in a fleet agent is orchestration and communication, not arithmetic over a distance matrix.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="what-the-llm-should-and-should-not-do">What the LLM should — and should not — do</h2>
+<p>Route optimization is an assignment and sequencing problem with hard constraints: vehicle capacity, time windows, driver hours, depot locations. This is exactly what solvers like Google OR-Tools, a dedicated routing API, or a commercial VRP engine are built for, and they will outperform an LLM on both solution quality and latency by a wide margin, every time. The agent's role is to gather the inputs — today's orders, vehicle availability, current driver locations — call the solver as a tool, and then turn the solver's output (a sequence of stops per vehicle) into something a human or a driver can act on: a summary, a dispatch message, an explanation of why a particular stop moved.</p>
+<p>This division isn't a compromise — it's the correct architecture. Treat the solver as ground truth for anything involving distances, capacities, or time windows, and treat the LLM as the layer that explains, summarizes, and drafts communication around what the solver decided.</p>
+<div class="callout-warn">
+  <strong>Don't let the model compute the route</strong>
+  <p>An LLM asked to plan a multi-stop route by reasoning in natural language will silently violate constraints — double-booking a time window, ignoring vehicle capacity — because it has no mechanism to backtrack and re-verify a combinatorial solution the way a solver does. Any accuracy it shows on small examples will not hold at fleet scale.</p>
+</div>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>In the work I have done on ai agent for fleet optimisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the fleet is.</p>
+<h2 id="real-time-rerouting-on-disruption">Real-time re-routing when things go wrong</h2>
+<p>A flat tire, a closed road, a customer that's a no-show — these require re-solving the routing problem for the remaining stops, not editing the plan by hand. The agent's value here is speed of detection and re-dispatch: watching for a disruption signal (a driver marks a stop failed, a telematics feed shows a vehicle stopped for 20 minutes off-route), re-calling the solver with the updated constraints (remaining stops, current vehicle positions, remaining driver hours), and pushing the new plan back out. The solver call itself is the same tool used for the original plan; what changes is the trigger and the reduced problem size, which also means re-solves can run fast enough to be genuinely real-time.</p>
+
+<h2 id="integrating-telematics-and-gps">Integrating telematics and GPS data</h2>
+<p>Live vehicle position feeds — from a telematics provider or the driver's phone — are what make re-routing decisions accurate instead of guesswork. The integration pattern is a background job that ingests position updates on a short interval, updates a vehicle-state table, and exposes that state as a tool the agent (and the solver) can query. Keep this ingestion path independent from the agent's request/response cycle: telematics data should be flowing and current whether or not an agent call happens to be in flight, since disruption detection often needs to trigger a re-plan proactively rather than waiting for someone to ask.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · SOLVER TOOL RESULT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "tool": "reoptimize_route",
+  "input": {
+    "vehicle_id": "VAN-07",
+    "remaining_stops": ["ORD-8841", "ORD-8842", "ORD-8850"],
+    "current_position": {"lat": -1.2921, "lng": 36.8219},
+    "reason": "stop_failed:ORD-8839"
+  },
+  "output": {
+    "status": "resolved",
+    "new_sequence": ["ORD-8842", "ORD-8841", "ORD-8850"],
+    "eta_delta_minutes": 12,
+    "constraint_violations": []
+  }
+}</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="drafting-driver-and-customer-communication">Drafting driver and customer communication</h2>
+<p>This is where the LLM genuinely earns its place. Once the solver produces a revised plan, someone has to tell the driver their next stop changed and tell the affected customer their delivery window shifted — in plain language, adjusted for tone, sometimes in a different language for a regional fleet. Generating that message from structured solver output (old ETA, new ETA, reason for the change) is a good, low-risk use of an LLM: the facts come from the solver, the LLM just phrases them. Keep a human-readable audit log of what was sent so a dispatcher can see exactly what a customer was told if a complaint comes in later.</p>
+
+<h2 id="human-dispatcher-override">Human dispatcher override</h2>
+<p>No routing agent should be fully autonomous in a fleet with real drivers and real customers. Dispatchers know things the system doesn't — a driver who's having a bad day, a customer who always complains regardless, a road closure not yet in the traffic feed. Build the override as a first-class path: every automated re-route should be visible in a dispatcher console before or immediately after it goes out, with a one-click revert, and the agent should defer to a manual override rather than re-optimizing over top of it. Log overrides separately — they're a signal about where the solver's constraints or the agent's judgment are systematically wrong.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Keep the override loop cheap</strong>
+  <p>If reverting an automated re-route takes more clicks than the dispatcher's patience allows, they'll stop reviewing and just let bad routes ship. The override needs to be at least as fast as the automation was.</p>
 </div>
-<h2 id="prompt-patterns-that-work-for-fleet">Prompt patterns that work for fleet</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>The performance of fleet in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Production fleet looks different from development fleet. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring fleet first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with fleet when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for fleet optimisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A fleet optimisation agent that works is a thin conversational and orchestration layer wrapped around a real solver, a live telematics feed, and a human who can always override it. The moment the LLM starts trying to compute routes itself is the moment quality quietly degrades in ways that are hard to catch until a customer complains about a driver going in circles.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +149,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-aws-bedrock/">AWS Bedrock + Acumatica Integration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

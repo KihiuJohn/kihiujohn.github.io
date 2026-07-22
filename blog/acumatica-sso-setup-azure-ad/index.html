@@ -93,107 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSsoExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sso(Acumatica doc)
-    {
-        // Custom sso logic for acumatica sso setup
-        if (doc?.Sso == null) return;
-        Base.Sso(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica sso setup with azure ad, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-sso-edge-cases-i-have-shipped">The sso edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sso is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Azure AD is the identity provider I set up most often for Acumatica clients, mostly because it's the default for any organization already on Microsoft 365 - the SSO project is frequently just "make Acumatica behave like every other Microsoft-federated app we already have." That framing is mostly right, but there are a few Azure AD-specific details that differ meaningfully from a generic SAML/OIDC setup and from how Okta behaves.</p>
+
+<h2 id="app-registration-basics">App registration: get the redirect URI and token version right the first time</h2>
+<p>Azure AD app registration for Acumatica is an OIDC confidential client - register the app in Entra ID (Azure AD's current name), configure the redirect URI to match Acumatica's SSO callback exactly (a trailing slash mismatch here is a surprisingly common source of a redirect_uri_mismatch error that looks like a bigger problem than it is), and generate a client secret for the confidential client flow. The detail that costs people real time: make sure the app registration's token configuration is issuing v2.0 tokens, not v1.0 - Acumatica's OIDC implementation expects the v2.0 token shape, and a v1.0 token's claim structure is different enough to cause opaque authentication failures that don't clearly point at the token version as the cause.</p>
+
+<div class="code-block"><div class="code-header"><span class="code-lang">TEXT · The manifest setting that actually matters</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// In the App Registration's manifest (or API permissions blade)
+"accessTokenAcceptedVersion": 2
+</code></pre></div>
+
+<h2 id="conditional-access">Conditional Access policies apply before Acumatica ever sees the login attempt</h2>
+<p>The advantage Azure AD has over most other identity providers for enterprise clients: Conditional Access policies (MFA requirements, device compliance checks, location-based restrictions) apply at the Azure AD layer, before a token is ever issued to Acumatica. This means Acumatica inherits the client's existing security posture - if the org already requires MFA for financial applications, you tag Acumatica's app registration into the right Conditional Access policy group and it's covered, with zero Acumatica-side configuration for the MFA enforcement itself.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Ask which Conditional Access group Acumatica should join, don't assume "default"</strong>
+  <p>Organizations with mature Azure AD setups usually have multiple Conditional Access policies tiered by application sensitivity. An ERP handling financial data usually belongs in a stricter tier than the default "all cloud apps" policy - ask the client's identity team explicitly which tier Acumatica should sit in rather than accepting whatever the app registration defaults to.</p>
 </div>
-<h2 id="how-to-debug-sso-in-production">How to debug sso in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of sso in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-sso-setup-with-azure-ad-matters-in-production">Why Acumatica SSO Setup with Azure AD matters in production</h2>
-<p>Production sso looks different from development sso. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSsoExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sso(Acumatica doc)
-    {
-        // Custom sso logic for acumatica sso setup
-        if (doc?.Sso == null) return;
-        Base.Sso(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sso first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sso when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="group-claims-and-role-mapping">Group claims into Acumatica roles, same requirement as Okta, different UI</h2>
+<p>Azure AD, like Okta, needs an explicit mapping from AD group membership to Acumatica role, configured via group claims added to the token configuration and then mapped on Acumatica's SSO settings screen. The Azure-specific wrinkle: by default, Azure AD emits group membership as GUIDs, not readable names, in the token claim. Either configure the app registration to emit group names instead of IDs (simpler to map, but breaks if a group gets renamed) or map by GUID (stable across renames, harder to read and audit six months later when someone's trying to remember which GUID was which team). I lean toward mapping by name for smaller clients and by GUID for large orgs with active group governance, where renames are common enough that GUID stability matters more than readability.</p>
+
+<h2 id="b2b-guest-users">Guest users from Azure AD B2B need a deliberate decision, not a default</h2>
+<p>If the client's Azure AD tenant includes B2B guest users - contractors or partner-org staff invited in from another tenant - decide explicitly whether guests should be able to SSO into Acumatica at all, and if so, whether they get a different, more restricted default role mapping than internal employees. Leaving this undecided means guest accounts inherit whatever the default connected-application role is, which I've seen accidentally grant a contractor broader access than the internal team intended, simply because nobody thought about the guest-user case separately from the employee case during setup.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sso setup with azure ad. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Azure AD SSO on Acumatica rides on infrastructure most enterprise clients already have configured - Conditional Access, MFA, device compliance - which is the real advantage over building equivalent policy from scratch. Get the v2.0 token setting right up front to avoid an opaque authentication failure, decide deliberately whether to map roles by group name or GUID based on how actively the client's group structure changes, and don't let B2B guest users fall through to a default role mapping nobody chose on purpose.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
       <li><a href="/blog/acumatica-okta-sso-integration/">Acumatica Okta SSO Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
-      <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
-      <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
+      <li><a href="/blog/acumatica-vulnerability-management/">Acumatica Vulnerability Management</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

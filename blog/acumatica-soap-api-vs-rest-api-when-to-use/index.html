@@ -94,101 +94,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production APIs to know the patterns that work. They share a few traits: versioned from day one, idempotent, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="what-acumatica-soap-vs-rest-api-when-to-use-which-gives-you">What Acumatica SOAP vs REST API — When to Use Which gives you</h2>
-<p>What Acumatica SOAP vs REST API — When to Use Which gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>In the work I have done on acumatica soap vs rest api — when to use which, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the soap is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /acumaticas/{id}:
-    get:
-      operationId: getAcumatica
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Acumatica has shipped two generations of contract-based web services: an older SOAP API (screen-based web-service endpoints defined in the Integration Scenario / SOAP screen contracts) and the newer REST API. Both are "contract-based" in the sense that they expose defined fields and actions rather than raw tables — the difference is age, tooling, and what each one is still actually good for.</p>
+
+<h2 id="two-apis-two-different-ages">Two APIs, two different ages</h2>
+<p>The SOAP API predates the REST API by several major versions and was the only integration option for a long time. Acumatica has not been actively adding new capability to it — new features (OAuth 2.0, OpenAPI/Swagger generation, richer OData-style querying) have landed on the REST side. That alone should push most new work toward REST by default.</p>
+
+<h2 id="what-soap-still-does-well">What the SOAP API still does well</h2>
+<p>SOAP contracts map very directly to screens and their exact field layout, including some legacy automation (older Excel add-ins, older middleware connectors, some third-party EDI tools) that was built against the SOAP endpoint and never migrated. If you're maintaining an existing integration built on it and it's stable, there's rarely a reason to force a rewrite purely for REST's sake — "it already works" is a legitimate reason to leave it alone.</p>
+
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>Existing SOAP integration ≠ technical debt</strong>
+  <p>A working SOAP integration that nobody's touched in years isn't automatically a liability. The cost of migrating it to REST only pays for itself if you also need something REST offers that SOAP doesn't — OAuth 2.0, easier testing tools, or a field the current contract can't expose.</p>
 </div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type AcumaticaResponse = {
-    id: string;
-    soap: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>The performance of soap in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production soap looks different from development soap. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring soap first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with soap when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="where-rest-wins">Where REST wins</h2>
+<p>REST wins on tooling and auth. OAuth 2.0 bearer tokens are simpler to manage across a fleet of services than SOAP's session-cookie-plus-WS-Security patterns. JSON is friendlier to modern client libraries and to no-code tools (Zapier, Make, n8n) than a SOAP envelope. And because contract-based REST endpoints can generate an OpenAPI/Swagger document per version, you get typed client generation and interactive documentation essentially for free — nothing equivalent exists for the SOAP contracts.</p>
+
+<h2 id="migration-friction-points">Migration friction points</h2>
+<p>Moving an integration from SOAP to REST isn't a drop-in swap. Field names and nesting in the JSON contract don't always mirror the SOAP schema one-to-one, custom fields added to a SOAP contract need to be re-added to the REST endpoint separately, and any code relying on SOAP-specific behavior (strongly typed proxy classes generated from WSDL, for instance) needs to be rewritten against the JSON/OpenAPI model rather than just repointed at a new URL.</p>
+
+<h2 id="a-decision-rule">A decision rule</h2>
+<p>Build new integrations on REST. Leave a working SOAP integration alone unless it needs a capability only REST provides, or the tooling maintaining it (an old middleware version, an unsupported add-in) is itself being retired. The API choice should follow from what the integration needs, not from a blanket "SOAP is legacy, replace it" instinct — a stable SOAP-based nightly export that nobody touches costs nothing to leave in place.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica soap vs rest api — when to use which. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>SOAP and REST are both still supported, but only one of them is getting new capability. Default new work to REST for its OAuth 2.0 support and OpenAPI tooling, and reserve SOAP-to-REST migration effort for integrations that actually need what REST offers rather than doing it on principle.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
       <li><a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">Generating an OpenAPI Spec from Acumatica</a></li>
-      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
-      <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
-      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-rest-api-versioning-upgrade-strategy/">Acumatica REST API — Versioning and Upgrade Strategy</a></li>
+      <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

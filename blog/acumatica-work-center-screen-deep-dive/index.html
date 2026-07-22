@@ -92,107 +92,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The version of acumatica that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaWorkExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Work(Acumatica doc)
-    {
-        // Custom work logic for acumatica work center
-        if (doc?.Work == null) return;
-        Base.Work(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="why-acumatica-work-center-screen-a-deep-dive-matters-in-production">Why Acumatica Work Center Screen — A Deep Dive matters in production</h2>
-<p>In the work I have done on acumatica work center screen — a deep dive, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>The Work Center screen (<code>AM207000</code>) defines the physical or logical production resource that route operations get assigned to — a machine, a production line, or a labor group, depending on how granular a given plant wants its capacity model. The DAC is <code>AMWorkCenter</code>, and it's the anchor point for capacity, cost rates, and (if Scheduling is licensed) shift calendars.</p>
+
+<h2 id="capacity-type-finite-vs-infinite">Capacity type: finite vs. infinite</h2>
+<p>Each work center is configured with a capacity type — infinite capacity assumes the resource can always absorb more work (fine for a manual assembly bench with flexible staffing, less fine for a single CNC machine), while finite capacity feeds the scheduling engine's constraint logic and will actually push operations to later time slots when the work center is already loaded. Setting every work center to infinite capacity "to keep it simple" quietly disables the part of Scheduling that's supposed to catch overbooked machines, so it's worth confirming this setting matches reality rather than accepting whatever default came through at implementation.</p>
+
+<h2 id="labor-and-machine-rates">Labor and machine rates, and where they feed cost</h2>
+<p>A work center carries labor and machine rate defaults (overridable per operation on the route) that flow into production order cost rollup — this is one of the two places (the other being the route operation itself) where a manufacturing cost calculation can go wrong if setup was rushed. A work center left at a zero or placeholder rate will understate labor cost on every production order that routes through it, and because the error is silent (no validation blocks a zero rate by default), it tends to surface as a finance question months later rather than an error at data-entry time.</p>
+
+<h2 id="shift-and-calendar-assignment">Shift and calendar assignment</h2>
+<p>When Scheduling is active, each work center references a shift calendar defining working hours, days off, and capacity per shift. This is what lets the scheduling engine calculate realistic start/finish times for operations instead of assuming 24/7 availability. A work center with no calendar assigned, or one pointing at a calendar that hasn't been updated for the current year's holidays, is a common cause of production schedules that look fine on paper but slip in practice — worth checking early when a client complains that "the scheduled dates never match what happens on the floor."</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Overlapping shifts across work centers aren't validated for you</strong>
+  <p>Acumatica won't stop you from assigning contradictory or overlapping calendars across work centers that are supposed to run in tandem (say, two stations on the same line). If a route sends work through both and their calendars disagree on working hours, the schedule can show one station idle while the other is projected to be running — a data-consistency problem, not a bug, and one only a careful calendar review catches.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the work is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The performance of work in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production work looks different from development work. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaWorkExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Work(Acumatica doc)
-    {
-        // Custom work logic for acumatica work center
-        if (doc?.Work == null) return;
-        Base.Work(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring work first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with work when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="common-customization-points">Common customization points</h2>
+<p>A DAC extension adding a custom field to <code>AMWorkCenter</code> — an external asset tag, a maintenance schedule reference, a department code for cross-charging — is the most common request, surfaced through the Customization Project Editor on a new tab. Slightly more involved is a graph extension on the Work Center Maintenance graph adding a <code>RowPersisting</code> validation that blocks saving a work center with a zero labor or machine rate when its capacity type is finite, closing the silent-zero-rate gap mentioned above before it reaches a live production order.</p>
+
+<h2 id="gotcha-work-center-groups">A gotcha with Work Center Groups and reassignment</h2>
+<p>Work centers can be organized into Work Center Groups for scheduling and reporting purposes, and reassigning a work center to a different group doesn't retroactively update historical production order records that already reference it under the old grouping — reports that filter or roll up by group can therefore show inconsistent historical vs. current-period totals for the same physical resource, purely because of when the group reassignment happened relative to when each order ran.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica work center screen — a deep dive. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Work Center is a small setup screen that quietly controls two things people usually attribute to other parts of the system: whether cost rollup numbers are trustworthy, and whether a production schedule reflects real shop-floor availability. Both failure modes are silent by default, so a periodic audit of rates, capacity type, and calendar assignment is worth more than any customization you'd build on top of the screen.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-cost-rollup-and-standard-costing/">Acumatica Cost Rollup and Standard Costing</a></li>
+      <li><a href="/blog/acumatica-route-screen-deep-dive/">Acumatica Route Screen — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-manufacturing-bom-routing-basics/">Acumatica Manufacturing — BOM and Routing Basics</a></li>
-      <li><a href="/blog/acumatica-mrp-planned-orders-explained/">Acumatica MRP — Planned Orders Explained</a></li>
+      <li><a href="/blog/acumatica-production-order-lifecycle/">Acumatica Production Order Lifecycle</a></li>
+      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-report-bom-cost-rollup/">Acumatica BOM Cost Rollup Report — Building It Right</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

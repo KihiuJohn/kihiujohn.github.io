@@ -93,96 +93,57 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The vertical SaaS model on a horizontal platform is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Equipment costing is the part of construction ERP work that gets glossed over in sales demos and then eats a week of implementation time in real life, because "equipment" in a contractor's world is really two different accounting problems wearing one label: owned equipment that depreciates and needs an internal rental rate charged to jobs, and rented equipment that is a straight vendor cost. Acumatica gives you the building blocks for both — the fit isn't automatic, and I want to be upfront that the owned-equipment rate-charging side is usually a configuration-and-light-customization exercise, not a checkbox.</p>
+
+<h2 id="owned-equipment">Owned equipment: tracking it is native, charging jobs for it takes setup</h2>
+<p>Acumatica gives you equipment management with visibility into an asset's history and warranty status, and equipment can be tracked against projects. Where implementations diverge is how the internal use charge gets calculated and posted — an hourly or daily rate the job absorbs to reflect wear on a company-owned excavator, independent of any external vendor invoice. That rate table and the recurring transaction that applies it to job cost is something I typically build as a scheduled process against a rate-by-equipment-class table, posting an inter-project or equipment-cost transaction each period.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ConstructionExt : PXCacheExtension<Equipment>
+  <div class="code-header"><span class="code-lang">C# · SCHEDULED EQUIPMENT USE-CHARGE (SIMPLIFIED)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>foreach (EquipmentUsageLog log in usageThisPeriod)
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    decimal rate = GetInternalRate(log.EquipmentClassID); // rate table, per class
+    decimal charge = rate * log.HoursUsed;
+
+    var pmTran = new PMTran
+    {
+        ProjectID   = log.ProjectID,
+        TaskID      = log.TaskID,
+        CostCodeID  = log.EquipmentCostCodeID, // e.g. "01-500 Equipment"
+        Qty         = log.HoursUsed,
+        UnitCost    = rate,
+        Amount      = charge,
+        Description = $"Internal equipment use — {log.AssetCD}"
+    };
+    pmTranGraph.Transactions.Insert(pmTran);
 }</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>In the work I have done on construction equipment rental vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<h2 id="rented-equipment">Rented equipment: this one is closer to native</h2>
+<p>Rented equipment is more straightforward because it is really just AP with project distribution — a purchase order or AP bill coded to the job and the equipment cost code, same as any subcontractor invoice. The customization I do more often here is on the receiving side: a mobile-friendly way for a superintendent to log equipment on/off-rent dates against a PO, so idle-rental costs get flagged before a month goes by and someone notices a scissor lift has been sitting unused and billed for three weeks.</p>
+
+<div class="callout-warn callout">
+  <strong>Don't conflate the two cost codes</strong>
+  <p>The single most common reporting defect I find on contractor instances: owned-equipment internal charges and rented-equipment vendor costs posted to the same cost code. It makes the job cost report technically balanced but useless for the "should we buy or keep renting this equipment class" decision, which is usually the whole reason a client asked for equipment costing in the first place. Split the cost codes from day one.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>When the work moves from design to production, the questions change. The construction is not the question; the failure mode of the equipment is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'construction'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM construction
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of equipment in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="why-construction-on-a-horizontal-platform-beats-from-scratch">Why construction on a horizontal platform beats from-scratch</h2>
-<p>Production equipment looks different from development equipment. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ConstructionExt : PXCacheExtension<Equipment>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring equipment first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add construction on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with equipment when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on construction equipment rental vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat owned and rented equipment as two different cost flows from the start of the project template design. Rented equipment rides on standard AP-to-project distribution with little extra work. Owned equipment internal charging is a legitimate customization — budget for it rather than assuming it appears when you enable the Equipment Management feature.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-civil-engineering-acumatica/">Civil Engineering Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction Vertical on Acumatica</a></li>
       <li><a href="/blog/vertical-saas-construction-contract-acumatica/">Construction Contract Management on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-job-costing-acumatica/">Job Costing Vertical SaaS on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-job-costing-acumatica/">Job Costing Structures on Acumatica</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-fs-field-service-extension/">Acumatica Field Service Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

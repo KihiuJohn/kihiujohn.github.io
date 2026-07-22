@@ -93,82 +93,92 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Tax fiscalisation in East and Southern Africa is a per-jurisdiction problem. this is the pattern that handles the specific regulatory requirements without making the codebase unmaintainable. This article is the field-tested implementation, with the device registration, the offline buffering, and the audit trail.</p>
-<h2 id="the-audit-trail-for-nigeria">The audit trail for nigeria</h2>
-<p>The audit trail for nigeria is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>In the work I have done on acumatica nigeria firs integration — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Nigeria's move to real-time e-invoicing changes what "invoice released" means inside Acumatica. It is no longer just a posting event — it is the trigger for a call to a FIRS-connected platform that has to succeed, or at least be queued reliably, before the document is fiscally complete. The FIRS national e-invoicing rollout (built around the Merchant Buyer Solution and the wider FIRS e-invoice programme) asks for invoice data in near real time, and hands back an Invoice Reference Number (IRN) and a QR code that must appear on the document the buyer actually receives. This is the pattern I use to wire that into Acumatica without turning invoice release into a single point of failure.</p>
+<h2 id="what-firs-actually-expects">What FIRS actually expects</h2>
+<p>The mechanics resemble what Kenya's TIMS/eTIMS and Uganda's EFRIS already require: every taxable invoice gets transmitted to the tax authority's platform — either directly or, more commonly, through an accredited Access Point / System Integrator that sits between the taxpayer's ERP and FIRS — and comes back stamped with an IRN and QR code. Both the seller's and buyer's Tax Identification Numbers (TIN) are validated as part of the submission, VAT is calculated at Nigeria's standard rate of 7.5%, and the invoice is priced and reported in Naira (NGN) even when Acumatica's base currency is USD or another currency for group reporting.</p>
+<p>The detail that catches people out: an invoice without a valid IRN and QR code is not just a compliance gap, it is a document the buyer's own tax filing may reject for input VAT recovery. That pushes the integration toward synchronous-ish behaviour at invoice release, not a nightly batch job.</p>
+<h2 id="where-it-hooks-into-acumatica">Where it hooks into Acumatica</h2>
+<p>Two places to attach this, and I have used both depending on the client's appetite for customisation: a graph extension on AR Invoice (and SO Invoice, if invoices are generated from shipments) that intercepts the Release action, or a Business Event fired on invoice release that calls out to an integration endpoint. The graph extension gives you a cleaner way to block printing until the IRN is attached; the Business Event is less invasive if the client already has a middleware layer doing outbound integrations.</p>
+<p>Either way, the extension packages the same payload: seller TIN, buyer TIN, invoice number, currency and NGN-converted amounts, VAT line detail at 7.5%, and line items. That payload goes out over REST to whichever Access Point the client is accredited through — Nigeria's e-invoicing framework, like most African real-time reporting regimes, generally does not let taxpayers hit the tax authority's core system directly.</p>
+<h2 id="dont-block-release-on-a-government-api">Don't block release on a government API</h2>
+<p>Real-time government tax APIs go down, rate-limit, or time out — this is not specific to Nigeria, it is true everywhere this pattern exists. Hard-blocking invoice release on a successful FIRS response means AR grinds to a halt the moment the Access Point has a bad afternoon. The pattern that holds up is a custom DAC — something like <code>FIRSSubmission</code> — that tracks each invoice's submission state: <code>Pending</code>, <code>Submitted</code>, <code>Failed</code>. The invoice can release normally; the submission record queues in the background.</p>
+<p>A scheduled processing screen (Acumatica's automation schedules are enough here, no external scheduler needed) picks up <code>Pending</code> and <code>Failed</code> rows, retries with backoff, and writes the IRN and QR payload back onto the submission record once it succeeds. Printing or emailing the invoice checks that record first — if no IRN yet, either hold the document or clearly mark it as pending fiscal confirmation, depending on what the client's finance team is comfortable with.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>Don't invent a fixed API contract</strong>
+  <p>Nigeria's e-invoicing platform and its integration specifics have been evolving, and the exact endpoint shape depends on which Access Point or System Integrator the client is accredited through. Treat the snippet below as the shape of the integration, not a copy-paste spec — confirm field names and auth against whatever the client's accredited provider actually publishes.</p>
 </div>
-<h2 id="what-acumatica-nigeria-firs-integration-a-complete-guide-is-for">What Acumatica Nigeria FIRS Integration — A Complete Guide is for</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the nigeria is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
+  <div class="code-header"><span class="code-lang">C# · SUBMISSION HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Fired from a graph extension on ARInvoiceEntry.Release, or from
+// a Business Event handler — either way this queues, never blocks.
+public class FIRSInvoiceSubmitter
+{
+    public FIRSSubmission Submit(ARInvoice invoice, List&lt;ARTran&gt; lines)
+    {
+        var payload = new
+        {
+            sellerTin = CompanySettings.Current.TaxRegistrationID,
+            buyerTin = invoice.GetExtension&lt;ARInvoiceExt&gt;().UsrBuyerTIN,
+            invoiceNumber = invoice.RefNbr,
+            currency = "NGN",
+            totalAmount = invoice.CuryDocTotal,
+            vatAmount = invoice.CuryTaxTotal,   // 7.5% standard rate
+            lines = lines.Select(l =&gt; new {
+                description = l.TranDesc,
+                quantity = l.Qty,
+                unitPrice = l.CuryUnitPrice,
+                lineTotal = l.CuryTranAmt
+            })
+        };
+
+        var submission = new FIRSSubmission
+        {
+            InvoiceRefNbr = invoice.RefNbr,
+            Status = FIRSSubmissionStatus.Pending,
+            PayloadJson = JsonConvert.SerializeObject(payload)
+        };
+        PXDatabase.Insert&lt;FIRSSubmission&gt;(submission);
+
+        // Actual HTTP call happens on the retry schedule below,
+        // not inline — release must never wait on FIRS uptime.
+        return submission;
+    }
+
+    // Runs on an Acumatica automation schedule, picks up Pending/Failed rows.
+    public void ProcessQueue()
+    {
+        foreach (var sub in GetPendingOrFailedSubmissions())
+        {
+            try
+            {
+                var response = accessPointClient.PostInvoice(sub.PayloadJson);
+                sub.IRN = response.IRN;
+                sub.QRCodePayload = response.QRCode;
+                sub.Status = FIRSSubmissionStatus.Submitted;
+            }
+            catch (Exception ex)
+            {
+                sub.Status = FIRSSubmissionStatus.Failed;
+                sub.LastError = ex.Message;
+                sub.RetryCount++;
+            }
+            PXDatabase.Update&lt;FIRSSubmission&gt;(sub);
+        }
+    }
+}</code></pre>
 </div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>The performance of nigeria in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>Production nigeria looks different from development nigeria. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
+<h2 id="stamping-the-irn-and-qr-code">Stamping the IRN and QR code onto the invoice</h2>
+<p>Once a submission comes back <code>Submitted</code>, the IRN and QR code need to land on the printed or PDF invoice — usually as a QR image generated from the returned payload plus the IRN printed as text near the invoice total. In Acumatica this means extending the invoice report (RPX/Report Designer) to pull from the <code>FIRSSubmission</code> record rather than the AR Invoice DAC directly, and treating "no IRN yet" as a reason to either suppress the customer-facing PDF or watermark it as provisional, depending on what the business decides.</p>
+<h2 id="comparing-to-other-regional-regimes">Comparing to other regional e-invoicing regimes</h2>
+<p>If you've built Kenya eTIMS or Uganda EFRIS integrations already, the Nigeria FIRS shape will feel familiar — same category of problem, different vendor plumbing.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring nigeria first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with nigeria when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Authority</th><th>Country</th><th>Real-time artifact</th><th>Typical access route</th></tr>
+  <tr><td>FIRS</td><td>Nigeria</td><td>IRN + QR code</td><td>Accredited Access Point / System Integrator</td></tr>
+  <tr><td>KRA (eTIMS)</td><td>Kenya</td><td>Control unit invoice number + QR</td><td>OSCU/VSCU device or virtual signer</td></tr>
+  <tr><td>URA (EFRIS)</td><td>Uganda</td><td>Fiscal Document Number + QR</td><td>Direct EFRIS API or middleware</td></tr>
+  <tr><td>RRA</td><td>Rwanda</td><td>EBM-signed receipt number</td><td>Certified EBM device/software</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica nigeria firs integration — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>That is the working approach I use on FIRS integrations. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +189,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-uganda-ura-efris-integration/">Acumatica Uganda URA EFRIS Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

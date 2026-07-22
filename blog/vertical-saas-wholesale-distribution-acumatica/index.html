@@ -93,96 +93,46 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>General wholesale distribution is Acumatica Distribution Edition's home turf — Sales Order Management, Inventory, Purchasing, and WMS were built for exactly this business model, and most of what makes a wholesale implementation succeed or struggle is unglamorous: pricing/discount structure and multi-warehouse allocation logic, not any exotic feature gap.</p>
+
+<h2 id="pricing-structure">Pricing and discount tiers: model the real structure, not a simplified version of it</h2>
+<p>Wholesale distributors commonly run customer-tier pricing, volume breaks, and vendor-funded promotional pricing simultaneously. Acumatica's native pricing engine (Sales Price Classes, Customer Price Classes, Discount Sequences with break quantities) handles all of this natively, but the implementation risk is under-modeling it — collapsing what is actually a three-dimensional pricing matrix (customer tier × product category × volume break) into a flat price list because it is faster to set up, and then discovering during UAT that the sales team cannot actually quote the way they used to.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class WholesaleExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">DISCOUNT SEQUENCE — LAYERED PRICING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Sequence 1: Customer Price Class discount   (Tier A/B/C base pricing)
+Sequence 2: Volume break discount           (qty &gt;= 100 -&gt; extra 5%)
+Sequence 3: Vendor rebate-funded promo      (time-boxed, item-specific)
+-- Acumatica applies sequences in defined order; get the order wrong
+-- and a promo discount can compound incorrectly on top of a tier
+-- discount that was supposed to be the ceiling, not a stacking layer.</code></pre>
 </div>
-<h2 id="why-wholesale-on-a-horizontal-platform-beats-from-scratch">Why wholesale on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on wholesale distribution vertical saas on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="channel-partner-programs-for-distribution">Channel partner programs for distribution</h2>
-<p>When the work moves from design to production, the questions change. The wholesale is not the question; the failure mode of the distribution is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'wholesale'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-wholesale">Marketplace listing for wholesale</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="multi-warehouse-allocation">Multi-warehouse allocation and drop-ship blending</h2>
+<p>A wholesale distributor with several warehouses needs sales order allocation logic that picks the right source warehouse (nearest, or cheapest to ship, or the one with stock) and gracefully splits a line across warehouses or falls back to drop-ship from a vendor when nobody has stock. Acumatica supports warehouse allocation rules and split-line fulfillment natively; the configuration work is defining the actual business priority (proximity vs. cost vs. stock availability) as rules rather than leaving allocation to whichever CSR is entering the order that day, which is what happens by default without a defined rule set.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Landed cost matters more than most wholesale implementations budget for</strong>
+  <p>If a distributor imports goods and duty, freight, and handling should be allocated into inventory cost (not expensed separately), Acumatica's Landed Cost functionality on Purchase Receipts handles this natively — but it needs to be configured and its allocation method (by value, weight, or quantity) chosen deliberately per cost type. Skipping it means margin reporting on imported goods is wrong by the exact amount of unallocated landed cost, silently.</p>
 </div>
-<h2 id="soc-2-and-iso-27001-for-distribution">SOC 2 and ISO 27001 for distribution</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM wholesale
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of distribution in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-wholesale-distribution-vertical-saas-on-acumatica-is-for">What Wholesale Distribution Vertical SaaS on Acumatica is for</h2>
-<p>Production distribution looks different from development distribution. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class WholesaleExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring distribution first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add wholesale on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with distribution when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on wholesale distribution vertical saas on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Wholesale distribution does not need much creative customization on Acumatica — it needs the pricing matrix, warehouse allocation rules, and landed cost configured to match the real business logic instead of a simplified version of it. This is the vertical where the platform fit is least in question and the implementation discipline is what determines the outcome.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-distribution-acumatica/">Beverage Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electrical-distribution-acumatica/">Electrical Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-food-distribution-acumatica/">Food Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-hvac-distribution-acumatica/">HVAC Distribution Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-purchase-orders-receipt-and-bill/">Acumatica Purchase Orders — Receipt and Bill</a></li>
+      <li><a href="/blog/acumatica-warehouse-management-wave-pick/">Acumatica Warehouse Management — Wave Picking</a></li>
+      <li><a href="/blog/vertical-saas-industrial-supply-acumatica/">Acumatica for Industrial Supply Distribution</a></li>
+      <li><a href="/blog/vertical-saas-petroleum-distribution-acumatica/">Acumatica for Petroleum Distribution</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

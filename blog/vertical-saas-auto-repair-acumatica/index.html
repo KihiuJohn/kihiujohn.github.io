@@ -93,96 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Multi-tenant data isolation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Independent auto repair shops and small chains are a much better Acumatica fit than dealerships, precisely because the workflow is lighter: no floorplan financing, no F&I deal desking, no factory warranty claims. What a repair shop actually needs — job/work order against a vehicle, parts consumed from inventory, labor time billed, invoice to the customer — maps onto Field Service plus Inventory reasonably directly, with the same honesty required about where it stops being a direct fit.</p>
+
+<h2 id="field-service-as-the-ro-screen">Field Service appointments as repair orders</h2>
+<p>The Field Service module's Appointment and Service Order objects cover the shape of a repair order well: customer and vehicle (modeled as Equipment records — Field Service's Equipment entity, normally used for serviced assets like HVAC units, works for vehicles with VIN, make/model/year as attributes), scheduled technician time, and a bill of parts and labor that flows to invoicing. This is a legitimate use of Field Service outside its typical field-technician-visiting-a-customer-site use case, and I have deployed it this way for a shop chain — the module does not care whether the "site" is the customer's home or your own bay.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AutoExt : PXCacheExtension<Repair>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">FIELD SERVICE EQUIPMENT RECORD AS A VEHICLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Equipment ID:     VIN-2GNAXHEV1J...
+Equipment Class:  VEHICLE
+Attributes:       Make=Toyota, Model=Hilux, Year=2019, Mileage=84200
+Owner (BAccount): linked to the customer account
+Service History:  every Appointment/Service Order against this Equipment ID
+                   gives you repair history automatically, for free</code></pre>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>In the work I have done on auto repair shop management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>When the work moves from design to production, the questions change. The auto is not the question; the failure mode of the repair is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'auto'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="parts-consumption">Parts consumption from a shop-floor bin, not a warehouse</h2>
+<p>Parts used on a repair order issue from inventory the same way any Field Service or Sales Order line does — the practical setup decision is treating the shop's parts room as its own warehouse/location so consumption is tracked against the actual repair order and gross margin per RO is visible (parts cost plus labor versus what was billed). Shops that skip this and just expense parts to a general COGS account lose per-job profitability entirely, which is usually the first report an owner asks for once the system is live.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Flat-rate labor guides are the one real gap</strong>
+  <p>Repair shops using industry flat-rate labor time guides (Mitchell, ALLDATA, or similar — "this job is billed at 2.3 hours regardless of actual time") have no native Acumatica equivalent; that is external labor-guide software, integrated at best via a manual reference or a custom lookup table you maintain yourself. Acumatica bills whatever labor time is entered on the service order — it does not know industry standard times for a brake job on a given model.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM auto
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="why-auto-on-a-horizontal-platform-beats-from-scratch">Why auto on a horizontal platform beats from-scratch</h2>
-<p>The performance of repair in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="channel-partner-programs-for-repair">Channel partner programs for repair</h2>
-<p>Production repair looks different from development repair. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AutoExt : PXCacheExtension<Repair>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring repair first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add auto on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with repair when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="why-this-is-lighter-than-a-dealership">Why this works where the dealership case does not</h2>
+<p>The dealership problem is fundamentally about deal-desking and DMV/title workflows that have no Acumatica analog at all. A repair shop's core loop — schedule, consume parts, bill labor, invoice — is exactly what Field Service plus Inventory already do for HVAC, equipment service, and similar businesses; automotive is just the vertical, not a different workflow shape. That is why I recommend Acumatica directly for repair shop clients where I steer dealership clients toward "keep your DMS, integrate the GL."</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on auto repair shop management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Auto repair is a legitimately good Field Service + Inventory deployment, not a compromise. The two things to plan for deliberately are treating the parts room as its own trackable location (for real per-RO margin) and accepting that flat-rate labor guide integration, if the client wants it, is external — Acumatica does not ship industry labor-time standards.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-auto-dealership-acumatica/">Auto Dealership Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-automotive-parts-acumatica/">Automotive Parts Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-field-service-dispatch-board/">Acumatica Field Service Dispatch Board</a></li>
+      <li><a href="/blog/vertical-saas-auto-dealership-acumatica/">Acumatica for Auto Dealerships</a></li>
+      <li><a href="/blog/acumatica-case-screen-deep-dive/">Acumatica Case Screen Deep Dive</a></li>
+      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Acumatica for Automotive Parts Distribution</a></li>
+      <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts Extension</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

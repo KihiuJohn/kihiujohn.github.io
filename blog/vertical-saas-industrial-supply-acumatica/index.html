@@ -93,96 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Industrial supply distributors — MRO (maintenance, repair, operations) houses selling fasteners, safety gear, tooling, and consumables into manufacturing plants — are close to the textbook Distribution Edition use case. The configuration work that actually moves the needle for this vertical is replenishment tuning, not anything exotic, because MRO distribution lives or dies on fill rate against a catalog that can run into tens of thousands of SKUs with wildly uneven velocity.</p>
+
+<h2 id="replenishment-is-the-core-decision">Min/max versus reorder-point-and-EOQ versus full MRP — pick deliberately per SKU class</h2>
+<p>Acumatica's Inventory module supports several native replenishment approaches at the item/warehouse level: simple min/max, reorder point with economic order quantity calculation, and full MRP-based planning against forecast and demand history. For a typical MRO catalog, applying one method uniformly across the whole SKU base is the most common implementation mistake I see — high-velocity fasteners and safety consumables genuinely suit min/max with tight reorder points, while slow-moving specialty tooling suits MRP-driven planning against actual demand signals, and treating both the same way either ties up cash in overstocked fast movers or stocks out on slow movers that a customer needed exactly once a quarter.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class IndustrialExt : PXCacheExtension<Supply>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ITEM CLASS REPLENISHMENT SEGMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Item Class: FAST-MOVER (fasteners, gloves, consumables)
+  Replenishment Source: Purchase to Order
+  Method: Min/Max
+  Review: Automatic reorder point recalculation, quarterly, from usage history
+
+Item Class: SLOW-MOVER (specialty tooling, low-velocity parts)
+  Replenishment Source: Purchase to Order
+  Method: MRP-planned (time-phased against actual demand)
+  Safety Stock: Minimal — accept longer lead time over carrying cost</code></pre>
 </div>
-<h2 id="why-industrial-on-a-horizontal-platform-beats-from-scratch">Why industrial on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on industrial supply distribution vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<h2 id="vendor-managed-inventory">Vendor-managed inventory (VMI) at the customer site is a real Distribution Edition pattern</h2>
+<p>MRO distributors increasingly run VMI programs — stocking bins at a plant customer's site and replenishing based on consumption the distributor tracks. Acumatica does not ship a VMI-specific screen, but the pattern is achievable with a customer-owned warehouse/location (a warehouse record representing the customer's site, still owned in the distributor's Acumatica instance) and either barcode-scan replenishment counts or an integration to a smart-bin/IoT sensor feed that creates transfer or sales orders automatically when a threshold is crossed. This is genuinely a build, not a toggle — I am explicit that "Acumatica has VMI" oversells what exists natively.</p>
+
+<div class="callout-warn callout">
+  <strong>Kitting and value-added services need explicit BOM modeling</strong>
+  <p>MRO distributors that assemble kits (a "confined space entry kit" bundling a harness, gas monitor, and rope from different vendors) need those modeled as a light-assembly BOM (a kit item, not a manufacturing BOM), with the assembly step as a simple inventory transaction. It is native Distribution Edition functionality but is frequently left unconfigured because it looks like a "manufacturing feature" and gets skipped in a pure-distribution scope — worth calling out explicitly during discovery.</p>
 </div>
-<h2 id="channel-partner-programs-for-supply">Channel partner programs for supply</h2>
-<p>When the work moves from design to production, the questions change. The industrial is not the question; the failure mode of the supply is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'industrial'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-industrial">Marketplace listing for industrial</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-supply">SOC 2 and ISO 27001 for supply</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM industrial
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of supply in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-industrial-supply-distribution-vertical-on-acumatica-is-for">What Industrial Supply Distribution Vertical on Acumatica is for</h2>
-<p>Production supply looks different from development supply. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class IndustrialExt : PXCacheExtension<Supply>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring supply first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add industrial on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with supply when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on industrial supply distribution vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Industrial supply distribution is a strong native fit for Distribution Edition. The highest-leverage implementation decision is segmenting replenishment method by SKU velocity class rather than applying one method catalog-wide, and recognizing that VMI, while achievable, is a built pattern on top of the platform, not a shipped feature.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-distribution-acumatica/">Beverage Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electrical-distribution-acumatica/">Electrical Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-food-distribution-acumatica/">Food Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-hvac-distribution-acumatica/">HVAC Distribution Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-purchase-orders-receipt-and-bill/">Acumatica Purchase Orders — Receipt and Bill</a></li>
+      <li><a href="/blog/acumatica-warehouse-management-wave-pick/">Acumatica Warehouse Management — Wave Picking</a></li>
+      <li><a href="/blog/vertical-saas-wholesale-distribution-acumatica/">Acumatica for Wholesale Distribution</a></li>
+      <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
+      <li><a href="/blog/acumatica-mrp-planned-orders-explained/">Acumatica MRP — Planned Orders Explained</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

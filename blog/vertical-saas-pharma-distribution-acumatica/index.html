@@ -93,96 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Vertical SaaS metrics that matter is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Pharmaceutical distribution is unglamorous, expiry-driven inventory work at a scale where a spreadsheet stops being viable somewhere around a few hundred SKUs, and Acumatica's Distribution Edition is built for exactly that shape of problem. This is the second vertical in this cluster I can recommend without hedging — the native inventory engine, not a bolt-on module, does the heavy lifting.</p>
+
+<h2 id="fefo-not-fifo">FEFO, not FIFO, and why the difference is configuration not code</h2>
+<p>Acumatica's issue methods for lot/serial-tracked items include an Expiration method — pick the soonest-to-expire lot first — alongside FIFO, LIFO, and Sequential. For pharma distribution this should be the default issue method on every expiry-tracked item, set at the Lot/Serial Class level so it is not something a warehouse picker can override by habit.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class PharmaceuticalExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · LOT/SERIAL CLASS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Lot/Serial Class:      PHARMA-EXP
+Segment Key:            Assigned at Receipt
+Track Expiration Date:  Yes
+Issue Method:           Expiration (FEFO)
+Days before Expiration
+  to warn on issue:      30
+Profile:                 Lot Numbered</code></pre>
 </div>
-<h2 id="what-pharmaceutical-distribution-vertical-on-acumatica-is-for">What Pharmaceutical Distribution Vertical on Acumatica is for</h2>
-<p>In the work I have done on pharmaceutical distribution vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>When the work moves from design to production, the questions change. The pharmaceutical is not the question; the failure mode of the distribution is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'pharmaceutical'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>The 30-day warning threshold is a soft control — it flags a pick that would issue near-expiry stock, but a warehouse user can still confirm it. For controlled categories, some clients back that with a workflow approval step on the shipment so a near-expiry pick needs sign-off rather than a dismissible warning. That is a small customization on the Shipment screen's persist logic, not a platform limitation.</p>
+
+<h2 id="controlled-substance-adjacent">Controlled-substance-adjacent inventory discipline</h2>
+<p>I am careful with the word "controlled substance" — Acumatica has no native DEA Schedule II-V workflow, no ARCOS reporting, and no built-in chain-of-custody signature capture. If you distribute scheduled drugs in the US, that regulatory layer is a specialized add-on or a dedicated system, full stop. What Acumatica does give you natively, which covers a large share of the actual inventory discipline: full lot genealogy from receipt to shipment, a hard audit trail on every inventory transaction (who, when, quantity, lot), and role-based restriction on who can perform inventory adjustments versus who can only view them. That is real infrastructure a controlled-substance compliance layer would sit on top of, not a substitute for it.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Recall drill: test it before you need it</strong>
+  <p>The genealogy trace is only as good as your receiving discipline. If a receiving clerk keys a lot number by hand and typos it, the trace breaks silently — the system will not tell you it lost the thread. I run a mock recall with every pharma distribution client during UAT: pick a real lot, ask them to find every customer shipment that contains it, and time it. If it takes longer than fifteen minutes, the gap is almost always inconsistent lot capture at receiving, not a system limitation.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM pharmaceutical
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The performance of distribution in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Production distribution looks different from development distribution. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class PharmaceuticalExt : PXCacheExtension<Distribution>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring distribution first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pharmaceutical on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with distribution when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="cold-chain">Temperature and cold-chain: outside the ERP's job</h2>
+<p>Some pharma distribution involves cold-chain product. Acumatica has no temperature-monitoring capability — that data comes from IoT sensors or a warehouse management system and gets attached to the lot record via the REST API as a custom attribute or a linked document, at best. Do not let a client believe the ERP is monitoring cold-chain integrity; it is recording data that a monitoring system feeds it.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pharmaceutical distribution vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>For expiry-driven pharma distribution, Acumatica's native FEFO issuing, lot genealogy, and inventory audit trail are genuinely strong and need no apology. Scheduled-substance regulatory workflows and cold-chain monitoring are not native — plan for a specialized integration for those, and use the ERP's real strength (traceable, auditable inventory movement) as the foundation they sit on.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-automotive-parts-distribution-acumatica/">Automotive Parts Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-distribution-acumatica/">Beverage Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electrical-distribution-acumatica/">Electrical Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-food-distribution-acumatica/">Food Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-hvac-distribution-acumatica/">HVAC Distribution Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Number Tracking</a></li>
+      <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
+      <li><a href="/blog/acumatica-report-inventory-valuation-tuning/">Acumatica Report — Inventory Valuation Tuning</a></li>
+      <li><a href="/blog/acumatica-inventory-adjustment-screen/">Acumatica Inventory Adjustment Screen Deep Dive</a></li>
+      <li><a href="/blog/vertical-saas-pharma-manufacturing-acumatica/">Pharma Manufacturing Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

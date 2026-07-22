@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PXCache vs PXSelect in Acumatica — Choosing the Right Tool | John Kihiu</title>
-<meta name="description" content="PXCache vs PXSelect in Acumatica — Choosing the Right Tool is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="I still see this question in code review more than almost any other: should this line read from Base.Caches[typeof(ARInvoice)] or run a fresh PXSelect ?">
 <meta name="keywords" content="Acumatica customization, Acumatica cache, Acumatica dac, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-pxcache-vs-pxselect-choosing/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PXCache vs PXSelect in Acumatica — Choosing the Right Tool">
-<meta property="og:description" content="PXCache vs PXSelect in Acumatica — Choosing the Right Tool is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="I still see this question in code review more than almost any other: should this line read from Base.Caches[typeof(ARInvoice)] or run a fresh PXSelect ?">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-pxcache-vs-pxselect-choosing.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-pxcache-vs-pxselect-choosing/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="dac">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PXCache vs PXSelect in Acumatica — Choosing the Right Tool","description":"PXCache vs PXSelect in Acumatica — Choosing the Right Tool is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxcache-vs-pxselect-choosing.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxcache-vs-pxselect-choosing/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PXCache vs PXSelect in Acumatica — Choosing the Right Tool","description": "I still see this question in code review more than almost any other: should this line read from Base.Caches[typeof(ARInvoice)] or run a fresh PXSelect ?","image":"https://kihiujohn.github.io/assets/og/acumatica-pxcache-vs-pxselect-choosing.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxcache-vs-pxselect-choosing/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PXCache vs PXSelect in Acumatica — Choosing the Right Tool","item":"https://kihiujohn.github.io/blog/acumatica-pxcache-vs-pxselect-choosing/"}]}
@@ -87,106 +87,86 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</span></nav>
     <span class="tag">SaaS · Customization</span>
     <h1>PXCache vs PXSelect in Acumatica — Choosing the Right Tool</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PXCache vs PXSelect in Acumatica — Choosing the Right Tool is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">I still see this question in code review more than almost any other: should this line read from Base.Caches[typeof(ARInvoice)] or run a fresh PXSelect ?</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>On a SaaS P&L, this is rarely the headline. The headline is revenue and churn. this is the metric that tells you whether the headline is going up or down. This article is how to measure it correctly and how to act on it.</p>
-<h2 id="why-pxcache-is-the-first-thing-to-look-at">Why pxcache is the first thing to look at</h2>
-<p>Why pxcache is the first thing to look at is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>I still see this question in code review more than almost any other: should this line read from <code>Base.Caches[typeof(ARInvoice)]</code> or run a fresh <code>PXSelect</code>? They look interchangeable in a lot of tutorials, and in a narrow sense they even return the same rows sometimes. But they answer different questions, and picking the wrong one is how I've seen customizations silently show stale data, or worse, hammer the database inside a loop that should have been a single cache lookup.</p>
+
+<h2 id="what-each-actually-is">PXCache is memory, PXSelect is a query</h2>
+<p><code>PXCache</code> is the in-memory, per-graph-instance object holding rows the graph has already loaded or touched this session - every row it knows about, tagged Inserted/Updated/Deleted/Unchanged, available without touching SQL Server at all. <code>PXSelect</code> (and its BQL cousins) is a query definition that, when you call <code>.Select(...)</code>, executes against the database - but with an important caveat: BQL selects are cache-aware too. A <code>PXSelect</code> against a DAC the graph already has cached rows for will return cache-tracked instances for any row already present, and only round-trip to SQL for rows it doesn't yet hold. So the two aren't strictly "memory vs database" - PXSelect is "database, filtered through the cache," while direct cache access is "memory, no query at all."</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Reading current graph state</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Cache access - no SQL, reads whatever is already tracked this session
+PXCache cache = Base.Caches[typeof(ARInvoice)];
+var cachedRows = cache.Cached.Cast&lt;ARInvoice&gt;();
+
+// PXSelect - a real query, cache-aware but will hit SQL for anything
+// not already tracked
+ARInvoice inv = PXSelect&lt;ARInvoice,
+    Where&lt;ARInvoice.refNbr, Equal&lt;Required&lt;ARInvoice.refNbr&gt;&gt;&gt;&gt;
+    .Select(Base, refNbr);
+</code></pre>
 </div>
-<h2 id="how-pxselect-distorts-the-picture">How pxselect distorts the picture</h2>
-<p>In the work I have done on pxcache vs pxselect in acumatica — choosing the right tool, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>When the work moves from design to production, the questions change. The pxcache is not the question; the failure mode of the pxselect is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="the-cohort-retention-curve-for-pxcache">The cohort retention curve for pxcache</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="when-cache-is-correct">Use the cache when you need "what the user is looking at right now"</h2>
+<p>The cache is the right tool whenever you need the in-session, possibly-unsaved state of a row - a value the user just typed but hasn't saved yet, or a row that was inserted this session and has no primary key in the database at all. <code>Base.Transactions.Current</code>, <code>Base.Transactions.Select().FirstTableItems</code>, and <code>Base.Transactions.Cache.GetStatus(row)</code> are all cache reads. A BQL select at this point would either miss the unsaved row entirely (it doesn't exist in SQL yet) or return the persisted version instead of the version with the user's in-flight edit, which is the exact bug I've been called in to fix more than once - a validation handler that "worked in testing" because the test always saved first, then failed for real users editing a grid line that hadn't posted yet.</p>
+
 <div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+  <strong>Cache.Locate and Cache.Cached are cheap; use them inside loops</strong>
+  <p>If you're iterating existing rows to find one matching a key, <code>cache.Locate(row)</code> or a LINQ filter over <code>cache.Cached</code> costs nothing beyond an in-memory scan. I've refactored more than one graph extension that ran a <code>PXSelect</code> inside a foreach loop over rows the graph already had cached - an easy sub-second-to-multi-second regression on a grid with a few hundred lines, fixed by replacing the query with a cache read.</p>
 </div>
-<h2 id="when-pxcache-is-a-leading-indicator-vs-a-lagging-one">When pxcache is a leading indicator vs a lagging one</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="when-pxselect-is-correct">Use PXSelect when you need data outside this graph's current state</h2>
+<p>PXSelect is correct whenever the data you need isn't guaranteed to already be loaded into this graph's cache - a lookup against a different DAC entirely, an aggregate across rows the user hasn't scrolled to, or any query where the WHERE clause depends on something other than "rows already in memory." Trying to satisfy this from the cache means manually filtering <code>cache.Cached</code>, which only contains what's been loaded - if the graph hasn't selected those rows yet, they simply aren't there, and a cache-only approach will silently return an empty or partial result instead of the correct one.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, pxselect, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Cross-DAC lookup, PXSelect is correct here</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.FieldUpdated&lt;ARInvoice.customerID&gt; e)
+{
+    if (e.Row == null) return;
+    // The graph has no reason to already have Customer rows cached -
+    // this must be a real query.
+    Customer cust = PXSelect&lt;Customer,
+        Where&lt;Customer.bAccountID, Equal&lt;Required&lt;Customer.bAccountID&gt;&gt;&gt;&gt;
+        .Select(Base, e.Row.CustomerID);
+    if (cust?.CreditHold == true)
+        e.Cache.RaiseExceptionHandling&lt;ARInvoice.customerID&gt;(e.Row, e.Row.CustomerID,
+            new PXSetPropertyException("Customer is on credit hold.", PXErrorLevel.Warning));
+}</code></pre>
 </div>
-<h2 id="what-pxcache-vs-pxselect-in-acumatica-choosing-the-right-tool-actually-measures">What PXCache vs PXSelect in Acumatica — Choosing the Right Tool actually measures</h2>
-<p>The performance of pxselect in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Production pxselect looks different from development pxselect. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pxselect first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pxcache on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pxselect when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="the-staleness-trap">The trap that catches experienced developers: cache reads can be stale relative to the database</h2>
+<p>A subtlety that bites people who otherwise understand the distinction: if another process (a different graph instance, a scheduled task, a direct SQL update) changed a row after this graph's cache last loaded it, reading from this graph's cache returns the stale in-memory copy, not the current database state. If correctness genuinely requires "the database's current value, not what I last saw," you need an explicit fresh select - and in a few cases, <code>PXSelect</code>'s own cache-awareness works against you here too, because it will still return the cache-tracked instance rather than re-querying. Forcing a true re-read means either clearing the row from the cache first or, for the rare cases that need it, dropping to <code>PXDatabase</code> directly, which always hits SQL and never touches the cache (a distinction that deserves its own detailed treatment).</p>
+
+<h2 id="decision-rule">The rule I actually use</h2>
+<ul>
+<li>Need the current graph's in-session, possibly-unsaved state? Read the cache.</li>
+<li>Need data this graph hasn't necessarily loaded, from any DAC? Use PXSelect.</li>
+<li>Iterating rows you already know are loaded (a grid's current rows, for example)? Cache - don't re-query what you already have.</li>
+<li>Need a guaranteed-fresh read regardless of what any graph has cached? Neither - that's a PXDatabase-level concern.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pxcache vs pxselect in acumatica — choosing the right tool. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>PXCache and PXSelect aren't competing ways to do the same thing - they answer "what does this graph currently believe" versus "what does a query against this criteria return," and BQL's cache-awareness blurs the line just enough to cause real bugs when you assume one always means the other. Reach for the cache for in-session state and iteration over rows you already hold, and reach for a real select the moment you need something outside what this graph instance has already loaded.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-pxdatabase-insert-vs-cache-insert/">PXDatabase.Insert vs Cache.Insert in Acumatica</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
+      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

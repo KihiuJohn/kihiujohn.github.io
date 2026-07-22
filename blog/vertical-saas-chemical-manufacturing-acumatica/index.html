@@ -93,96 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real vertical SaaS projects, this is rarely the question. The question is the multi-tenant data isolation, the feature flags, the channel partner program. This article is the implementation.</p>
-<h2 id="channel-partner-programs-for-manufacturing">Channel partner programs for manufacturing</h2>
-<p>Channel partner programs for manufacturing is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Chemical manufacturers evaluating Acumatica ask a narrower, sharper question than most verticals: not "can it make things" but "can it prove what went into this batch, six months after the fact, when a regulator or a customer's QA department asks." That is a lot genealogy question, and it is where Acumatica Manufacturing Edition's process-manufacturing support either earns its keep or falls short of what a client actually needs.</p>
+
+<h2 id="process-vs-discrete">Process manufacturing is BOM plus quantity flexibility, not a separate module</h2>
+<p>Acumatica does not have a distinct "process manufacturing" module the way some ERPs do (formula management as a first-class object separate from BOM). What it has is the standard Manufacturing Edition BOM/Routing engine used in a process-like way: formula-style BOMs where component quantities are percentages or ratios of a batch size, and Production Orders that consume raw materials by weight/volume rather than discrete unit counts. This works for most batch chemical processes, but it means "formula versioning" is really BOM revision management — effectivity dates and revision numbers on the BOM header — not a dedicated formula-history object. Set client expectations there before the demo, not after.</p>
+
+<h2 id="lot-genealogy">Lot genealogy: this part is genuinely strong</h2>
+<p>Where Acumatica does deliver real value is lot tracking through the full transaction chain. Every issue, receipt, and production consumption carries the lot number, and the <em>Where Used</em> / <em>Trace</em> inquiries (built on the standard <code>INLotSerTran</code> history) let you walk from a finished-goods lot back to every raw-material lot consumed in it, and forward from a raw-material lot to every finished lot it touched. For a recall scenario that is the whole ballgame.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ChemicalExt : PXCacheExtension<Manufacturing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">BQL · UPSTREAM LOT TRACE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Simplified trace: which raw material lots fed a given finished-goods lot
+SELECT LotSerialNbr, InventoryID, TranType, RefNbr
+FROM INTran
+WHERE TranType = 'I'                 -- issue to production
+  AND RefNbr IN (
+    SELECT DISTINCT OrderNbr FROM AMProdItem
+    WHERE FinishedLotSerialNbr = @finishedLot
+  )</code></pre>
 </div>
-<h2 id="marketplace-listing-for-chemical">Marketplace listing for chemical</h2>
-<p>In the work I have done on chemical manufacturing vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<p>Where I extend it: standard lot inquiries assume one level of consumption. For a multi-stage batch process (intermediate compound A feeds intermediate compound B feeds finished product), full genealogy needs a recursive trace across production orders, which I have built as a custom graph action that walks <code>AMProdItem</code> parent/child relationships and materializes the chain into a report, because the stock screens stop at one hop.</p>
+
+<div class="callout-warn callout">
+  <strong>Hazmat and regulatory data are not native fields</strong>
+  <p>Acumatica has no built-in SDS (Safety Data Sheet) management, DOT/IATA hazmat classification fields, or REACH/GHS compliance tracking. Clients in regulated chemical manufacturing consistently need these as custom attributes on the Stock Item screen plus a document-attachment discipline for SDS PDFs, or a third-party EHS system integrated via the REST API. I have never seen a chemical manufacturer skip this requirement, so budget for it from the first estimate rather than discovering it in UAT.</p>
 </div>
-<h2 id="soc-2-and-iso-27001-for-manufacturing">SOC 2 and ISO 27001 for manufacturing</h2>
-<p>When the work moves from design to production, the questions change. The chemical is not the question; the failure mode of the manufacturing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'chemical'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="what-chemical-manufacturing-vertical-on-acumatica-is-for">What Chemical Manufacturing Vertical on Acumatica is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM chemical
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The performance of manufacturing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Production manufacturing looks different from development manufacturing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ChemicalExt : PXCacheExtension<Manufacturing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring manufacturing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add chemical on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with manufacturing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="expiry-and-potency">Expiry dates and potency-adjusted quantities</h2>
+<p>Lot expiration is a native field (expiration date on the lot/serial class), and Acumatica will block issuing expired lots if the item class enforces it. What it will not do natively is potency-adjusted quantity — a raw material that is 92% pure this batch and 97% the next, requiring a yield-adjusted consumption quantity in the formula. That is a custom BOM quantity calculation, similar in shape to the apparel size-yield problem, just triggered by an assay result instead of a size code.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on chemical manufacturing vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica's lot genealogy and BOM revisioning cover the traceability backbone a chemical manufacturer needs, and cover it well. The gap is always the regulatory layer — SDS, hazmat classification, potency adjustment — which is customization or integration, not configuration. Scope that gap explicitly in the SOW; it is the single biggest source of change orders I have seen on chemical-manufacturing Acumatica projects.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-apparel-manufacturing-acumatica/">Apparel and Textile Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-automotive-parts-acumatica/">Automotive Parts Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-acumatica/">Beverage Manufacturing and Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-cosmetics-acumatica/">Cosmetics and Personal Care Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-electronics-manufacturing-acumatica/">Electronics Manufacturing Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/acumatica-manufacturing-bom-routing-basics/">Acumatica Manufacturing — BOM and Routing Basics</a></li>
+      <li><a href="/blog/vertical-saas-pharma-manufacturing-acumatica/">Acumatica for Pharmaceutical Manufacturing</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code Side</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

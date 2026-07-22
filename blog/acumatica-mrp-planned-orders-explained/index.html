@@ -93,107 +93,81 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMrpExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Mrp(Acumatica doc)
-    {
-        // Custom mrp logic for acumatica mrp planned
-        if (doc?.Mrp == null) return;
-        Base.Mrp(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica mrp — planned orders explained, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-mrp-edge-cases-i-have-shipped">The mrp edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the mrp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>The first time a client asked me why MRP was telling them to buy 4,000 units of a part they already had on the shelf, I learned more about Acumatica's planning engine in a week than the documentation had taught me in a year. Planned orders are the output of MRP, but understanding <em>why</em> a specific planned order exists means understanding the inputs the regeneration run consumed — and most "MRP is wrong" tickets turn out to be "the inputs were wrong."</p>
+<p>This post walks through how the MRP regeneration in the Acumatica Manufacturing Edition builds planned orders, where the data lives, and the diagnostic path I follow when the output looks insane.</p>
+
+<h2 id="what-a-planned-order-actually-is">What a planned order actually is</h2>
+<p>MRP in Acumatica is a full regeneration, not a net-change engine. When you run <strong>Regenerate MRP (AM505000)</strong>, the engine wipes the previous plan and rebuilds it from scratch: it nets gross requirements (sales orders, production demand from higher-level orders, forecasts) against supply (on-hand quantity, open purchase orders, open production orders), explodes BOMs level by level, offsets by lead time, and writes the shortfall as planned orders into the <code>AMRPPlan</code> and related tables.</p>
+<p>A planned order is a suggestion, nothing more. It has no document number in PO or Production terms, it reserves nothing, and it disappears on the next regeneration if the conditions that created it change. It only becomes real when someone fires it from <strong>MRP Display (AM400000)</strong> — at which point Acumatica creates an actual purchase order line or production order, and the next MRP run sees that as supply instead of re-suggesting it.</p>
+
+<h2 id="the-inputs-that-actually-drive-the-numbers">The inputs that actually drive the numbers</h2>
+<p>When a planned order quantity or date looks wrong, the cause is almost always one of these, roughly in order of how often I've seen it:</p>
+<ul>
+<li><strong>Item replenishment settings.</strong> The Manufacturing tab and replenishment settings on the stock item — source (Purchase vs Manufacture), lot size, minimum/maximum order quantity, and safety stock. A minimum order quantity of 5,000 will happily turn a demand for 12 units into a planned order for 5,000.</li>
+<li><strong>Lead times.</strong> Purchase lead time on the vendor or item, plus the MRP grace period. If lead time is zero, everything looks feasible; if it's wrong, action dates drift into the past and you get "past due" planned orders on day one.</li>
+<li><strong>Warehouse participation.</strong> Each warehouse has an MRP flag. Demand in a warehouse excluded from MRP simply doesn't exist to the engine — a classic source of "MRP missed this sales order."</li>
+<li><strong>Forecast and sales order consumption.</strong> If you load forecasts and also have real sales orders, the consumption settings decide whether they stack or the orders consume the forecast. Getting this wrong doubles demand.</li>
+<li><strong>BOM effectivity.</strong> The engine explodes the BOM that is effective on the planned date, not today's date. A future-dated BOM revision changes component requirements for orders planned past its start date.</li>
+</ul>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Check the exceptions screen first</strong>
+  <p>Before staring at planned orders, open <strong>MRP Exceptions</strong>. Move-in, move-out, expedite and cancel recommendations against existing supply are usually more actionable than the raw plan, and they tell you what MRP thinks about the orders you already have.</p>
 </div>
-<h2 id="how-to-debug-mrp-in-production">How to debug mrp in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="tracing-a-single-planned-order">Tracing a single planned order</h2>
+<p>MRP Display gives you pegging: select a planned order and drill into the requirements that generated it. I still sometimes go to the database when the pegging looks off, because seeing the raw plan rows makes the netting logic obvious:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT InventoryID, SiteID, PlanDate, ActionDate,
+       BaseQty, Type, RefNoteID
+FROM AMRPPlan
+WHERE CompanyID = 2
+  AND InventoryID = (SELECT InventoryID FROM InventoryItem
+                     WHERE InventoryCD LIKE 'BRKT-100%')
+ORDER BY PlanDate;</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of mrp in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-mrp-planned-orders-explained-matters-in-production">Why Acumatica MRP — Planned Orders Explained matters in production</h2>
-<p>Production mrp looks different from development mrp. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<p>Reading supply and demand rows in date order for one item is the fastest way I know to answer "why did it suggest this quantity on this date." You can see the running balance dip below safety stock and the planned order appear exactly where the engine decided it had to.</p>
+
+<h2 id="firing-planned-orders-programmatically">Firing planned orders programmatically</h2>
+<p>On one project the planners wanted approved planned orders converted automatically overnight rather than clicked through MRP Display. The supported way is the same as any mass action: instantiate the graph, set the filter, mark rows selected, and invoke the action. Roughly:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMrpExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var graph = PXGraph.CreateInstance&lt;MRPEngine&gt;(); // MRP display graph
+foreach (AMRPDetail row in graph.Detailrecs.Select())
 {
-    [PXOverride]
-    public virtual void Mrp(Acumatica doc)
+    if (row.Type != MRPPlanningType.PlannedOrder) continue;
+    if (ShouldFire(row))                    // your approval rule
     {
-        // Custom mrp logic for acumatica mrp planned
-        if (doc?.Mrp == null) return;
-        Base.Mrp(doc);
+        row.Selected = true;
+        graph.Detailrecs.Update(row);
     }
-}</code></pre>
+}
+graph.Actions["CreateOrders"].Press();      // fires selected rows</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mrp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mrp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Two gotchas from doing this in production. First, run it on a processing schedule <em>after</em> the nightly MRP regeneration completes, never overlapping — firing against a half-built plan creates duplicates. Second, log every fired order with its pegged demand; when a planner asks "why did the system buy this," you want an answer that doesn't involve reconstructing last Tuesday's plan.</p>
+
+<h2 id="performance-and-scheduling-the-run">Performance and scheduling the run</h2>
+<p>Regeneration is heavy — it locks planning tables and chews CPU roughly in proportion to BOM depth times active items times open orders. Practical rules I follow: run it once nightly via an automation schedule during the quietest window; keep BOMs shallow where the engineering allows it (phantoms are cheaper than real subassembly levels); and archive or close stale sales orders and production orders, because MRP dutifully plans for demand from 2023 if you leave it open.</p>
+<p>If the run takes more than an hour on a mid-size dataset, look at SQL before looking at Acumatica settings — missing index maintenance on the MRP tables shows up here first.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica mrp — planned orders explained. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Planned orders are deterministic: same inputs, same plan. Every "MRP is broken" investigation I've done ended in a data problem — a lot size, a lead time, a warehouse flag, an open order someone forgot to close. Learn to read the plan rows for a single item in date order, fix the input, regenerate, and the suggestion fixes itself. Treat the planned order as the messenger, not the problem.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-bill-of-material-screen/">Acumatica Bill of Material Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-cost-rollup-and-standard-costing/">Acumatica Cost Rollup and Standard Costing</a></li>
       <li><a href="/blog/acumatica-manufacturing-bom-routing-basics/">Acumatica Manufacturing — BOM and Routing Basics</a></li>
       <li><a href="/blog/acumatica-production-order-lifecycle/">Acumatica Production Order Lifecycle</a></li>
+      <li><a href="/blog/acumatica-cost-rollup-and-standard-costing/">Acumatica Cost Rollup and Standard Costing</a></li>
+      <li><a href="/blog/acumatica-production-scheduling-finite-vs-infinite/">Acumatica Production Scheduling — Finite vs Infinite</a></li>
+      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica AM Manufacturing Extension</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

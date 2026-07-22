@@ -93,107 +93,66 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Billing rules are the piece of the Projects module that translates accumulated cost and effort into an actual customer invoice, and they're also one of the more misunderstood extension points — the rule engine is more configurable than most people assume, and custom code should only fill the specific gap configuration can't reach.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p><code>PMBillingRule</code> defines how project transactions on <code>PMTran</code> get converted into invoice lines — by cost-plus markup, by fixed milestone amount, by rate table lookup, or by a combination keyed on transaction type and cost code. Billing runs through a dedicated billing engine graph invoked from the project or from a batch billing process, which reads unbilled <code>PMTran</code> rows matching the rule's criteria and produces AR invoice data.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>Rate table and markup percentage differences by client, item category, or date range are usually expressible through the existing billing rule configuration (rate tables, effective-dated pricing). Custom code becomes necessary when the billing logic depends on something outside the rule engine's inputs — a contractual cap on total billable amount for a phase, a blended rate that changes based on cumulative hours billed to date, or an external approval gate before a milestone amount can be invoiced.</p>
+
+<div class="callout">
+  <strong>Check rate tables and effective dating before reaching for a graph extension</strong>
+  <p>A surprising share of "we need custom billing logic" requests turn out to be solvable with a rate table that has more granularity than whoever scoped the requirement assumed — different rates by employee class, by task type, effective on different dates. Confirm the rule engine's existing configuration options are actually insufficient before writing a graph extension; it's a smaller, more upgrade-safe deliverable if configuration covers it.</p>
+</div>
+
+<h2 id="a-realistic-scenario-contract-cap-enforcement">A realistic scenario: contract cap enforcement</h2>
+<p>A frequent PM billing customization: a fixed-fee phase has a not-to-exceed cap, and the billing run needs to stop generating invoice amounts once cumulative billed-to-date hits the cap, flagging the excess as unbilled overage for internal cost tracking rather than silently invoicing over the contracted amount.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaBillingExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · BILLING ENGINE EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ProjectBillingEngine_ContractCap_Extension : PXGraphExtension&lt;ProjectBillingEngine&gt;
 {
-    [PXOverride]
-    public virtual void Billing(Acumatica doc)
+    protected virtual decimal ApplyContractCap(PMTask task, decimal proposedAmount)
     {
-        // Custom billing logic for acumatica billing rule
-        if (doc?.Billing == null) return;
-        Base.Billing(doc);
+        decimal billedToDate = GetBilledToDate(task.TaskID);
+        decimal cap = GetContractCap(task.TaskID);
+        if (cap &lt;= 0) return proposedAmount; // no cap configured, bill as computed
+
+        decimal remainingCapacity = Math.Max(0, cap - billedToDate);
+        if (proposedAmount &gt; remainingCapacity)
+        {
+            LogOverageForReview(task.TaskID, proposedAmount - remainingCapacity);
+            return remainingCapacity;
+        }
+        return proposedAmount;
     }
 }</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on acumatica billing rule — extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the billing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-billing-edge-cases-i-have-shipped">The billing edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-billing-in-production">How to debug billing in production</h2>
-<p>The performance of billing in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>Production billing looks different from development billing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaBillingExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Billing(Acumatica doc)
-    {
-        // Custom billing logic for acumatica billing rule
-        if (doc?.Billing == null) return;
-        Base.Billing(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring billing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with billing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Logging the overage rather than discarding it matters — project managers need visibility into work performed but not billable under the contract, both for staffing decisions and for the inevitable change-order conversation with the client.</p>
+
+<h2 id="revenue-recognition-alignment">Revenue recognition alignment</h2>
+<p>If revenue is recognized on a basis different from what's actually billed (percentage-of-completion vs. milestone billing, for instance), a billing rule customization needs to be checked against how it interacts with revenue recognition calculations — capping what's billed without adjusting what's recognized can create a mismatch between AR and recognized revenue that finance will have to reconcile manually every period.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test a full contract lifecycle: several billing runs approaching the cap, one that hits it exactly, and one that would exceed it — off-by-one and rounding errors in cap enforcement are common, and they're the kind of bug that only shows up on the run that actually crosses the threshold, not the several before it.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica billing rule — extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Billing rule extensions pay off when they're scoped to the genuine gap between what the rule engine can already express and what the contract requires. Confirm rate tables and effective dating first, keep overage visible rather than silently discarded, and check alignment with revenue recognition before calling a cap-enforcement customization done.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
       <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica Projects Module — Extension Patterns</a></li>
       <li><a href="/blog/acumatica-time-entry-customisation/">Acumatica Time Entry — Customisation Patterns</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
+      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

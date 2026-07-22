@@ -93,100 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The SaaS playbook in 2026 has stabilised. this is one of the metrics that the playbook tracks. The benchmark is the median for your stage; the goal is to be above the benchmark. This article is the benchmark, the goal, and how to improve.</p>
-<h2 id="when-staffing-is-a-leading-indicator-vs-a-lagging-one">When staffing is a leading indicator vs a lagging one</h2>
-<p>When staffing is a leading indicator vs a lagging one is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Staffing agencies are the hardest of the professional-services verticals to get right on Acumatica, and the reason is specific: pay-and-bill spread margin, computed per contractor per timesheet, at volume, with the pay side and the bill side needing to reconcile constantly. Get the architecture wrong and you either can't see true margin until month-end close, or you're maintaining two parallel systems that drift apart.</p>
+
+<h2 id="pay-and-bill-core">The core pattern: bill rate and pay rate on the same timesheet line</h2>
+<p>Every hour a contractor works generates two numbers: what the client is billed, and what the contractor (or the staffing firm's payroll, if W-2, or the contractor's own invoice, if 1099/subcontracted) is paid. The spread between them is the agency's gross margin, and it needs to be visible per timesheet line, not reconstructed later. Model each active assignment as a Project (or lightweight Project-Task) with both a Customer billing rate and an Employee/Vendor cost rate configured — the same rate-resolution mechanism consulting firms use for T&M billing, just with cost rate populated deliberately rather than left at a default.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">PM207000 · PAY-AND-BILL RATE SETUP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Assignment: Contractor #4471 -> Client "Acme Logistics", Warehouse Ops
+  Bill Rate (to client):   $42.00/hr
+  Pay Rate (to contractor): $28.00/hr   (W-2) or Vendor AP rate (1099)
+  Spread:                   $14.00/hr = 33% gross margin
+
+Timesheet line generates BOTH:
+  - AR billable time activity at Bill Rate
+  - Payroll/AP cost entry at Pay Rate
+  Margin visible per line, not just at invoice/payroll run</code></pre>
 </div>
-<h2 id="what-staffing-agency-vertical-on-acumatica-actually-measures">What Staffing Agency Vertical on Acumatica actually measures</h2>
-<p>In the work I have done on staffing agency vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<h2 id="w2-vs-1099">W-2 payroll vs 1099/subcontracted — different Acumatica paths</h2>
+<p>If contractors are W-2 employees, pay flows through Acumatica Payroll (or an integrated payroll provider) against the Employee record, with time captured the same way as any Projects timesheet. If contractors are 1099/subcontracted through a vendor arrangement, cost flows through AP as a vendor bill against the same Project/Task, coded from the timesheet rather than manually re-keyed. Firms running a mix of both (common — W-2 for longer assignments, 1099 for short ones) need both paths live simultaneously, coded to the same Project structure so a single margin report works across the mix; building two separate reporting paths for W-2 vs 1099 margin is a maintenance trap I'd actively avoid.</p>
+
+<h2 id="timesheet-approval">Client timesheet approval is the workflow that actually needs building</h2>
+<p>Staffing firms typically need the client (not just the contractor's manager) to approve hours before billing — a VMS (vendor management system) portal in larger accounts, or a simple approval email/portal for smaller ones. This is Acumatica's Workflow engine territory: a time activity in "pending client approval" state that can't be included in a billing run until approved, with a defined escalation if the client doesn't respond in a set window. Skipping this and billing on submitted-but-unapproved time is the fastest way to generate billing disputes.</p>
+
+<div class="callout-warn callout">
+  <strong>Do not compute margin only at invoice time</strong>
+  <p>If cost rate isn't captured at time-entry (left to be reconciled during payroll run days later), the agency runs blind on margin for every open assignment in between — and by the time a bad-margin assignment shows up in a month-end report, it's too late to renegotiate or pull the contractor. Populate both rates at assignment setup, before the first timesheet is ever entered.</p>
 </div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>When the work moves from design to production, the questions change. The staffing is not the question; the failure mode of the agency is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, agency, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>The performance of agency in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>Production agency looks different from development agency. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring agency first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add staffing on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with agency when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on staffing agency vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The whole staffing-on-Acumatica problem collapses to one discipline: capture bill rate and pay rate together, at assignment setup, on the same Project/Task structure that generates both the AR billing and the payroll/AP cost side — so margin is visible per timesheet line instead of reconstructed at month end. Everything else (W-2 vs 1099 paths, client approval workflow) is real but secondary to getting that rate pairing right from day one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen Deep Dive</a></li>
       <li><a href="/blog/vertical-saas-recruitment-acumatica/">Recruitment Agency Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-kenya-payroll-paye-setup/">Acumatica Kenya PAYE Payroll Setup — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-report-payroll-summary/">Acumatica Payroll Summary Report — Building It Right</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

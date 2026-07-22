@@ -93,107 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Margin-by-product reports are where the difference between "the report ran fine" and "the report told finance the right thing" really shows up, because product margin is sensitive to exactly which cost you compare revenue against, and there are at least three defensible answers depending on who's asking.</p>
+
+<h2 id="which-cost">Standard cost, actual cost, or landed cost — pick one on purpose</h2>
+<p>Sales wants margin against standard cost, because it's stable and lets them compare quoting decisions without variance noise from a supplier's bad week. Finance wants margin against actual issued cost, because that's what actually hit the P&L. If the product involves imported goods, landed cost (item cost plus freight, duty, and clearing charges allocated back to the item) can differ meaningfully from both. Building one report that silently uses whichever cost happens to be easiest to join produces a number that's defensible to nobody, because the person reading it assumes their definition was used. State the cost basis in the report title and offer it as an explicit toggle if more than one audience uses the same report.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMarginsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Margins(Acumatica doc)
-    {
-        // Custom margins logic for acumatica margins product
-        if (doc?.Margins == null) return;
-        Base.Margins(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SCHEMA — PARAMETERIZED COST BASIS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CostField = IIf([@CostBasis] = 'STD', InventoryItem.StdCost,
+             IIf([@CostBasis] = 'ACTUAL', SOShipLine.TranCost,
+                 InventoryItem.StdCost + LandedCostAllocation.AllocatedAmt))
+Margin = Revenue - (Qty * CostField)</code></pre>
 </div>
-<h2 id="how-to-debug-margins-in-production">How to debug margins in production</h2>
-<p>In the work I have done on acumatica margins by product report — building it right, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="product-vs-item-vs-category">Decide the grouping grain before building the schema</h2>
+<p>"Margin by product" means different things: by inventory item (thousands of rows, precise), by item class or product category (dozens of rows, useful for a management review), or by a custom product line grouping that doesn't map cleanly to Acumatica's item class hierarchy at all. Building the report at item grain and hoping the layout can roll it up to category with a group header is fine — but confirm the category assignment on <code>InventoryItem.ItemClassID</code> or whatever custom classification field the client actually uses is populated and maintained, because a margin-by-category report where half the items have no category assigned produces a large, wrong "Uncategorized" bucket that undermines trust in the whole report on day one.</p>
+
+<h2 id="returns-and-credits">Returns pull margin in a direction people don't expect</h2>
+<p>A returned item reverses revenue and reverses the matching cost — but if the return happens in a later period than the original sale, and your report groups by period, the return shows up as negative revenue with no matching cost in that period unless you also net the original cost reversal into the same period bucket. Left unhandled, this makes a period's margin percentage look artificially bad (revenue down, cost unchanged) purely because of return timing. Decide whether returns should net back into their original sale period or show in the return's own period as a deliberate variance line — either is defensible, but pick one and be consistent, and say which one the report does in a footnote.</p>
+<div class="callout-warn callout">
+  <strong>Freight and discount allocation skews per-line margin if ignored</strong>
+  <p>An order-level discount or freight charge that isn't allocated back down to line level will show every line at full undiscounted margin, overstating true product profitability. If the report is meant to represent true per-product margin, allocate header-level discounts and freight to lines proportionally (by line amount is the common default) rather than ignoring them because they live on a different table.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the margins is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-margins-by-product-report-building-it-right-matters-in-production">Why Acumatica Margins by Product Report — Building It Right matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of margins in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production margins looks different from development margins. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMarginsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Margins(Acumatica doc)
-    {
-        // Custom margins logic for acumatica margins product
-        if (doc?.Margins == null) return;
-        Base.Margins(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring margins first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with margins when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica margins by product report — building it right. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Pick and state a cost basis explicitly — standard, actual, or landed — because each answers a different question and none of them is more "correct" in the abstract. Confirm the grouping field is actually populated before building a category-level report around it, decide deliberately how returns net against period margin, and allocate header-level discounts and freight down to line level so per-product margin isn't quietly overstated.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-report-customer-profitability/">Acumatica Customer Profitability Report — Building It Right</a></li>
+      <li><a href="/blog/acumatica-report-customer-profitability/">Acumatica Customer Profitability Report</a></li>
+      <li><a href="/blog/acumatica-inventory-costing-methods-fifo-average/">Acumatica Inventory Costing Methods — FIFO vs Average</a></li>
+      <li><a href="/blog/acumatica-report-variance-analysis/">Acumatica Variance Analysis Report</a></li>
       <li><a href="/blog/acumatica-report-sales-by-period-tuning/">Acumatica Sales by Period Report — Tuning Guide</a></li>
-      <li><a href="/blog/acumatica-back-to-back-order-workflow/">Acumatica Back-to-Back Order Workflow</a></li>
-      <li><a href="/blog/acumatica-crm-lead-to-cash-process/">Acumatica CRM — Lead to Cash Process</a></li>
-      <li><a href="/blog/acumatica-customer-screen-deep-dive/">Acumatica Customer Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-report-bom-cost-rollup/">Acumatica BOM Cost Rollup Report</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

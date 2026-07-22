@@ -93,107 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Using Generic Inquiries as the extraction layer for a data warehouse is one of the most reliable integration patterns in the Acumatica ecosystem, and also one of the most commonly under-engineered — clients build one broad "everything" GI, point an ETL tool at it, and are surprised eighteen months later that the nightly load takes four hours and occasionally drops rows.</p>
+
+<h2 id="why-gi-plus-odata-beats-direct-db">Why GI + OData beats querying the database directly</h2>
+<p>The temptation on private-cloud deployments is to skip GIs entirely and have the warehouse's ETL tool query the Acumatica database directly. Resist it. The schema carries implementation details — <code>CompanyID</code> tenant discrimination, <code>DeletedDatabaseRecord</code> soft-delete flags, denormalized balance and history tables that do not mean what their column names suggest — and none of that is documented as a stable contract. A GI exposed via OData is a contract you control: it applies tenant scoping and soft-delete filtering automatically, and its shape only changes when you change it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaDataExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Data(Acumatica doc)
-    {
-        // Custom data logic for acumatica data warehouse
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ODATA PULL, INCREMENTAL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GET /odata/KG-ARInvoiceFeed?$filter=LastModifiedDateTime ge 2026-07-08T00:00:00Z
+    &amp;$orderby=LastModifiedDateTime
+    &amp;$top=5000
+Authorization: Basic {integration user}</code></pre>
 </div>
-<h2 id="how-to-debug-data-in-production">How to debug data in production</h2>
-<p>In the work I have done on acumatica gi as a data warehouse feed, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+
+<h2 id="incremental-extraction">Design for incremental extraction from day one</h2>
+<p>A full-table pull every night is the single biggest cause of "the load takes four hours" tickets. The fix is a <code>LastModifiedDateTime</code> (or equivalent audit timestamp field, present on most Acumatica DACs) watermark condition on the GI, combined with the ETL tool tracking the high-water mark from the previous run:</p>
+<ul>
+<li>Add <code>LastModifiedDateTime &gt;= @Watermark</code> as a GI condition, with the parameter fed by the orchestration tool.</li>
+<li>Sort by that same field so pagination is stable across pages within one run.</li>
+<li>Handle deletes separately — a soft-deleted or genuinely removed record will not appear in an incremental "modified since" pull. If the warehouse needs to reflect deletions, you need either a separate "deleted records" feed (some entities expose this) or a periodic full reconciliation pass alongside the incremental daily pulls.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>Watermark on the wrong field silently drops rows</strong>
+  <p>If the GI's watermark field is a business date (invoice date) rather than a true audit/modification timestamp, a backdated correction — someone editing a two-month-old invoice today — never gets picked up by an incremental pull filtered on invoice date. Always watermark on the actual last-modified timestamp, not a business date, even though the business date is what analysts want to see in the warehouse afterward.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the data is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-gi-as-a-data-warehouse-feed-matters-in-production">Why Acumatica GI as a Data Warehouse Feed matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of data in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaDataExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Data(Acumatica doc)
-    {
-        // Custom data logic for acumatica data warehouse
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="pagination-and-batch-size">Pagination discipline</h2>
+<p>OData feeds from GIs are paginated (<code>$top</code>/<code>$skip</code>, or a continuation pattern depending on version), and a naive ETL pull that does not respect pagination silently truncates at the default page size — I have seen "the warehouse total is smaller than the ERP total" tickets that were exactly this, with no error anywhere, just a quietly truncated feed. Confirm your ETL tool's OData connector honors server-driven paging, and size batches (1,000–5,000 rows per page is a reasonable range) to balance request count against per-request payload.</p>
+
+<h2 id="schema-stability">Treat the feed GI as a versioned contract</h2>
+<p>Once a warehouse depends on a GI's shape, renaming or removing a column breaks the downstream load silently until someone notices a dashboard is wrong. I add new columns freely but never remove or rename an existing one on a feed GI already in production — if a field genuinely needs to change shape, I publish a new GI (<code>KG-ARInvoiceFeed-v2</code>) and migrate the ETL job deliberately, retiring the old one only after the new one has been validated in production for a full cycle.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi as a data warehouse feed. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A GI-backed OData feed is the right extraction layer for a warehouse because it inherits tenant scoping and soft-delete handling for free — direct database access does not. Design for incremental pulls watermarked on a true last-modified timestamp, respect server-side pagination explicitly, and version the feed GI's schema rather than editing it in place once anything downstream depends on it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector — Setup and Best Practices</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-aws-s3-integration/">Acumatica AWS S3 Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-blob-storage-integration/">Acumatica Azure Blob Storage Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Acumatica REST API — Bulk Data Load</a></li>
+      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
+      <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector Setup</a></li>
+      <li><a href="/blog/acumatica-gi-cross-tenant-patterns/">Acumatica GI Cross-Tenant Patterns</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI Realtime vs Snapshot</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

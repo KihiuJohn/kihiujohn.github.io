@@ -93,107 +93,74 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Inventory is deceptively deep. On the surface it's items, quantities, and locations, but underneath it's a valuation engine (FIFO, average, standard cost) tied to every issue and receipt, which means an extension that looks like a simple field addition can quietly touch cost layers if you're not careful about where it hooks in.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p><code>INItem</code> (Stock and Non-Stock Items, IN202500) is the item master, <code>INLocation</code> holds warehouse locations, and <code>INTran</code> is the transaction table every movement — issue, receipt, transfer, adjustment — ultimately writes to. The primary graph for item maintenance is <code>InventoryItemMaint</code>, while movement screens (issues, receipts, transfers) each have their own graph built around <code>INTran</code>.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>Custom item attributes are usually a straightforward <code>PXCacheExtension&lt;INItem&gt;</code> plus fields surfaced on the item screen — this is safe and doesn't touch valuation. Anything that changes quantity or cost calculation is riskier: a <code>RowInserting</code> or <code>RowPersisting</code> handler on <code>INTran</code> that adjusts quantity based on custom logic needs to run before the cost engine picks up the transaction, and needs to be idempotent, because inventory transactions can be part of a larger multi-line document (a shipment with ten lines) that gets saved and re-saved as the user works through it.</p>
+
+<div class="callout">
+  <strong>Custom attributes vs. custom cost logic are different risk classes</strong>
+  <p>Adding a "hazmat class" field to <code>INItem</code> is a low-risk, well-trodden customization. Changing how a cost layer is consumed on issue is not — it affects every module downstream of inventory valuation, including GL postings for COGS. Treat these as different categories of work with different levels of testing rigor, not variations on the same task.</p>
+</div>
+
+<h2 id="a-realistic-scenario-custom-replenishment-signal">A realistic scenario: custom replenishment signal</h2>
+<p>Stock replenishment (min/max, reorder point) is configurable per item, but some businesses need a replenishment trigger based on a factor Acumatica doesn't track natively — seasonal demand curves, or a signal from an external planning system. This is usually implemented as a scheduled process that reads <code>INItem</code>/<code>ItemAvailability</code> data and either writes suggested purchase requisitions or flags items for the buyer's attention, rather than trying to override the built-in reorder point calculation.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · SCHEDULED REPLENISHMENT CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SeasonalReplenishmentCheck : PXGraph&lt;SeasonalReplenishmentCheck&gt;
 {
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
+    public virtual void FlagLowStockItems()
     {
-        // Custom inventory logic for acumatica inventory module
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
+        PXResultset&lt;INItem&gt; items = PXSelectJoin&lt;INItem,
+            InnerJoin&lt;INItemSite, On&lt;INItemSite.inventoryID, Equal&lt;INItem.inventoryID&gt;&gt;&gt;,
+            Where&lt;INItemSite.qtyAvail, LessEqual&lt;INItemSite.reorderPoint&gt;&gt;&gt;
+            .Select(this);
+
+        foreach (INItem item in items)
+        {
+            decimal seasonalFactor = SeasonalFactorLookup.Get(item.InventoryCD, DateTime.Today.Month);
+            if (seasonalFactor &gt; 1.2m)
+            {
+                // Write a suggestion row rather than auto-creating a PO —
+                // let the buyer confirm before committing spend.
+                ReplenishmentSuggestions.Insert(new ReplenishmentSuggestion
+                {
+                    InventoryID = item.InventoryID,
+                    SuggestedQty = item.SafetyStock * seasonalFactor
+                });
+            }
+        }
     }
 }</code></pre>
 </div>
-<h2 id="the-inventory-edge-cases-i-have-shipped">The inventory edge cases I have shipped</h2>
-<p>In the work I have done on acumatica inventory module — extension patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the inventory is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-inventory-in-production">How to debug inventory in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-inventory-module-extension-patterns-matters-in-production">Why Acumatica Inventory Module — Extension Patterns matters in production</h2>
-<p>The performance of inventory in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaInventoryExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Inventory(Acumatica doc)
-    {
-        // Custom inventory logic for acumatica inventory module
-        if (doc?.Inventory == null) return;
-        Base.Inventory(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Writing a suggestion rather than auto-creating a purchase requisition is a deliberate choice — automated purchasing decisions are exactly the kind of customization that should have a human checkpoint until the logic has a track record.</p>
+
+<h2 id="lot-serial-and-valuation-methods">Lot/serial and valuation methods</h2>
+<p>If the item uses lot or serial tracking, or a valuation method other than average cost, any custom transaction logic needs to account for that — a customization built and tested against a simple average-cost, non-lot item will frequently break the first time it's run against an FIFO-costed, lot-tracked item, because the number of cost layers and the tracking fields involved are genuinely different.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test inventory extensions against at least one item per valuation method and tracking type in use at the client — average cost, FIFO or standard cost if used, and lot/serial if used. A single happy-path item is not representative of what actually lives in a real inventory module.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica inventory module — extension patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Inventory extensions split cleanly into low-risk attribute work and high-risk transaction/valuation work — know which one you're doing before you start. Keep automated decisions (auto-reorder, auto-transfer) advisory until proven, and test against every valuation method and tracking configuration actually in use, not just the simplest one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-inventory-issues-receipts-ext/">Acumatica Inventory Issues and Receipts — Extensions</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
+      <li><a href="/blog/acumatica-so-module-extension-patterns/">Acumatica SO Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-po-module-extension-patterns/">Acumatica PO Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-extensions-avoiding-the-overfetch-trap/">Acumatica DAC Extensions — Avoiding the Overfetch Trap</a></li>
       <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

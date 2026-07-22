@@ -92,107 +92,71 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="how-to-debug-report-in-production">How to debug report in production</h2>
-<p>How to debug report in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Teams coming to Acumatica from Dynamics GP, NAV, or a homegrown .NET stack almost always arrive with a folder of SSRS reports and a developer who is genuinely good at SQL Server Reporting Services. The question lands on my desk in the same form every time: "can we keep using SSRS, or do we have to learn the embedded Report Designer?" You can keep SSRS. Whether you should depends on which of two very different jobs the report is doing.</p>
+
+<h2 id="two-different-jobs">Documents versus analytics: two different jobs</h2>
+<p>Every report in an ERP is one of two things. It is either a <strong>document</strong> — an invoice, a purchase order, a statement, a picking list — that must print from a screen, respect per-branch branding, attach to emails, and participate in workflow. Or it is <strong>analytics</strong> — a margin pack, a trend analysis, an operations dashboard — that someone reads to make a decision.</p>
+<p>The embedded Report Designer owns the first job outright. Its <code>.rpx</code> reports are invoked by the platform itself: the Print action on the Invoices screen, the <code>PXReportRequiredException</code> you throw from a graph, the mailing settings on the Customer class that pick a report ID for statement runs. SSRS cannot participate in any of that without you writing and maintaining glue code — a web service call, credentials, error handling, retry logic. I have inherited two such glue layers from previous vendors and decommissioned both.</p>
+<p>For the second job the calculus genuinely differs, so the rest of this post is about analytics.</p>
+
+<h2 id="how-ssrs-gets-data">How SSRS gets Acumatica data (and how it must not)</h2>
+<p>SSRS wants a data source. Your realistic options against Acumatica, best to worst:</p>
+<ol>
+<li><strong>OData over Generic Inquiries.</strong> Build a GI shaped for the report, tick <em>Expose via OData</em>, and consume <code>https://instance/odata/GIName</code> (or the OData v4 endpoint on current builds) from SSRS with an XML/OData data source or via a small ETL step into a reporting database. Tenancy, soft deletes, and business logic filtering are applied by the platform.</li>
+<li><strong>Contract-based REST API</strong> into a staging database that SSRS queries. More moving parts, but the right shape when several reports share the same extracted data — you pay the extraction cost once.</li>
+<li><strong>Direct SQL against the Acumatica database.</strong> Do not. On SaaS you have no access anyway; on private cloud the schema's <code>CompanyID</code> discrimination and <code>DeletedDatabaseRecord</code> soft-delete flags mean naive queries return wrong numbers, and every upgrade is a breaking change you find out about in production. If someone insists, insist back on a read replica and a documented view layer — and even then, prefer option 1.</li>
+</ol>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report ssrs
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP · ODATA FEED FROM A GI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GET /odata/KG-SalesMargin?$filter=OrderDate ge 2026-06-01&amp;$top=500 HTTP/1.1
+Host: yourinstance.acumatica.com
+Authorization: Basic {base64 user:password}
+Accept: application/json</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>In the work I have done on acumatica report — ssrs vs embedded designer, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="why-acumatica-report-ssrs-vs-embedded-designer-matters-in-production">Why Acumatica Report — SSRS vs Embedded Designer matters in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the report is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="what-ssrs-does-better">What SSRS genuinely does better</h2>
+<ul>
+<li><strong>Subscriptions and bursting.</strong> SSRS subscriptions — render this pack every Monday, one PDF per region, email each to its manager — are mature and self-service. Acumatica's Automation Schedules can email a report, but data-driven bursting takes custom work.</li>
+<li><strong>Layout horsepower.</strong> The tablix is simply a stronger layout engine than the <code>.rpx</code> band model for matrix-style analytical layouts with dynamic column groups.</li>
+<li><strong>Cross-system joins.</strong> An SSRS report over a reporting database can blend Acumatica, your WMS, and your e-commerce data. The embedded designer only ever sees DACs.</li>
+<li><strong>Existing skills and estate.</strong> Fifty tested SSRS reports and a fluent developer are real assets. Repointing data sources is cheaper than rewriting layouts.</li>
+</ul>
+
+<h2 id="what-you-give-up">What you give up outside the platform</h2>
+<p>Everything I listed for documents, plus the quieter costs: SSRS runs under a service credential, so Acumatica's row-level security, branch restrictions, and restriction groups do not apply — you rebuild audience scoping in SSRS's own security model. Reports live outside your customization project, so they version and deploy on a separate track. And you now run a Report Server (or Power BI Report Server) — patching, backups, one more thing on the DR checklist.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>The 2026 wrinkle: SSRS is a legacy bet</strong>
+  <p>Microsoft has folded SSRS's future into Power BI Report Server, and investment in classic SSRS has been minimal for years. If you are choosing an external analytics tool for Acumatica <em>today</em> with no existing estate, Power BI via the OData feeds is the mainstream path, not new SSRS development. I only recommend fresh SSRS work when the client already owns the server and the skills.</p>
 </div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of report in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Production report looks different from development report. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReportExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Report(Acumatica doc)
-    {
-        // Custom report logic for acumatica report ssrs
-        if (doc?.Report == null) return;
-        Base.Report(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring report first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with report when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="the-split-that-works">The split that works in practice</h2>
+<p>The arrangement I set up for a distribution client running both, and would set up again:</p>
+<ul>
+<li>All <strong>documents</strong> in embedded Report Designer, packaged in the customization project. No exceptions — this is the hill I die on.</li>
+<li>All <strong>operational in-app reporting</strong> (registers, edit reports, aged AR/AP) also embedded, because users run them from the screens they already live in.</li>
+<li><strong>Scheduled analytical packs and cross-system reports</strong> in SSRS, fed exclusively by named GIs over OData — one GI per report, so the data contract is explicit and versionable.</li>
+<li>One integration user for SSRS, with access scoped to those GIs and nothing else, so a leaked credential exposes report feeds, not the ERP.</li>
+</ul>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica report — ssrs vs embedded designer. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>SSRS versus the embedded designer is not a technology beauty contest — it is a question of which side of the document/analytics line the report sits on. Documents belong in the platform, always. Analytics can defensibly live in SSRS when you already own the estate, provided the data flows through GIs and OData rather than raw SQL. And if you are starting from zero on analytics, skip the question entirely and evaluate Power BI first.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-aws-s3-integration/">Acumatica AWS S3 Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-blob-storage-integration/">Acumatica Azure Blob Storage Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-service-bus-bridge/">Acumatica Azure Service Bus — A Bridge Pattern for Async Work</a></li>
+      <li><a href="/blog/acumatica-report-designer-vs-birt-when-to-use/">Acumatica Report Designer vs BIRT — When to Use Each</a></li>
+      <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector Setup</a></li>
+      <li><a href="/blog/acumatica-report-designer-guide/">Acumatica Report Designer Guide</a></li>
+      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
+      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

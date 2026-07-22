@@ -94,101 +94,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real production APIs, this is rarely the question. The question is the failure mode: what happens when the consumer retries, when the rate limit hits, when the schema changes. This article is the patterns.</p>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>Versioning and deprecation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica exposes two web services APIs — an older SOAP-based, screen-contract API and the contract-based REST API. This guide covers the REST one, which is what almost every new integration should be built against: it's the one Acumatica actively extends, the one that supports OAuth 2.0, and the one with a Swagger/OpenAPI schema you can generate per endpoint.</p>
+
+<h2 id="what-contract-based-means">What "contract-based" means</h2>
+<p>The REST API doesn't expose your database tables. It exposes <strong>endpoints</strong> — named, versioned contracts you define (or accept the defaults for) on the Web Service Endpoints screen. Each endpoint maps entities like <code>SalesOrder</code> or <code>Contact</code> to specific DACs, fields, and actions, filtered through the same business logic and field-level security the UI enforces. A request to <code>/entity/Default/24.200.001/SalesOrder</code> runs through the same graph and validations as a user typing into the Sales Orders screen — that's the whole point of contract-based over a raw data API.</p>
+<p>The practical consequence: if a field isn't in the endpoint's contract, the API can't see it, no matter how visible it is in the database. Extending an endpoint to add a custom field is normal, routine work, not an edge case.</p>
+
+<h2 id="authentication-oauth-2-vs-cookies">Authentication: OAuth 2.0 vs. the older cookie session</h2>
+<p>Acumatica supports two auth models for the REST API. The original approach logs in against <code>/entity/auth/login</code> with a username and password, gets a session cookie back, and reuses that cookie for subsequent calls until it expires or you call <code>/entity/auth/logout</code>. It still works, but it's stateful, ties your integration to a single web node in a load-balanced deployment, and doesn't fit well with any client that can't hold onto cookies cleanly.</p>
+<p>OAuth 2.0 is the model Acumatica now recommends for anything long-lived: register a connected application on the instance, exchange credentials at the identity server's token endpoint (typically <code>{instance}/identity/connect/token</code>), and send the resulting bearer token on every request. It's stateless per request, works cleanly behind a load balancer, and the token has an expiry you refresh explicitly rather than an opaque session timeout.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP · TOKEN REQUEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>POST /identity/connect/token HTTP/1.1
+Host: yourinstance.acumatica.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&amp;client_id={client_id}&amp;client_secret={client_secret}
+&amp;username={api_user}&amp;password={api_user_password}&amp;scope=api</code></pre>
 </div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>In the work I have done on acumatica rest api — the definitive guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the rest is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /acumaticas/{id}:
-    get:
-      operationId: getAcumatica
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="anatomy-of-a-request">Anatomy of a request</h2>
+<p>Every entity call is scoped by endpoint name and version: <code>/entity/{endpointName}/{version}/{entity}</code>. <code>Default</code> is the built-in endpoint Acumatica ships; most serious integrations define a custom endpoint name so version bumps to the built-in default don't silently change your contract underneath you. GET reads a filtered list or a single record by key; PUT creates or updates (there is no separate POST-for-create — more on that below); DELETE removes a record where deletion is permitted by business logic.</p>
+
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>One endpoint per integration, not one endpoint for everything</strong>
+  <p>It's tempting to add every entity you'll ever need to a single custom endpoint. In practice, giving each integration (accounting sync, e-commerce, EDI) its own endpoint name means you can version and modify one without touching the contract another integration depends on.</p>
 </div>
-<h2 id="why-acumatica-is-not-rest-anymore">Why acumatica is not REST anymore</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type AcumaticaResponse = {
-    id: string;
-    rest: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="idempotency-in-rest">Idempotency in rest</h2>
-<p>The performance of rest in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="contract-testing-for-acumatica">Contract testing for acumatica</h2>
-<p>Production rest looks different from development rest. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rest first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rest when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="reading-filtering-paging">Reading, filtering, and paging results</h2>
+<p>GET requests accept OData-style query parameters — <code>$filter</code>, <code>$select</code>, <code>$expand</code>, <code>$top</code>, and <code>$skip</code>. Page through a large result set by requesting a fixed <code>$top</code> and incrementing <code>$skip</code> by that same amount each call; when a response comes back with fewer records than <code>$top</code>, you've hit the last page. There's no cursor or continuation token in the contract-based API the way some modern REST APIs offer — skip/top is what you get, which means a record inserted mid-page-through can shift your window. For anything that must be exhaustive and consistent, filter on a monotonic field (like <code>LastModifiedDateTime</code>) rather than relying on raw offset paging alone.</p>
+
+<h2 id="writing-data-put-based-upserts">Writing data: PUT-based upserts</h2>
+<p>There's no dedicated "create" verb. PUT with no key fields in the body creates a new record; PUT with key fields that match an existing record updates it. This single-verb model is convenient for idempotent retries — replaying the same PUT after a timeout doesn't create a duplicate the way a naive POST might — but it means your integration code has to be careful about which fields it includes. Omitting a field on an update generally leaves it unchanged, but sending an empty value is different from not sending the field at all, and getting that distinction wrong is a common source of "why did this field get cleared out" bugs.</p>
+
+<h2 id="custom-endpoints-and-versioning">Custom endpoints and versioning</h2>
+<p>Endpoints are defined and versioned from System &gt; Integration &gt; Web Service Endpoints. Cloning the default endpoint into a custom one with its own version number is the standard way to add fields, rename entities, or expose a Generic Inquiry as a queryable entity — without waiting on or being broken by an Acumatica platform upgrade that revs the built-in <code>Default</code> contract. Treat your custom endpoint version the same way you'd treat a package version: bump it deliberately, and keep old versions live until every consumer has migrated off them.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica rest api — the definitive guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The REST API's contract-based design is what makes it safe to build against: fields and validations you don't explicitly expose can't leak, and a custom endpoint insulates you from platform upgrades touching the built-in contract. Start with OAuth 2.0 over the cookie session, give each integration its own endpoint, and treat paging and PUT semantics as the two places integration bugs actually hide.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
-      <li><a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">Generating an OpenAPI Spec from Acumatica</a></li>
-      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-soap-api-vs-rest-api-when-to-use/">Acumatica SOAP vs REST API — When to Use Which</a></li>
+      <li><a href="/blog/acumatica-rest-api-versioning-upgrade-strategy/">Acumatica REST API — Versioning and Upgrade Strategy</a></li>
       <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
-      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-business-events-deep-dive/">Acumatica Business Events — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

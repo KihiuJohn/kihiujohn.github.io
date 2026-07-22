@@ -93,107 +93,63 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSecretsExt : PXGraphExtension<AcumaticaEntry>
+    <p>Most Acumatica integrations I inherit store their secrets the same way: a connection string or API key sitting in plain text inside a customization project's config, or worse, hardcoded in a C# constant that ships inside a compiled DLL. It works right up until someone needs to rotate a credential, audit who can see it, or explain to a security reviewer why an integration secret is readable by anyone with file access to the web server. Pulling that integration onto HashiCorp Vault (or Azure Key Vault, the pattern is nearly identical) fixes all three problems at once, but it takes some care to do inside Acumatica's plugin model.</p>
+
+<h2 id="where-secrets-actually-live-today">Find every place a secret currently lives before you start</h2>
+<p>Before touching Vault, I inventory every place a given integration's credentials currently exist: a site-scoped custom setting DAC in the database, a web.config appSetting, a hardcoded string in an extension, and - the one people forget - Business Events action configuration, which frequently embeds webhook URLs with API keys baked into the query string. On one client audit I found the same expired API key still live in three of those four places, two of which nobody had touched in over a year.</p>
+
+<h2 id="fetching-at-runtime-not-startup">Fetch secrets at call time, cache briefly, never persist to the DAC</h2>
+<p>The integration point is usually a graph extension or a processing screen that calls an external API. The secret should never land in a custom DAC field, even an encrypted one, if you can avoid it entirely - because a DAC field, however it's stored, tends to get pulled into GIs, exports, and support screenshots eventually. Fetch it from Vault at call time instead:</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">C# · Vault-backed secret retrieval</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class VaultSecretProvider
 {
-    [PXOverride]
-    public virtual void Secrets(Acumatica doc)
+    private static readonly MemoryCache _cache = new MemoryCache("VaultSecrets");
+
+    public static string GetSecret(string path, string key)
     {
-        // Custom secrets logic for acumatica secrets management
-        if (doc?.Secrets == null) return;
-        Base.Secrets(doc);
+        if (_cache.Get(path) is string cached) return cached;
+
+        var client = new VaultClient(new VaultClientSettings(
+            Environment.GetEnvironmentVariable("VAULT_ADDR"),
+            new AppRoleAuthMethodInfo(
+                Environment.GetEnvironmentVariable("VAULT_ROLE_ID"),
+                Environment.GetEnvironmentVariable("VAULT_SECRET_ID"))));
+
+        var secret = client.V1.Secrets.KeyValue.V2
+            .ReadSecretAsync(path: path).GetAwaiter().GetResult();
+        var value = secret.Data.Data[key].ToString();
+
+        _cache.Set(path, value, DateTimeOffset.UtcNow.AddMinutes(10));
+        return value;
     }
-}</code></pre>
-</div>
-<h2 id="how-to-debug-secrets-in-production">How to debug secrets in production</h2>
-<p>In the work I have done on acumatica secrets management with vault, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+}
+</code></pre></div>
+<p>The ten-minute cache matters: Vault is not designed to take a network round trip on every RowSelected or every scheduled processing run against a thousand-record batch. Cache briefly enough that a rotated secret propagates within minutes, long enough that you're not hammering Vault on every call.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>AppRole credentials are themselves a secret you have to bootstrap somewhere</strong>
+  <p>Vault authentication needs its own credential to get started, and on IIS the honest answer is environment variables set at the app pool level, or better, Azure Key Vault references if you're already on Azure App Service, which avoids storing even the AppRole secret ID in a way IIS config inspection could expose. There is no fully secret-free bootstrap; the goal is minimizing what's stored in the application itself down to the one credential needed to reach the vault.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the secrets is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-secrets-management-with-vault-matters-in-production">Why Acumatica Secrets Management with Vault matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of secrets in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production secrets looks different from development secrets. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSecretsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Secrets(Acumatica doc)
-    {
-        // Custom secrets logic for acumatica secrets management
-        if (doc?.Secrets == null) return;
-        Base.Secrets(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring secrets first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with secrets when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="what-not-to-move">Not every credential needs Vault - pick the ones that matter</h2>
+<p>I don't route every setting through Vault; that turns a five-line integration into infrastructure. The bar I use: does this credential grant access to something outside the Acumatica instance itself (an external API, a cloud storage bucket, a payment gateway), and would its exposure be a genuine incident rather than an inconvenience? Internal Acumatica custom settings that only affect in-instance behavior stay as ordinary site-scoped settings. Anything crossing a trust boundary to a third-party system goes through Vault.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica secrets management with vault. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The value of Vault in an Acumatica integration isn't encryption for its own sake - Acumatica already has field-level encryption for that - it's centralizing rotation, access auditing, and revocation for credentials that reach outside the instance. Inventory where a secret currently lives before assuming it lives in one place, fetch at call time with a short cache rather than persisting to a DAC, and reserve the extra plumbing for credentials that actually cross a trust boundary.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/secrets-management-vault-2026/">Secrets Management with Vault 2026</a></li>
+      <li><a href="/blog/acumatica-secure-api-key-rotation/">Acumatica Secure API Key Rotation</a></li>
+      <li><a href="/blog/github-actions-secrets/">GitHub Actions Secrets Management</a></li>
       <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-currencycloud-fx-integration/">Acumatica Currencycloud FX Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-dhl-tracking-integration/">Acumatica DHL Tracking Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

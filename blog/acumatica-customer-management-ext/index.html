@@ -93,107 +93,73 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCustomerExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Customer(Acumatica doc)
-    {
-        // Custom customer logic for acumatica customer management
-        if (doc?.Customer == null) return;
-        Base.Customer(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-customer-edge-cases-i-have-shipped">The customer edge cases I have shipped</h2>
-<p>In the work I have done on acumatica customer management — field-level extensions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Customer master data looks like the simplest thing to extend in Acumatica — add a field, put it on a tab, done — but customer records touch credit control, tax calculation, pricing, and CRM simultaneously, which means a field-level customization here has more downstream readers than its scope suggests.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p><code>Customer</code> extends the shared <code>BAccount</code> DAC (the same base record backing vendors and CRM business accounts), maintained through the Customers screen (AR303000) via the <code>CustomerMaint</code> graph. <code>CustomerClass</code> drives defaults — terms, credit limit, GL accounts — that get copied onto a new customer at creation and can diverge from the class afterward, which matters when you're deciding whether a customization belongs at the class level or the individual customer level.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>A <code>PXCacheExtension&lt;Customer&gt;</code> is the standard way to add fields — a custom risk rating, an external CRM ID, an industry classification. Because <code>Customer</code> shares its base table with <code>BAccount</code>, and <code>BAccount</code> is also the base for <code>Vendor</code> and CRM business accounts, it's worth deciding explicitly whether a new field is customer-specific or actually belongs on the shared <code>BAccount</code> level — getting this wrong means the field either doesn't show up where a vendor-side or CRM-side screen expects it, or shows up everywhere including places it doesn't make sense.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>BAccount is shared — extending Customer isn't free of vendor/CRM side effects</strong>
+  <p>A field added via <code>PXCacheExtension&lt;Customer&gt;</code> only appears on customer-context screens by default, which is usually what's wanted, but the underlying table storage is shared with <code>BAccount</code>. Before assuming a customization is isolated to AR, check whether the same business account is ever accessed through the Vendor or CRM business account screens (common when a company is both a customer and a vendor) and confirm the field's behavior there is intentional, not accidental.</p>
 </div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the customer is.</p>
+
+<h2 id="a-realistic-scenario-custom-credit-review-status">A realistic scenario: custom credit review status</h2>
+<p>A common customer-management ask: a credit review workflow with more granularity than the stock credit hold (under review, conditionally approved, hard hold), driving different behavior at order entry than a binary hold flag allows.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-customer-in-production">How to debug customer in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-customer-management-field-level-extensions-matters-in-production">Why Acumatica Customer Management — Field-Level Extensions matters in production</h2>
-<p>The performance of customer in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production customer looks different from development customer. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCustomerExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · CustomerMaint EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class CustomerMaint_CreditReview_Extension : PXGraphExtension&lt;CustomerMaint&gt;
 {
-    [PXOverride]
-    public virtual void Customer(Acumatica doc)
+    #region CustomerExt
+    public class CustomerExt : PXCacheExtension&lt;Customer&gt;
     {
-        // Custom customer logic for acumatica customer management
-        if (doc?.Customer == null) return;
-        Base.Customer(doc);
+        [PXDBString(1, IsFixed = true)]
+        [PXStringList(new[] { "A", "U", "C", "H" },
+            new[] { "Approved", "Under Review", "Conditional", "Hold" })]
+        [PXDefault("A")]
+        public string CreditReviewStatus { get; set; }
+        public abstract class creditReviewStatus : PX.Data.BQL.BqlString.Field&lt;creditReviewStatus&gt; { }
+    }
+    #endregion
+
+    protected virtual void Customer_RowUpdated(PXCache sender, PXRowUpdatedEventArgs e)
+    {
+        var row = (Customer)e.Row;
+        var ext = sender.GetExtension&lt;CustomerExt&gt;(row);
+        if (ext?.CreditReviewStatus == "H")
+        {
+            row.CreditHold = true; // keep the stock hold flag in sync so SO/AR still enforce it
+        }
     }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring customer first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with customer when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Syncing the custom status back onto the stock <code>CreditHold</code> flag is the important part — it means every place in Acumatica that already checks credit hold (order entry, invoice release) keeps working without needing to know the new status field exists, rather than requiring every consuming screen to be individually updated to understand the richer status.</p>
+
+<h2 id="tax-and-pricing-linkage">Tax and pricing linkage</h2>
+<p>Customer records drive tax zone defaults and price/discount schedule assignment — a customization adding customer segmentation (a new customer category, say) should check whether that segmentation is meant to also drive pricing or tax behavior, since those are configured separately and won't pick up a new custom field automatically.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test against a business account that's linked to both a customer and a vendor record (common for reciprocal trading relationships) to confirm a Customer-scoped extension behaves as expected on the shared <code>BAccount</code> data, and test the credit status sync against an actual order entry attempt, not just a save on the customer screen.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica customer management — field-level extensions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Customer field extensions are simple in mechanics and easy to get subtly wrong in scope, because of the shared <code>BAccount</code> base. Decide deliberately whether a field is customer-only or account-wide, and keep any custom status in sync with the stock fields other screens already depend on.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cr-crm-extension/">Acumatica CRM Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-vendor-management-ext/">Acumatica Vendor Management — Field-Level Extensions</a></li>
       <li><a href="/blog/acumatica-ar-module-extension-patterns/">Acumatica AR Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-cr-crm-extension/">Acumatica CRM Module — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

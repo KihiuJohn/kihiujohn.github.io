@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica AP — Vendor Bill Automation | John Kihiu</title>
-<meta name="description" content="How to automate Acumatica vendor bill processing — OCR ingestion, three-way matching, approval routing, and posting to GL — the playbook that cuts AP cycle time in half.">
+<meta name="description" content="How to automate Acumatica vendor bill processing — document recognition, three-way matching, approval maps, and clean posting to GL — so clean invoices flow through untouched and only exceptions reach a person.">
 <meta name="keywords" content="Acumatica customization, Acumatica finance, Acumatica workflow, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-ap-vendor-bill-automation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica AP — Vendor Bill Automation">
-<meta property="og:description" content="How to automate Acumatica vendor bill processing — OCR ingestion, three-way matching, approval routing, and posting to GL — the playbook that cuts AP cycle time in half.">
+<meta property="og:description" content="How to automate Acumatica vendor bill processing — document recognition, three-way matching, approval maps, and clean posting to GL — so clean invoices flow through untouched and only exceptions reach a person.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-ap-vendor-bill-automation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-ap-vendor-bill-automation/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="workflow">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica AP — Vendor Bill Automation","description":"How to automate Acumatica vendor bill processing — OCR ingestion, three-way matching, approval routing, and posting to GL — the playbook that cuts AP cycle time in half.","image":"https://kihiujohn.github.io/assets/og/acumatica-ap-vendor-bill-automation.svg","datePublished":"2026-01-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-ap-vendor-bill-automation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica AP — Vendor Bill Automation","description":"How to automate Acumatica vendor bill processing — document recognition, three-way matching, approval maps, and clean posting to GL — so clean invoices flow through untouched and only exceptions reach a person.","image":"https://kihiujohn.github.io/assets/og/acumatica-ap-vendor-bill-automation.svg","datePublished":"2026-01-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-ap-vendor-bill-automation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica AP — Vendor Bill Automation","item":"https://kihiujohn.github.io/blog/acumatica-ap-vendor-bill-automation/"}]}
@@ -87,84 +87,57 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica AP — Vendor Bill Automation</span></nav>
     <span class="tag">Vertical SaaS · Customization</span>
     <h1>Acumatica AP — Vendor Bill Automation</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to automate Acumatica vendor bill processing — OCR ingestion, three-way matching, approval routing, and posting to GL — the playbook that cuts AP cycle time in half.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to automate Acumatica vendor bill processing — document recognition, three-way matching, approval maps, and clean posting to GL — so clean invoices flow through untouched and only exceptions reach a person.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-01-30">Jan 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="why-acumatica-on-a-horizontal-platform-beats-from-scratch">Why acumatica on a horizontal platform beats from-scratch</h2>
-<p>Why acumatica on a horizontal platform beats from-scratch is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Vendor>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+    <p>AP bill entry is where finance teams quietly lose hours: keying invoices from PDFs, chasing approvers, and reconciling to receipts. Acumatica gives you the pieces to automate most of it — document ingestion, three-way matching, approval maps, and clean posting to GL — without leaving the product. The goal is not a zero-touch fantasy; it is to let clean invoices flow through untouched and route only the exceptions to a human.</p>
+
+<h2 id="the-ingestion-front-door">The ingestion front door</h2>
+<p>Bills arrive as email attachments and PDFs. Acumatica's <strong>Incoming Documents (AP301100)</strong> screen is the intake point: it accepts uploaded or emailed files and, with the AP document recognition feature enabled, extracts header and line data — vendor, date, amounts, and line items — into a draft bill you review before releasing. The important framing is that recognition produces a <em>proposal</em>, not a fact. You keep a human in the loop for the fields that matter (vendor identity, tax, GL account) until you have measured the recognition accuracy on your own document mix.</p>
+<div class="callout">
+  <strong>Match the vendor before you trust anything else</strong>
+  <p>Recognition binds an invoice to a vendor by name or tax ID. If the match is wrong, every downstream default — terms, GL account, approval route — is wrong too. Make vendor identification the one field a person always confirms on a newly recognised bill.</p>
 </div>
-<h2 id="channel-partner-programs-for-vendor">Channel partner programs for vendor</h2>
-<p>In the work I have done on acumatica ap — vendor bill automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="three-way-matching">Three-way matching against PO and receipt</h2>
+<p>For purchase-order-backed spend, the automation that actually prevents overpayment is <strong>three-way matching</strong>: the bill is matched to the purchase order and the goods receipt, and tolerances decide whether a variance passes or holds. Acumatica does this natively — you enter (or recognise) the bill, link it to the PO receipt, and the system flags quantity and price variances outside your configured tolerance. Configure those tolerances deliberately: too tight and every freight rounding difference stops a bill; too loose and duplicate or inflated invoices slip through.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TEXT · MATCHING FLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>PO created        -> quantity + agreed price
+Goods received    -> receipt posts qty into inventory/expense
+Bill entered      -> matched to PO receipt lines
+  within tolerance -> auto-approve line
+  over tolerance   -> hold, route to buyer for review</code></pre>
+</div>
+
+<h2 id="approval-routing">Approval routing</h2>
+<p>Approvals live in the <strong>Approval Maps</strong> engine (assigned to AP bills through the AP preferences). A map is an ordered set of rules — by amount, branch, vendor class, or GL account — that decides who must approve before a bill can be released. This is where most of the "automation" value sits: a well-built map sends the $200 utility bill straight through and escalates the $50,000 capital invoice to a controller. Keep the maps readable. A map with thirty overlapping conditions is impossible to debug when an invoice sticks; prefer a few clear tiers.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Design for the approver who is on leave</strong>
+  <p>Every approval rule needs a delegation or timeout path. Bills that route to a single named person will pile up the week that person is out of office. Use roles and workgroups, not individuals, and configure escalation so nothing stalls indefinitely.</p>
 </div>
-<h2 id="marketplace-listing-for-acumatica">Marketplace listing for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the vendor is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'acumatica'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="soc-2-and-iso-27001-for-vendor">SOC 2 and ISO 27001 for vendor</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM acumatica
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="what-acumatica-ap-vendor-bill-automation-is-for">What Acumatica AP — Vendor Bill Automation is for</h2>
-<p>The performance of vendor in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>Production vendor looks different from development vendor. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Vendor>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+
+<h2 id="posting-to-gl">Posting to GL and accruals</h2>
+<p>Once approved and released, the bill posts to AP and GL using the vendor's default expense or the PO's account distribution. For non-PO spend, lean on the vendor's default GL account and a small set of allocation rules rather than asking AP clerks to pick accounts by hand — hand-keyed distributions are the top source of misposted expense. Where goods are received before the invoice arrives, the PO receipt already created an accrual; the bill simply clears it, which is exactly why three-way matching and accrual accounts belong in the same conversation.</p>
+
+<h2 id="what-to-automate-and-what-to-leave">What to automate, what to leave manual</h2>
+<p>The honest split: automate ingestion, PO matching within tolerance, and approval routing. Keep humans on vendor identification, tax treatment on ambiguous invoices, and any over-tolerance variance. Trying to auto-post recognised bills with no review is where automation projects earn their reputation for creating cleanup work — the recovery cost of one wrong auto-post erases the time saved on many good ones.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring vendor first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with vendor when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Step</th><th>Automate?</th><th>Why</th></tr>
+  <tr><td>Document intake / OCR</td><td>Yes</td><td>Eliminates keying; output is reviewed</td></tr>
+  <tr><td>Vendor identification</td><td>Assisted</td><td>Wrong vendor poisons everything downstream</td></tr>
+  <tr><td>PO three-way match (in tolerance)</td><td>Yes</td><td>Deterministic, prevents overpayment</td></tr>
+  <tr><td>Over-tolerance variance</td><td>No</td><td>Needs a buyer's judgement</td></tr>
+  <tr><td>Approval routing</td><td>Yes</td><td>Rules encode policy cleanly</td></tr>
+  <tr><td>GL distribution (non-PO, ambiguous)</td><td>Assisted</td><td>Misposting is costly to unwind</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica ap — vendor bill automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Vendor bill automation in Acumatica is an assembly job, not a build job: ingestion, three-way matching, approval maps, and clean posting are all in the box. Wire them so clean invoices flow untouched and only genuine exceptions reach a person, measure recognition accuracy before you widen the auto-path, and keep vendor identity and over-tolerance variances under human eyes. Do that and AP stops being the department that works late at month-end.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +148,6 @@ public class AcumaticaExt : PXCacheExtension<Vendor>
       <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

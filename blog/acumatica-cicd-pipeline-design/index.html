@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica CI/CD Pipeline Design | John Kihiu</title>
-<meta name="description" content="Acumatica CI/CD Pipeline Design is the Acumatica operations topic that you only get good at by doing it badly a few times.">
+<meta name="description" content="A working CI/CD pipeline for Acumatica customizations: version the project package, build a validated ZIP, publish it through the API, and gate promotion on a real smoke test.">
 <meta name="keywords" content="Acumatica devops, Acumatica cicd, Acumatica architecture, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-cicd-pipeline-design/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica CI/CD Pipeline Design">
-<meta property="og:description" content="Acumatica CI/CD Pipeline Design is the Acumatica operations topic that you only get good at by doing it badly a few times.">
+<meta property="og:description" content="A working CI/CD pipeline for Acumatica customizations: version the project package, build a validated ZIP, publish it through the API, and gate promotion on a real smoke test.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-cicd-pipeline-design.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-cicd-pipeline-design/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="architecture">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica CI/CD Pipeline Design","description":"Acumatica CI/CD Pipeline Design is the Acumatica operations topic that you only get good at by doing it badly a few times.","image":"https://kihiujohn.github.io/assets/og/acumatica-cicd-pipeline-design.svg","datePublished":"2026-06-03","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-cicd-pipeline-design/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica CI/CD Pipeline Design","description":"A working CI/CD pipeline for Acumatica customizations: version the project package, build a validated ZIP, publish it through the API, and gate promotion on a real smoke test.","image":"https://kihiujohn.github.io/assets/og/acumatica-cicd-pipeline-design.svg","datePublished":"2026-06-03","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-cicd-pipeline-design/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica CI/CD Pipeline Design","item":"https://kihiujohn.github.io/blog/acumatica-cicd-pipeline-design/"}]}
@@ -87,99 +87,116 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica CI/CD Pipeline Design</span></nav>
     <span class="tag">DevOps · Devops</span>
     <h1>Acumatica CI/CD Pipeline Design</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica CI/CD Pipeline Design is the Acumatica operations topic that you only get good at by doing it badly a few times.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A working CI/CD pipeline for Acumatica customizations: version the project package, build a validated ZIP, publish it through the API, and gate promotion on a real smoke test.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-03">Jun 3, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="slos-and-error-budgets-for-pipeline">SLOs and error budgets for pipeline</h2>
-<p>SLOs and error budgets for pipeline is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica customizations do not build like a normal .NET app. The unit of deployment is a customization project — a package of graph extensions, DACs, screen edits, generic inquiries, and site-map entries that Acumatica compiles at publish time inside the instance itself. A CI/CD pipeline that actually helps has to work with that reality: export the project to source, validate it, produce a versioned package, and publish it into a target instance through the API rather than by clicking Publish in the Customization Project Editor. This is the pipeline I keep rebuilding, and the decisions that matter in it.</p>
+
+<h2 id="what-the-artifact-actually-is">What the artifact actually is</h2>
+<p>The thing you version and promote is the customization project ZIP. It is not compiled DLLs — Acumatica compiles the C# in the extension library on the target instance when the project is published. That single fact drives the whole design: your build stage cannot produce a runnable binary and be done, because the same package can compile cleanly against one instance version and fail against another. The pipeline's job is to keep the project in source control as unpacked XML/C#, repackage it deterministically, and then let a real target instance be the compiler and the integration test.</p>
+<p>Keep the project unpacked in Git. Export it once from the Customization Project Editor (<strong>Publish → Export</strong> gives you the ZIP; unzip it into the repo), and from then on treat the individual files — the <code>_project/</code> metadata, the code files, the customized screen deltas — as the source of truth. Diffing a screen change in a pull request is only possible if the files are unpacked; a committed ZIP is a black box in review.</p>
+
+<h2 id="build-repackage-deterministically">Build: repackage deterministically</h2>
+<p>The build stage takes the unpacked project and produces a versioned ZIP whose layout matches what Acumatica's import expects. Stamp the version into the project name so a published instance shows exactly which build it is running — this is the single most useful thing you can do for support later.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
+  <div class="code-header"><span class="code-lang">YAML · GITHUB ACTIONS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>name: build-customization
+on:
+  push:
+    tags: ['v*']
 jobs:
-  build:
+  package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+      - name: Stamp version into project metadata
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          sed -i "s/&lt;Level&gt;.*&lt;\/Level&gt;/&lt;Level&gt;${VERSION}&lt;\/Level&gt;/" \
+            src/_project/ProjectMetadata.xml
+      - name: Package project ZIP
+        run: |
+          cd src
+          zip -r "../MyCompanyCustomizations-${GITHUB_REF_NAME}.zip" . -x '*.git*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: customization-package
+          path: MyCompanyCustomizations-*.zip</code></pre>
 </div>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>In the work I have done on acumatica ci/cd pipeline design, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>There is no MSBuild step here, and that is the point. If you want the compiler to check the C# before you ship it, add a throwaway project that references <code>PX.Data.dll</code> and <code>PX.Objects.dll</code> from the matching Acumatica build and compiles the extension code — but treat that as a fast lint, not proof of a good publish. The authoritative compile still happens on the target.</p>
+
+<h2 id="deploy-publish-through-the-api">Deploy: publish through the API</h2>
+<p>Clicking Publish by hand does not belong in a pipeline. Acumatica exposes the customization operations over the contract-based/REST endpoints so you can import a package and publish it from a script. The flow is: authenticate, upload the ZIP via the <code>UploadFileBase64</code>/customization import call, then invoke publish and poll until the compile finishes. Publishing recompiles the extension library and recycles the application domain, so the instance drops connections for a few seconds — schedule it into a maintenance window, never mid-day.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">BASH · DEPLOY SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="https://erp-uat.example.com"
+COOKIE_JAR=$(mktemp)
+
+# 1. Log in (credentials come from the CI secret store, never the repo)
+curl -sf -c "$COOKIE_JAR" "$BASE/entity/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$ACU_USER\",\"password\":\"$ACU_PASS\",
+       \"company\":\"$ACU_TENANT\"}"
+
+# 2. Import + publish the package (sysContract endpoint)
+PKG_B64=$(base64 -w0 MyCompanyCustomizations-*.zip)
+curl -sf -b "$COOKIE_JAR" "$BASE/CustomizationApi/Import" \
+  -H 'Content-Type: application/json' \
+  -d "{\"projectLevel\":1,\"isReplaceIfExists\":true,
+       \"projectContentBase64\":\"$PKG_B64\"}"
+
+curl -sf -b "$COOKIE_JAR" "$BASE/CustomizationApi/Publish" \
+  -H 'Content-Type: application/json' \
+  -d '{"projectNames":["MyCompanyCustomizations"],
+       "isMergeWithExistingPackages":false}'
+
+# 3. Always log out — sessions are a licensed, limited resource
+curl -sf -b "$COOKIE_JAR" "$BASE/entity/auth/logout" -X POST
+rm -f "$COOKIE_JAR"</code></pre>
+</div>
 <div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+  <strong>Log out, or you will run out of sessions</strong>
+  <p>Acumatica API sessions count against your licensed concurrent-user limit and are not released immediately when a script exits. A pipeline that logs in on every run and never logs out will, within a day or two, exhaust the session pool and lock real users out. Wrap the logout in a trap so it fires even when publish fails.</p>
 </div>
-<h2 id="what-acumatica-ci-cd-pipeline-design-gives-you">What Acumatica CI/CD Pipeline Design gives you</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the pipeline is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_pipeline" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The performance of pipeline in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>Production pipeline looks different from development pipeline. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+
+<h2 id="environments-and-promotion">Environments and promotion</h2>
+<p>Keep at least three instances: a developer instance where the project is authored and exported, a UAT/staging instance that mirrors production's Acumatica build number, and production. The build number match matters — a package authored against 2023 R2 can fail to compile against 2024 R1 because a base method signature moved. Promote the <em>same</em> ZIP artifact through each stage; never rebuild between UAT and production, or you have not tested what you ship.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pipeline first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pipeline when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Stage</th><th>Trigger</th><th>Gate before promotion</th></tr>
+  <tr><td>Dev instance</td><td>Manual export → commit</td><td>Pull request review of unpacked diff</td></tr>
+  <tr><td>UAT</td><td>Git tag <code>v*</code></td><td>Publish succeeds + smoke test passes</td></tr>
+  <tr><td>Production</td><td>Manual approval on the same artifact</td><td>UAT sign-off, maintenance window</td></tr>
 </table>
+
+<h2 id="the-smoke-test-that-earns-its-keep">The smoke test that earns its keep</h2>
+<p>A green publish only means the code compiled. It does not mean the screen still opens or the endpoint still returns data. The gate that actually catches regressions is a tiny post-publish check that hits the customized surface: open one modified screen through the API, pull one record through a customized generic inquiry or endpoint, and assert the shape you expect. If that fails, fail the pipeline and hold promotion.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">BASH · POST-PUBLISH SMOKE TEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>set -euo pipefail
+# Retrieve one record through the customized endpoint and check a field
+RESP=$(curl -sf -b "$COOKIE_JAR" \
+  "$BASE/entity/MyCustomEndpoint/22.200.001/SalesOrder?\$top=1")
+
+echo "$RESP" | jq -e '.[0].CustomFieldValue.value != null' &gt; /dev/null \
+  || { echo "Smoke test failed: custom field missing after publish"; exit 1; }
+echo "Smoke test passed"</code></pre>
+</div>
+
+<h2 id="rollback">Rollback</h2>
+<p>Rollback in Acumatica is republishing the previous package version, not a database revert — published customizations do not migrate data, they change compiled behavior, so reverting the code usually restores the prior behavior cleanly. Keep the last known-good ZIP as a retained artifact and make "publish previous tag" a one-click job. The exception is any customization that also shipped a schema change through a <code>PXDatabase</code> upgrade script or a custom SQL step; those need their own down-path, and that is exactly why database changes belong in a separate, explicitly reviewed part of the project rather than bundled invisibly into a feature.</p>
+<div class="callout">
+  <strong>Separate schema changes from code changes</strong>
+  <p>Column additions via custom fields are handled by Acumatica automatically and roll back safely. Hand-written SQL upgrade scripts do not. Keep them isolated and idempotent so a re-publish or a rollback does not double-apply them.</p>
+</div>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica ci/cd pipeline design. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A good Acumatica pipeline is mostly about respecting how the platform actually deploys: version the project ZIP, keep it unpacked in Git for reviewable diffs, publish through the API into a build-matched target, and gate promotion on a smoke test that touches the real customized surface. None of it is exotic — but each of those steps is one I have watched a team skip and then spend a Friday evening recovering from.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +207,6 @@ jobs:
       <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

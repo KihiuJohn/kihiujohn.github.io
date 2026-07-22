@@ -93,107 +93,75 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="how-to-debug-time-in-production">How to debug time in production</h2>
-<p>How to debug time in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaTimeExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Time(Acumatica doc)
-    {
-        // Custom time logic for acumatica time entry
-        if (doc?.Time == null) return;
-        Base.Time(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>In the work I have done on acumatica time entry — customisation patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Time entry looks like the simplest self-service screen in Acumatica — a grid of hours against days — until you factor in overtime rules, project billability, and payroll or Projects module integration all reading from the same records. Most time-entry customizations are really about getting those downstream calculations right.</p>
+
+<h2 id="core-dacs-and-screens">Core DACs and screens</h2>
+<p>Time entries are typically recorded through <code>EPTimeCard</code>/<code>EPActivity</code> style DACs, submitted through a self-service time entry screen (often numbered around EP305000) and approved through the standard Approval Maps engine. Time entries that reference a project and task feed into <code>PMTran</code> for project cost and billing purposes; time entries without a project reference typically feed payroll or general labor tracking instead.</p>
+
+<h2 id="extension-points">Extension points</h2>
+<p>Overtime rules (daily over 8 hours, weekly over 40, state-specific variants) are the most common time-entry customization, and they're best implemented as a calculation run at approval or at a nightly batch process rather than recalculated live on every keystroke in the entry grid — overtime depends on a full week's entries, which aren't necessarily complete while the employee is still entering Tuesday's hours.</p>
+
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Don't compute overtime from a single day's entry</strong>
+  <p>A validation that fires on each time card row and tries to compute overtime immediately will get it wrong whenever entries are submitted out of order (which is common — people don't always fill in their week Monday-first). Compute overtime as a rollup over the full pay period once entries are complete or at approval time, not incrementally per row.</p>
 </div>
-<h2 id="why-acumatica-time-entry-customisation-patterns-matters-in-production">Why Acumatica Time Entry — Customisation Patterns matters in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the time is.</p>
+
+<h2 id="a-realistic-scenario-daily-and-weekly-overtime">A realistic scenario: daily and weekly overtime</h2>
+<p>A frequent request: apply daily overtime (anything over 8 hours in a single day pays at 1.5x) and weekly overtime (anything over 40 total pays at 1.5x, with daily OT hours not double-counted toward the weekly threshold) — a specific interaction that's easy to get subtly wrong.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of time in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Production time looks different from development time. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaTimeExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C# · OVERTIME CALCULATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class TimeCardOvertimeCalculator
 {
-    [PXOverride]
-    public virtual void Time(Acumatica doc)
+    public virtual (decimal regular, decimal overtime) CalculateWeek(IEnumerable&lt;EPActivity&gt; weekEntries)
     {
-        // Custom time logic for acumatica time entry
-        if (doc?.Time == null) return;
-        Base.Time(doc);
+        decimal totalRegular = 0, totalOT = 0;
+        var byDay = weekEntries.GroupBy(a =&gt; a.Date.Value.Date);
+
+        foreach (var day in byDay)
+        {
+            decimal dayHours = day.Sum(a =&gt; a.TimeSpent ?? 0);
+            decimal dayOT = Math.Max(0, dayHours - 8m);
+            decimal dayRegular = dayHours - dayOT;
+
+            totalOT += dayOT;
+            totalRegular += dayRegular;
+        }
+
+        // Weekly OT applies on top of regular hours already counted,
+        // not on hours already classified as daily OT.
+        decimal weeklyOTThreshold = Math.Max(0, totalRegular - 40m);
+        totalOT += weeklyOTThreshold;
+        totalRegular -= weeklyOTThreshold;
+
+        return (totalRegular, totalOT);
     }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring time first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with time when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>This is a simplified illustration of the daily-then-weekly cascading logic — actual payroll rules vary significantly by jurisdiction (some states require daily OT past a different threshold, some have double-time rules past 12 hours), so this needs to be parameterized per the client's actual policy rather than treated as a universal formula.</p>
+
+<h2 id="project-billability-interactions">Project billability interactions</h2>
+<p>When a time entry is tagged to a billable project task, the hours flow into <code>PMTran</code> and eventually the project billing engine — overtime premium handling needs an explicit decision here: does the client bill the client at a blended rate, a straight rate with OT absorbed internally, or pass through the OT premium? This is a business decision that needs to be nailed down before writing the calculation, not inferred from the code.</p>
+
+<h2 id="testing-considerations">Testing considerations</h2>
+<p>Test a full pay period with entries submitted out of chronological order, at least one day crossing the daily OT threshold, and a week crossing the weekly threshold — and test the interaction of both in the same week, since that's where the subtlest bugs live, exactly as illustrated in the calculation above.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica time entry — customisation patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Time entry customization is a payroll problem wearing an ERP UI — get the overtime cascade logic (daily before weekly, no double counting) and the project-billing interaction explicitly agreed before writing code, and compute overtime as a period rollup rather than a live per-entry calculation.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
+      <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica Employee Self-Service — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica Projects Module — Extension Patterns</a></li>
       <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule — Extension Patterns</a></li>
       <li><a href="/blog/acumatica-expense-claims-customisation/">Acumatica Expense Claims — Customisation Patterns</a></li>
-      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica Projects Module — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Cross-Field DAC Validation in Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,107 +93,59 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The patterns that survive the upgrade cycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGenericExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Generic(Acumatica doc)
-    {
-        // Custom generic logic for acumatica generic inquiries
-        if (doc?.Generic == null) return;
-        Base.Generic(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>In the work I have done on acumatica generic inquiries — the definitive guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the generic is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>If I had to name the single highest-leverage tool in Acumatica, it wouldn't be the REST API or the customization framework — it would be Generic Inquiries. A GI is a saved, parameterized query built on the same DACs the rest of the system uses, rendered as a grid screen, exportable to Excel, publishable to dashboards and the mobile app, exposable through OData and the REST API, and usable as a lookup or a substitute list screen. On most of my projects, GIs replace a third of what the client assumed would be paid report development.</p>
+
+<p>This guide covers how GIs actually work under the hood and the design decisions that separate a fast, maintainable inquiry from the five-minute-timeout monsters I get called in to fix.</p>
+
+<h2 id="how-a-gi-executes">How a GI executes</h2>
+<p>A GI is not stored SQL. The designer (screen SM208000) builds a BQL query at runtime from your Tables, Relations, Conditions, and Grouping tabs, and BQL compiles down to SQL against the tenant's data with row-level security, tenant filtering, and attribute-driven logic applied automatically. That's the key difference from writing a view in SQL Server: a GI respects <code>PXProjection</code>-style semantics — restriction attributes on DACs still apply, so a user can't see via GI what the security model hides from them on screens.</p>
+<p>The practical consequence: your join and condition choices translate fairly directly into the generated SQL. A GI that joins eight tables with OR-heavy conditions produces exactly the SQL you'd fear.</p>
+
+<h2 id="tables-and-relations">Tables and relations: where GIs are won or lost</h2>
+<p>The Relations tab is a join editor. Each pair of tables gets a join type (Inner, Left, Full, Cross) and one or more field equations. The mistakes I see repeatedly:</p>
+<ul>
+<li><strong>Wrong join type flipping row counts.</strong> Inner-joining <code>SOOrder</code> to <code>SOShipment</code> silently drops unshipped orders. If the requirement says "all orders, with shipment info where it exists," that's a Left join, full stop.</li>
+<li><strong>Fan-out from joining two child tables.</strong> Join orders to both lines and shipments and you get a Cartesian blow-up per order. Aggregate one side first (or build two GIs) instead.</li>
+<li><strong>Joining on non-key fields.</strong> Joining <code>InventoryItem</code> to transactions on <code>InventoryCD</code> instead of <code>InventoryID</code> works until it doesn't — always join on the integer identity keys.</li>
+</ul>
+
+<h2 id="conditions-parameters">Conditions and parameters</h2>
+<p>Conditions filter the result set; Parameters let the user supply values at runtime. The two combine: a condition like <code>SOOrder.OrderDate &gt;= [FromDate]</code> references a parameter by its name in brackets. Give parameters sensible defaults — a date parameter defaulting to <code>@monthStart</code> spares users from accidentally querying five years of history. One detail worth knowing: a condition on a parameter can be made optional by ticking the parameter's "required" off and using the <code>IsNull</code> pattern in conditions, so a blank parameter means "don't filter."</p>
+
+<h2 id="grouping">Grouping and aggregation</h2>
+<p>The Grouping tab turns the GI into a GROUP BY query. Any field not in the grouping list must carry an aggregate (SUM, MIN, MAX, COUNT, AVG) on the Results Grid tab or it will return arbitrary values. Aggregated GIs are how you get "sales by customer by month" without a report — and paired with a formula column using functions like <code>=Round([SOOrder.CuryOrderTotal], 2)</code> or date-part expressions, they cover a lot of finance asks.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Formula columns are computed after the query</strong>
+  <p>Formulas on the Results Grid run over the returned rows, not in SQL. You cannot filter or group on a formula's result efficiently — if you need that, push the logic into a condition or a DAC-level calculated field instead.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The performance of generic in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Production generic looks different from development generic. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGenericExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Generic(Acumatica doc)
-    {
-        // Custom generic logic for acumatica generic inquiries
-        if (doc?.Generic == null) return;
-        Base.Generic(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring generic first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with generic when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="gi-as-primary-screen">GIs as substitute list screens and entry points</h2>
+<p>Two features turn GIs from reports into UI. First, <strong>navigation</strong>: on the Results Grid you can make a column a link to the source screen, so clicking an order number opens SO301000 positioned on that order. Second, <strong>Entry Point / substitute screen</strong>: a GI can replace a screen's default list view entirely, which is how you give the sales team a list of orders with your custom columns, conditional highlighting, and filters as their daily driver. Add side panels (a GI or dashboard docked next to the grid) and you've built a mini-workspace with zero code.</p>
+
+<h2 id="exposure">Exposing GIs: OData, REST, dashboards</h2>
+<p>Tick "Expose via OData" and the GI becomes an OData feed at <code>/odatav4/</code> — the cleanest way to feed Power BI or a warehouse without building an endpoint. GIs can also back dashboard widgets, mobile screens, and Business Events (a GI defines the monitored data; the event fires on changes to its result set). That last one is worth internalizing: a well-designed GI is often the trigger definition for your automation, not just a report.</p>
+
+<h2 id="performance">Performance basics</h2>
+<p>Most slow GIs are slow for boring reasons: leading-wildcard LIKE conditions, joins on non-indexed custom columns, OR conditions that defeat index seeks, or simply returning 200,000 rows into a grid. Set a row limit while designing, check the generated SQL with the request profiler when something drags, and remember that an unindexed <code>Usr</code> field used as a join key needs an index adding via the customization project.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica generic inquiries — the definitive guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Generic Inquiries are Acumatica's best power-to-effort ratio: real queries with security applied, rendered as usable screens, exposed to OData and events, all without code. Learn the Relations tab cold — join type and fan-out errors cause most wrong numbers — give every parameter a default, aggregate deliberately, and treat GI design as query design, because that's what it is.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
       <li><a href="/blog/acumatica-gi-cross-table-joins-deep-dive/">Acumatica GI Cross-Table Joins — A Deep Dive</a></li>
       <li><a href="/blog/acumatica-gi-parameters-and-default-values/">Acumatica GI Parameters and Default Values</a></li>
-      <li><a href="/blog/acumatica-gi-pivot-tables-when-to-avoid/">Acumatica GI Pivot Tables — When to Use and When to Avoid</a></li>
+      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
+      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Diagnosing Slow Generic Inquiries in Acumatica</a></li>
+      <li><a href="/blog/acumatica-gi-dashboard-best-practices/">Acumatica GI Dashboard Best Practices</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

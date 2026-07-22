@@ -93,107 +93,68 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most Google Workspace requests I get on Acumatica projects are really three separate asks wearing one label: SSO login via Google, sending mail through a Workspace domain's Gmail account rather than a generic SMTP relay, and syncing calendar or Drive documents against records. Each uses a different Google API surface and a different auth grant, and treating "Google Workspace integration" as one task instead of three is how scope creeps sideways mid-project.</p>
+
+<h2 id="sso-via-google">SSO: OpenID Connect, mapped through Acumatica's federated login</h2>
+<p>Google Workspace SSO into Acumatica goes through standard OpenID Connect, Acumatica's federated authentication configuration (the same subsystem used for Azure AD or Okta) accepts Google as an OIDC provider once you register an OAuth 2.0 client in Google Cloud Console and point Acumatica's identity provider settings at Google's discovery document:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGoogleExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Google(Acumatica doc)
-    {
-        // Custom google logic for acumatica google workspace
-        if (doc?.Google == null) return;
-        Base.Google(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · Acumatica OIDC provider config (Identity Provider screen)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Issuer:                https://accounts.google.com
+Authorization Endpoint: https://accounts.google.com/o/oauth2/v2/auth
+Token Endpoint:         https://oauth2.googleapis.com/token
+Client ID:              &lt;from Google Cloud Console OAuth client&gt;
+Client Secret:          &lt;from Google Cloud Console OAuth client&gt;
+Scope:                  openid email profile
+</code></pre>
 </div>
-<h2 id="the-google-edge-cases-i-have-shipped">The google edge cases I have shipped</h2>
-<p>In the work I have done on acumatica google workspace integration — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the google is.</p>
+
+<p>The part that trips up first-time setups: Acumatica matches the incoming federated identity to an existing Acumatica user by email, and that match is exact, a Google Workspace account's primary email must equal the Acumatica user's login email precisely, including domain. Alias addresses or a secondary Workspace domain on the same account will not match and produce a confusing "no matching user" error that looks like a config problem when it's actually a data mismatch.</p>
+
+<h2 id="sending-mail-via-gmail-api">Sending notifications through the Gmail API instead of generic SMTP</h2>
+<p>Clients who've standardized on Workspace often want outbound Acumatica notifications (Business Events emails, AR statements) to come from a real Workspace mailbox via the Gmail API rather than a generic SMTP relay, mostly for deliverability, mail genuinely sent through Google's infrastructure with proper SPF/DKIM alignment lands in inboxes more reliably than a third-party relay pretending to be a Workspace domain. This requires a service account with domain-wide delegation, not a simple OAuth user grant:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Gmail API send via domain-wide delegated service account</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var credential = GoogleCredential.FromFile("service-account.json")
+    .CreateScoped(GmailService.Scope.GmailSend)
+    .CreateWithUser("erp-notifications@clientdomain.com"); // the delegated mailbox
+
+var gmail = new GmailService(new BaseClientService.Initializer { HttpClientInitializer = credential });
+
+var rawMessage = Convert.ToBase64String(Encoding.UTF8.GetBytes(mimeMessage))
+    .Replace('+', '-').Replace('/', '_');
+await gmail.Users.Messages.Send(new Message { Raw = rawMessage }, "me").ExecuteAsync();</code></pre>
 </div>
-<h2 id="how-to-debug-google-in-production">How to debug google in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+
+<div class="callout-warn callout">
+  <strong>Domain-wide delegation is a Workspace admin action, not a developer one</strong>
+  <p>The service account's client ID has to be explicitly authorized in the Workspace Admin Console under Security &gt; API Controls &gt; Domain-wide Delegation, scoped to exactly the Gmail scopes you need. I've had integrations blocked for days waiting on a client's IT admin to complete this one step, flag it as a dependency in the project plan on day one, not when you hit the permission error during testing.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-google-workspace-integration-a-complete-guide-matters-in-production">Why Acumatica Google Workspace Integration — A Complete Guide matters in production</h2>
-<p>The performance of google in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production google looks different from development google. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaGoogleExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Google(Acumatica doc)
-    {
-        // Custom google logic for acumatica google workspace
-        if (doc?.Google == null) return;
-        Base.Google(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring google first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with google when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="drive-attachments">Drive as an attachment backend: reuse Acumatica's file API abstraction</h2>
+<p>For clients wanting Acumatica document attachments (AP bills, signed contracts) mirrored into a Google Drive shared folder rather than staying purely in Acumatica's own file storage, I hook into <code>PXNoteAttribute</code>'s file-added event and push a copy to Drive via a service account scoped to a specific shared drive, storing the returned Drive file ID back on a small custom DAC so the two stay linked. I do not treat Drive as the source of truth, Acumatica's own attachment storage remains authoritative, and Drive is a one-way mirror for users who want to browse documents outside the ERP UI. Trying to make it bidirectional (editing in Drive, syncing back) is a substantially harder problem I steer clients away from unless they have a very specific reason to need it.</p>
+
+<h2 id="calendar-sync">Calendar sync: scope it to one direction and one entity type</h2>
+<p>Calendar integration requests (syncing Acumatica Service Order appointments to a technician's Google Calendar) work best one-directional, Acumatica-to-Google, using the Calendar API's service-account-with-delegation pattern again. Two-way sync sounds appealing in a sales conversation but in practice requires reconciling conflicting edits made independently in both systems, which is a genuinely hard distributed-state problem I've only seen justify its complexity once, for a client with very high appointment-reschedule volume from the field-technician side.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica google workspace integration — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>"Google Workspace integration" is shorthand for at least three separate, differently-scoped pieces of work: OIDC-based SSO matched strictly by email, Gmail API sending through a domain-delegated service account for deliverability, and one-directional Drive or Calendar mirroring rather than full bidirectional sync. Scope each piece explicitly with the client before estimating, and get the Workspace admin's domain-wide delegation step scheduled early since it's outside your control as the developer.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-currencycloud-fx-integration/">Acumatica Currencycloud FX Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-dhl-tracking-integration/">Acumatica DHL Tracking Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-okta-sso-integration/">Acumatica Okta SSO Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-microsoft-teams-integration/">Acumatica Microsoft Teams Integration — A Complete Guide</a></li>
       <li><a href="/blog/acumatica-dropbox-integration/">Acumatica Dropbox Integration — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-ebay-integration/">Acumatica eBay Integration — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-sendgrid-email-integration/">Acumatica SendGrid Email Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,96 +93,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Let's be straightforward about this one: there is no "Acumatica Agriculture Edition." Acumatica ships general-purpose Distribution, Manufacturing, and (via Commerce/Field Service add-ons) other editions — agriculture is not one of the named verticals in the product line. What agribusinesses actually run on Acumatica is Distribution Edition or Manufacturing Edition, customized for crop and lot-level tracking. That is a legitimate and reasonably common pattern, but it is customization territory, not a box you tick during setup, and clients should hear that framing before signing a statement of work.</p>
+
+<h2 id="what-maps-natively">What maps onto stock functionality</h2>
+<p>A fair amount of agribusiness actually fits without custom code:</p>
+<ul>
+<li><strong>Lot/Serial tracking</strong> on inventory items handles harvest batches reasonably well out of the box — a lot number per harvest run, expiration/best-before dates on the item class, and lot-level costing (Average or FIFO, not Standard, for anything with real cost variance from harvest to harvest).</li>
+<li><strong>Multi-warehouse / multi-location</strong> covers separate farms, processing facilities, and distribution centers as distinct warehouses with inter-warehouse transfers.</li>
+<li><strong>Landed cost</strong> functionality, meant for import/freight allocation, works surprisingly well repurposed for allocating harvest-season labor and input costs across lots when you can express the allocation basis numerically.</li>
+</ul>
+
+<h2 id="what-needs-customization">What genuinely needs customization</h2>
+<p>The gaps are specific and predictable:</p>
+<ul>
+<li><strong>Field/plot-level tracking</strong> below the warehouse — Acumatica's location model stops at warehouse/location, not "which field, which row." That is a custom DAC extension adding a Field/Plot entity linked to Production Orders or Inventory Receipts, if the client needs cost or yield reporting below the lot.</li>
+<li><strong>Yield-based costing</strong> — crop cost per hectare/kg, actual-vs-expected yield variance — is not a stock report. It is a projection over Production Order actuals joined to a custom Field entity, and it is the single most-requested custom report I've seen on these engagements.</li>
+<li><strong>Grading and quality attributes</strong> (grade A/B/C output from a single harvest run) map onto Manufacturing Edition's co-product/by-product production orders reasonably well, but the UI for grading is usually still a light custom screen so field staff aren't editing production orders directly.</li>
+</ul>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AgricultureExt : PXCacheExtension<Farming>
+  <div class="code-header"><span class="code-lang">C# · FIELD/PLOT DAC EXTENSION (SKETCH)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class INLotSerialStatusExt : PXCacheExtension&lt;INLotSerialStatus&gt;
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    [PXDBString(20)]
+    [PXUIField(DisplayName = "Field / Plot")]
+    [PXSelector(typeof(SelectFrom&lt;KGFieldPlot&gt;))]
+    public string FieldPlotID { get; set; }
+    public abstract class fieldPlotID : BqlString.Field&lt;fieldPlotID&gt; { }
 }</code></pre>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on agriculture and farming vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+
+<div class="callout-warn callout">
+  <strong>Do not promise "agriculture edition" features in a proposal</strong>
+  <p>I've seen SOWs get into trouble when a proposal implies native agri-specific functionality that doesn't exist in the product. Scope it explicitly as "Distribution/Manufacturing Edition plus a custom Field/Plot module" — the client's expectations, and your change-order conversations later, go much better when the customization boundary is named up front.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The agriculture is not the question; the failure mode of the farming is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'agriculture'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-agriculture-on-a-horizontal-platform-beats-from-scratch">Why agriculture on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="channel-partner-programs-for-farming">Channel partner programs for farming</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM agriculture
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-agriculture">Marketplace listing for agriculture</h2>
-<p>The performance of farming in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-farming">SOC 2 and ISO 27001 for farming</h2>
-<p>Production farming looks different from development farming. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AgricultureExt : PXCacheExtension<Farming>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring farming first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agriculture on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with farming when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="integration-reality">Integration is usually the bigger lift than the ERP customization</h2>
+<p>In practice the harder problem is rarely the Acumatica side — it's getting data in from farm-management or IoT/telemetry systems (irrigation, weather stations, yield monitors on harvesting equipment) that speak their own formats. The REST API's bulk endpoints handle the volume fine; the actual work is building and maintaining the transform layer, usually as a small scheduled job rather than real-time sync, since agronomic data doesn't need sub-minute latency.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on agriculture and farming vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Agriculture on Acumatica works, but it is Distribution or Manufacturing Edition wearing a costume built by customization — lot tracking and multi-warehouse are free, field-level costing and yield reporting are not. Scope honestly, and expect the farm-system integration to eat more of the budget than the ERP customization itself.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
-      <li><a href="/blog/cac-payback-period/">CAC Payback Period — A Field Guide</a></li>
-      <li><a href="/blog/churn-prediction-saas/">SaaS Churn Prediction — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-inventory-valuation-snapshot-report/">Acumatica Inventory Valuation Snapshot Report</a></li>
+      <li><a href="/blog/acumatica-report-inventory-valuation-tuning/">Acumatica Report — Inventory Valuation Tuning</a></li>
+      <li><a href="/blog/acumatica-dac-extension-multiple-extensions/">Acumatica DAC Extension with Multiple Extensions</a></li>
+      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Acumatica REST API — Bulk Data Load</a></li>
+      <li><a href="/blog/vertical-saas-food-manufacturing-acumatica/">Food and Beverage Manufacturing Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

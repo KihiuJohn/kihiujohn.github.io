@@ -92,81 +92,33 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The data stack in 2026 is more capable than it was in 2020. dbt, lakehouses, vector databases, streaming. this is one of the parts of the modern stack. This article is the part.</p>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>Performance: cost, latency, freshness is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+    <p>Data loss prevention in Acumatica is less about a single feature and more about closing off the many small ways data leaves the system without anyone noticing — an export nobody logged, an integration with too-broad an API scope, an attachment quietly synced to a personal cloud drive. Acumatica gives you the primitives to control most of these; DLP is the discipline of actually turning them on and reviewing them.</p>
+<h2 id="restricting-export-and-print">Restricting export and print access</h2>
+<p>Every grid in Acumatica supports export to Excel by default, and every user with access to a screen can generally export whatever that screen shows them. Access rights on the <strong>Access Rights by Role (SM201020)</strong> screen let you restrict this per role — you can grant a role "View Only" without export, which stops the casual bulk-export path while still letting people do their job on-screen. This matters most for screens exposing customer PII, banking details, or payroll data, where "can see it in the UI" and "can download 50,000 rows to a laptop" should not be the same permission.</p>
+<h2 id="restricted-fields-and-field-level-security">Restricted fields</h2>
+<p>Beyond screen-level access, Acumatica supports field-level security through the same role-based access configuration — specific fields on a DAC can be hidden or masked for roles that don't need them, independent of whether the role can see the rest of the record. This is the right tool for something like a partial bank account number that a sales rep never needs but AP does.</p>
+<div class="callout-warn">
+  <strong>API access rights follow the same roles — check them separately</strong>
+  <p>A REST or SOAP integration authenticates as a real Acumatica user and inherits that user's role-based access rights, including export-equivalent bulk reads. An integration user provisioned with a broad "administrator-like" role for convenience during setup is a DLP hole that never gets closed. Scope integration users to the exact entities and fields the integration needs, and audit them on the same cadence as human accounts.</p>
 </div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>In the work I have done on acumatica data loss prevention — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the data is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.acumatica > 0).groupBy("data").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="why-acumatica-in-the-warehouse-beats-in-the-lake">Why acumatica in the warehouse beats in the lake</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="schema-evolution-for-data">Schema evolution for data</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_acumatica') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="cost-optimisation-for-acumatica">Cost optimisation for acumatica</h2>
-<p>The performance of data in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="the-testing-pyramid-for-data">The testing pyramid for data</h2>
-<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM acumatica
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="attachment-controls">Attachment and file controls</h2>
+<p>Files attached to Acumatica records — invoices, contracts, ID scans — are stored either in the SQL Server FileStore or, if configured, in Azure Blob/S3-backed storage. Two things matter for DLP here: who can attach and detach files (a role-scoped permission, not universal), and where that storage sits — an on-prem FileStore under your own backup and access policy is a different risk profile than a loosely-configured public blob container. If you've wired attachments to external storage, verify the bucket or container is not publicly readable; this is a common oversight when storage is set up quickly during a go-live.</p>
+<h2 id="generic-inquiries-and-reporting-exposure">Generic Inquiries and reporting exposure</h2>
+<p>Generic Inquiries are one of the easiest ways sensitive data leaks past screen-level controls, because a GI can join across tables a user would never be granted direct screen access to, and its results can still be exported. Auditing which GIs expose PII or financial detail, and confirming the GI's own access rights are scoped to the roles that legitimately need it, closes a gap that's easy to miss because GIs are usually built ad hoc by power users rather than reviewed like a screen customization.</p>
+<h2 id="audit-trail-as-a-detective-control">Audit trail as the detective control</h2>
+<p>Access rights are the preventive control; the audit trail is the detective one. Acumatica's audit history (configured per-DAC field) records who changed what and when, which won't stop a bulk export but will show you, after the fact, who viewed or modified a specific customer's sensitive fields — useful both for incident response and for periodic access reviews that ask "does this person still need to see this."</p>
+<h2 id="the-practical-checklist">A practical checklist</h2>
+<p>None of the above needs custom code. It needs a deliberate pass through roles, exports, attachments, GIs, and integration users, on a recurring schedule rather than once at go-live.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Control</th><th>Where it lives</th><th>Stops</th></tr>
+  <tr><td>Export/print restriction</td><td>Access Rights by Role (SM201020)</td><td>Bulk download by legitimate users</td></tr>
+  <tr><td>Field-level security</td><td>Role field restrictions</td><td>Exposure of specific sensitive fields</td></tr>
+  <tr><td>Scoped integration users</td><td>User + Role setup</td><td>Over-broad API access</td></tr>
+  <tr><td>GI access review</td><td>Generic Inquiry security settings</td><td>Cross-table PII leakage via reporting</td></tr>
+  <tr><td>Attachment storage review</td><td>FileStore / Blob configuration</td><td>Publicly exposed documents</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica data loss prevention — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica's DLP posture is only as good as the last access review. Screen rights, field rights, integration user scope, GI exposure, and attachment storage all drift over time as roles are added and staff change — the fix is not a tool purchase, it's putting a recurring review of exactly these five things on someone's calendar.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -177,9 +129,6 @@ LIMIT 100;</code></pre>
       <li><a href="/blog/acumatica-azure-ad-b2c-integration/">Acumatica Azure AD B2C Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

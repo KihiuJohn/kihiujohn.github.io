@@ -84,7 +84,7 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Reorder Points and Min/Max</span></nav>
-    <span class="tag">Acumatica · Customization</span>
+    <span class="tag">Acumatica · Inventory</span>
     <h1>Acumatica Reorder Points and Min/Max</h1>
     <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to configure Acumatica inventory reorder points, min/max stock levels, safety stock, and the replenishment engine that creates POs automatically.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2025-11-20">Nov 20, 2025</time><span>12 min read</span></div>
@@ -92,89 +92,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Acumatica implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReorderExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Reorder(Acumatica doc)
-    {
-        // Custom reorder logic for acumatica reorder points
-        if (doc?.Reorder == null) return;
-        Base.Reorder(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on acumatica reorder points and min/max, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Min/max and reorder points are the settings customers ask about first and revisit least. They live on the Item Warehouse Details tab of the stock item — one Replenishment Source, one Replenishment Method, a Min and a Max — and once they are typed in during go-live, nobody looks at them again until the warehouse is either sitting on six months of dead stock or explaining a stockout to a customer. Neither is a bug. Both are the predictable result of static settings applied to demand that is not static.</p>
+<h2 id="where-the-settings-actually-live">Where the settings actually live</h2>
+<p>Replenishment configuration sits on the Item Warehouse Details record for a stock item at a specific warehouse — the same place you set costing and valuation per site. Each combination of item and warehouse gets its own Replenishment Source (Purchased, Manufactured, or Transferred from another warehouse), its own Replenishment Method, and its own set of quantities. This matters because the same SKU can be min/max in one branch warehouse and reorder-point-driven in a distribution center, and that is intentional — a fast-moving regional warehouse and a slow consignment site should not share a replenishment strategy just because they share an item.</p>
+<p>Replenishment Method has three real options. <strong>None</strong> means the system will never suggest a purchase or transfer for that item at that warehouse — someone has to plan it manually, which is correct for one-off or engineered-to-order items. <strong>Min/Max</strong> is the simple threshold model. <strong>Reorder Point</strong> pulls in lead time and usage to size a buffer instead of a flat number.</p>
+<h2 id="min-max-the-simple-case">Min/Max: the simple case</h2>
+<p>Min/Max is a threshold, not a forecast. When the available quantity — on-hand plus on-order, minus allocations — drops to or below Min, the replenishment engine suggests an order that brings the item back up to Max. That is the entire model. It does not know about lead time, it does not know about seasonality, and it does not care whether last month's usage was double this month's.</p>
+<p>That simplicity is a feature for the right items. Stable, low-variability SKUs — the ones that sell roughly the same quantity every week — do not need a lead-time-aware buffer; a well-tuned Min/Max pair gets the reorder timing close enough, and it is trivial for a planner to sanity-check at a glance. The failure mode shows up on items that are not stable: a Min set for average demand gets blown through in a single large order, and the warehouse is short until the next PO lands.</p>
+<h2 id="reorder-point-and-safety-stock">Reorder Point and safety stock</h2>
+<p>Reorder Point-based replenishment is the same trigger mechanic — order when available quantity hits the threshold — but the threshold itself is calculated instead of typed in by feel. It factors in Lead Time (days), average daily usage, and a Safety Stock quantity that absorbs variability in either demand or the vendor's actual delivery time. If you're using EOQ (Economic Order Quantity) instead of a fixed Max, the suggested order quantity is sized to balance ordering cost against carrying cost rather than just topping up to a round number.</p>
+<p>This method earns its complexity on items where demand is genuinely variable, or where the vendor's lead time is long enough that a stockout during replenishment is expensive. Safety stock is the part people under-tune: set it too low and you have reinvented Min/Max with extra steps; set it too high and you are carrying inventory that only protects against a demand spike that never comes.</p>
+<h2 id="mrp-vs-manual-requirement-planning">MRP versus manual requirement planning</h2>
+<p>Neither Min/Max nor Reorder Point settings do anything by themselves — they are inputs that a planning process reads. Customers running the Material Requirements Planning module get purchase and production suggestions generated by MRP Preview and MRP Recalculation, which net demand across sales orders, forecasts, and existing supply before applying these thresholds. Customers not on MRP typically work from the simpler Purchase Requirements and Transfer Requirements inquiries, which react more directly to the Min/Max or reorder point numbers without the multi-level netting.</p>
+<p>The practical difference matters when you're diagnosing why a suggested PO looks wrong. On MRP, a suggestion can be suppressed or resized because of a sales order pegged against existing supply, not because the replenishment settings are broken. On the simpler inquiries, what you see is closer to a direct read of the threshold math.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Stale settings are the real defect, not the formula</strong>
+  <p>Min/Max and reorder point values set once at go-live and never revisited are the single most common cause of chronic stockouts or overstock I see in the field. Demand patterns shift, a vendor's lead time changes after a supplier switch, and nobody updates the item record to match. Put a recurring review on the calendar — quarterly for A items, less often for C items — rather than trusting numbers that were correct eighteen months ago.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the reorder is.</p>
+<h2 id="tying-it-to-abc-classification">Tying it to ABC classification</h2>
+<p>Not every item deserves the same level of tuning attention. High-value, high-velocity A items are worth the effort of reorder-point-with-safety-stock, reviewed frequently, because a stockout is expensive and overstock ties up real capital. C items — low value, low velocity — can usually tolerate a loose Min/Max buffer reviewed once or twice a year; the carrying cost of being slightly wrong is trivial. Applying the same review cadence to both is wasted effort in one direction and negligence in the other.</p>
+<p>A generic inquiry over <code>INSiteStatus</code> joined to <code>INItemSiteSettings</code> is a fast way to surface items where on-hand plus on-order has dropped below the reorder point or Min, without waiting for the next MRP run:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · REPLENISHMENT SHORTAGE CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+    iss.InventoryID,
+    iss.SiteID,
+    iss.QtyOnHand,
+    iss.QtyOnOrder,
+    (iss.QtyOnHand + iss.QtyOnOrder - iss.QtyAllocated) AS AvailableQty,
+    ic.ReplenishmentMethod,
+    ic.MinQty,
+    ic.MaxQty,
+    ic.ReorderPoint,
+    ic.SafetyStock,
+    ic.LeadTime
+FROM INSiteStatus iss
+INNER JOIN INItemSiteSettings ic
+    ON ic.InventoryID = iss.InventoryID
+   AND ic.SiteID = iss.SiteID
+WHERE ic.ReplenishmentMethod IN ('M', 'R')
+  AND (iss.QtyOnHand + iss.QtyOnOrder - iss.QtyAllocated)
+      <= CASE ic.ReplenishmentMethod
+             WHEN 'M' THEN ic.MinQty
+             ELSE ic.ReorderPoint
+         END
+ORDER BY AvailableQty ASC;</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of reorder in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-reorder-edge-cases-i-have-shipped">The reorder edge cases I have shipped</h2>
-<p>Production reorder looks different from development reorder. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaReorderExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Reorder(Acumatica doc)
-    {
-        // Custom reorder logic for acumatica reorder points
-        if (doc?.Reorder == null) return;
-        Base.Reorder(doc);
-    }
-}</code></pre>
-</div>
+<p>Treat the field and table names as illustrative — verify the actual DAC and generic-inquiry field mappings in your build before wiring this into a dashboard, since exact naming can shift slightly by version.</p>
+<h2 id="choosing-a-method">Choosing a method</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring reorder first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with reorder when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Method</th><th>Best for</th><th>Weak point</th></tr>
+  <tr><td>Min/Max</td><td>Stable demand, simple review, low SKU count per planner</td><td>Ignores lead time and seasonality</td></tr>
+  <tr><td>Reorder Point + Safety Stock</td><td>Variable demand, longer or inconsistent vendor lead times</td><td>Needs accurate lead-time and usage data to be worth the complexity</td></tr>
+  <tr><td>MRP / Requirement Planning</td><td>Multi-level BOMs, dependent demand, sales-order-driven netting</td><td>Heavier to configure and explain to planners</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica reorder points and min/max. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>That is the working approach I use on Acumatica inventory replenishment. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep a warehouse from either running dry or drowning in stock nobody ordered. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -185,9 +157,7 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -93,96 +93,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Go-to-market and customer success is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>An electronics manufacturer's first serious question about Acumatica is usually about serial tracking granularity — can the system track a unit by serial number from the moment a bare PCB comes off the line through final assembly, test, shipment, and eventually an RMA three years later. The short answer: yes, and this is one of the areas where Manufacturing Edition's stock serial-tracking is genuinely solid, but the RMA/warranty side needs deliberate configuration, because it is not a manufacturing feature — it is a Case Management feature wearing a manufacturing hat.</p>
+
+<h2 id="serial-tracking-through-production">Serial assignment through production, not just at receipt</h2>
+<p>Serial-tracked items in Acumatica get serial numbers assigned at receipt by default, but for electronics you typically want serials assigned at a specific production step — after final test, not at raw-component receipt, because a bare board is not yet a serialized unit. That means configuring the item class serial assignment method and, for many boards, generating the serial number itself rather than accepting a system-sequential one (a scanned barcode fed by your test fixture, for instance).</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ElectronicsExt : PXCacheExtension<Manufacturing>
+  <div class="code-header"><span class="code-lang">C# · SERIAL NUMBER FROM TEST FIXTURE SCAN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Override the default serial generator so production receipt accepts
+// an externally-scanned serial (from the test station) instead of
+// Acumatica's auto-numbering sequence.
+protected virtual void INTran_RowInserting(PXCache cache, PXRowInsertingEventArgs e)
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    var row = (INTran)e.Row;
+    if (row.TranType == INTranType.Assembly && !string.IsNullOrEmpty(scannedSerial))
+    {
+        row.LotSerialNbr = scannedSerial; // bypass auto-numbering
+    }
 }</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on electronics manufacturing vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="why-electronics-on-a-horizontal-platform-beats-from-scratch">Why electronics on a horizontal platform beats from-scratch</h2>
-<p>When the work moves from design to production, the questions change. The electronics is not the question; the failure mode of the manufacturing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'electronics'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="channel-partner-programs-for-manufacturing">Channel partner programs for manufacturing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="rma-is-case-management-not-manufacturing">RMA and warranty: this is CRM Case Management wearing a manufacturing hat</h2>
+<p>Acumatica has no dedicated "RMA module." What most electronics manufacturers actually deploy is the Case Management screen (CR/CS) with a custom case class for returns, linked to the original sales order and the serial number via the standard Inventory serial history, plus a Return Order type in Sales Order Management (SO with an RC/RM order type) to handle the physical inventory movement — credit, replace, or repair-and-return. Warranty entitlement itself (is this serial still under warranty, based on ship date plus a warranty term) is not a stock field; I build it as a calculated field off the original shipment date on the serial's transaction history, surfaced on the case screen so support reps see entitlement status without leaving the case.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Serial history is the single source of truth — use it</strong>
+  <p>Resist the temptation to build a separate "warranty tracking" table. Every fact you need — ship date, ship-to customer, original sales order — already lives against the serial in <code>INTran</code>/<code>INLotSerTran</code> history. A parallel tracking table just drifts out of sync. Query the existing history and surface it; don't duplicate it.</p>
 </div>
-<h2 id="marketplace-listing-for-electronics">Marketplace listing for electronics</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM electronics
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="soc-2-and-iso-27001-for-manufacturing">SOC 2 and ISO 27001 for manufacturing</h2>
-<p>The performance of manufacturing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Production manufacturing looks different from development manufacturing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ElectronicsExt : PXCacheExtension<Manufacturing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring manufacturing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add electronics on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with manufacturing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="ipc-and-traceability">IPC-class traceability expectations</h2>
+<p>Electronics contract manufacturers serving regulated end markets (aerospace, medical, automotive-grade) often need component-level genealogy meeting IPC or AS9100-adjacent traceability — which components, which reel/lot, went into which serialized unit. This is the same lot-genealogy machinery covered for chemical manufacturing, applied per serial instead of per batch: Acumatica's native BOM consumption records the lot/serial of components issued to a specific production order, and a serial-to-serial trace report (again, a custom inquiry walking <code>AMProdItem</code> and <code>INTran</code>) gives you the as-built record. Acumatica does not ship this report; every electronics client I have built it for needed it as a first-project deliverable, not a nice-to-have.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on electronics manufacturing vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Electronics manufacturing on Acumatica leans on serial tracking done right at the production step where a unit becomes identifiable, and on Case Management repurposed deliberately for RMA rather than left as generic support tickets. Neither is a checkbox in the demo — both need real configuration decisions before the first serialized unit ships.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-apparel-manufacturing-acumatica/">Apparel and Textile Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-automotive-parts-acumatica/">Automotive Parts Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-beverage-acumatica/">Beverage Manufacturing and Distribution Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-chemical-manufacturing-acumatica/">Chemical Manufacturing Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-cosmetics-acumatica/">Cosmetics and Personal Care Manufacturing Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-lot-and-serial-tracking/">Acumatica Lot and Serial Tracking</a></li>
+      <li><a href="/blog/acumatica-case-screen-deep-dive/">Acumatica Case Screen Deep Dive</a></li>
+      <li><a href="/blog/acumatica-manufacturing-bom-routing-basics/">Acumatica Manufacturing — BOM and Routing Basics</a></li>
+      <li><a href="/blog/vertical-saas-medical-device-acumatica/">Acumatica for Medical Device Manufacturing</a></li>
+      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Acumatica REST API — Bulk Data Load</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

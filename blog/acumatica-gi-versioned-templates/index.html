@@ -93,116 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The architecture: how the pieces fit together is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Generic Inquiries are customization metadata, which means they can and should live in source control the same way a DAC extension or a graph extension does — and in every instance where I have inherited GIs that were only ever edited live in production, the lack of versioning has eventually caused a real incident: a GI silently broken by an edit nobody remembers making, or a "which version is actually live" argument during a go-live weekend.</p>
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="gis-are-customization-content">GIs belong in a customization project, not free-edited live</h2>
+<p>The GI Designer (SM208000) lets you create and edit a Generic Inquiry directly against a live site with no project context at all — convenient for prototyping, dangerous as a permanent workflow. The moment a GI is used by anyone beyond you experimenting, it should be created or moved into a customization project, exported, and committed:</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>In the work I have done on acumatica gi versioned templates, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the versioned is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">WORKFLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>1. Open/create the GI inside an active Customization Project (not directly
+   on the live site) via Customization Project Editor -&gt; Generic Inquiries.
+2. Design and test in a dev/test instance.
+3. Export the project (.zip), extract, commit the GI's XML definition
+   alongside the rest of the customization package in git.
+4. Publish the project to higher environments through your normal
+   deployment pipeline, not by hand-editing the GI in each environment.</code></pre>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The performance of versioned in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-acumatica">Latency and cost tradeoffs for acumatica</h2>
-<p>Production versioned looks different from development versioned. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<p>This gets you the same benefits any code gets from source control: a diff showing exactly what changed between versions, a commit message explaining why, the ability to revert a bad change in seconds instead of trying to remember what the condition used to say, and a single source of truth for what "production" is actually running.</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="naming-and-semantic-versioning">Naming conventions for GIs that need to evolve without breaking consumers</h2>
+<p>Renaming or restructuring a GI in place is fine when nothing external depends on its exact shape. It is not fine once something is consuming it via OData, a dashboard, or a scheduled export — those consumers reference the GI by name and expect a stable column contract. My convention for GIs with external consumers:</p>
+<ul>
+<li>Never remove or rename an existing column on a published, consumed GI — only add.</li>
+<li>If a breaking reshape is genuinely necessary, publish a new GI with a version suffix (<code>KG-ARInvoiceFeed-v2</code>), let both run in parallel, migrate consumers deliberately, and only retire the old one once nothing references it — verified via access logs or, more crudely, by asking every known consumer team directly.</li>
+<li>Put a short changelog in the GI's Description field even when the real history lives in git — the Description is what someone stares at from inside the live Acumatica UI at 2 a.m., without necessarily having the repo open.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>Two people editing the same GI outside source control is a silent overwrite</strong>
+  <p>Without a customization project and a deployment pipeline enforcing one path of change, two people editing "the same" GI directly on a shared instance will overwrite each other with no warning and no merge — the second save simply wins. Source control does not just give you history; it forces edits through a single, serialized path where conflicts actually surface as merge conflicts instead of silent data loss.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring versioned first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with versioned when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="testing-across-versions">Testing before promoting a new version</h2>
+<p>Because GI changes can silently alter row counts or column meaning (a join tweak fanning out rows, a condition change narrowing results), I run the same row-count and spot-check discipline described in the cross-table-joins piece before promoting any GI version change beyond dev — compare old-version and new-version output against the same test parameters, and confirm the diff is exactly the intended change and nothing else.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica gi versioned templates. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat GIs as versioned customization artifacts from the start: build and edit them inside a customization project under source control rather than live on production, never break a published GI's column contract once something external consumes it, and version-suffix genuinely breaking changes instead of reshaping in place. The discipline costs a few extra minutes per change and saves the "who changed this and why" fire drill every time.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-gi-aggregations-group-by-having/">Acumatica GI Aggregations — Group By, Having, and Rollups</a></li>
-      <li><a href="/blog/acumatica-gi-business-events-integration/">Acumatica GI and Business Events Integration</a></li>
-      <li><a href="/blog/acumatica-gi-cascading-parameters/">Acumatica GI Cascading Parameters — Dependent Filters</a></li>
-      <li><a href="/blog/acumatica-gi-conditional-formatting-with-style-templ/">Acumatica GI Conditional Formatting — A Style Template</a></li>
+      <li><a href="/blog/acumatica-gi-audit-trail/">Acumatica GI Audit Trail</a></li>
+      <li><a href="/blog/acumatica-report-publishing-to-version-control/">Acumatica Report — Publishing to Version Control</a></li>
+      <li><a href="/blog/acumatica-gi-styling-templates/">Acumatica GI Styling Templates</a></li>
+      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

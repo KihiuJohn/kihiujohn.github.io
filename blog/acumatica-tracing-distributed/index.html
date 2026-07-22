@@ -93,93 +93,65 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Cost optimisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+    <p>A single Sales Order in Acumatica can trigger a webhook, fire a business event into a message bus, hit a tax fiscalization API, and receive an asynchronous callback that updates the order again — four systems, four log files, and no obvious way to tell which webhook call caused which downstream error six hours after the fact. Distributed tracing exists to answer exactly that question: not "is the system slow" but "which hop broke, for this one transaction, right now."</p>
+
+<h2 id="why-acumatica-integrations-need-tracing">Why Acumatica integrations need tracing</h2>
+<p>Acumatica's own audit trail and trace logs are excellent for what happens inside Acumatica — field changes, who touched a record, which business event fired. They stop being useful the moment a transaction leaves the instance. A webhook fired from a business event, picked up by middleware (Azure Service Bus, n8n, a custom integration service), forwarded to a tax fiscalization API, and returned via callback is four separate systems each logging in isolation. Without a shared identifier threading through all four, debugging a failed transaction means manually correlating timestamps across log sources that don't agree on clock skew, format, or retention — the kind of task that eats an afternoon for what should be a five-minute lookup.</p>
+
+<h2 id="correlating-trace-ids-across-hops">Correlating trace IDs across business events and middleware</h2>
+<p>The fix is a trace ID generated once, at the first hop, and carried through every subsequent call. Acumatica doesn't generate W3C trace context natively, so the practical pattern is to mint the trace ID in the business event handler or the outbound webhook code (a GUID is enough if you're not adopting full OpenTelemetry; a proper W3C <code>traceparent</code> header if you are), store it against the source record — a custom field on the Business Event's target entity or on a custom interface log DAC — and pass it as an HTTP header on every outbound call. Middleware like Azure Service Bus or n8n should propagate that same header unchanged rather than generating a new ID per hop; the moment a hop mints a fresh ID instead of forwarding the one it received, the trace breaks and you're back to manual correlation.</p>
+<div class="callout">
+  <strong>Log the trace ID on the Acumatica side too</strong>
+  <p>A trace is only as useful as its weakest link. If the external fiscalization service logs trace IDs beautifully but Acumatica's side only logs "webhook sent" with no correlation ID, you still can't jump from the Acumatica record to the external system's logs. A simple <code>UsrTraceId</code> field on the interface log or business event log, populated at send time, closes that gap cheaply.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on acumatica distributed tracing, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="why-acumatica-is-the-on-call-s-best-friend">Why acumatica is the on-call's best friend</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the distributed is.</p>
+
+<h2 id="opentelemetry-conventions-and-header-placement">OpenTelemetry conventions and where to inject context</h2>
+<p>For anything beyond a couple of integration points, standardizing on OpenTelemetry's conventions pays off even if Acumatica itself isn't instrumented as an OTel source — the middleware and external services almost certainly can be. The <code>traceparent</code> header (W3C Trace Context) is the de facto standard: a 128-bit trace ID plus a per-hop span ID, propagated on every outbound HTTP call. The practical injection points for an Acumatica-centered flow: on the outbound webhook call fired from a business event (custom code in the event handler sets the header), on the middleware's outbound call to the external API (Service Bus message properties or n8n's HTTP node headers), and on the callback the external system sends back to Acumatica's REST/webhook receiver (read the incoming header and log it against the same trace ID before processing).</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_distributed" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
+  <div class="code-header"><span class="code-lang">C# · TRACE CONTEXT PROPAGATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderWebhookHandler
+{
+    public async Task SendFiscalizationRequest(SOOrder order, string parentTraceId)
+    {
+        var traceId = string.IsNullOrEmpty(parentTraceId)
+            ? Guid.NewGuid().ToString("N")
+            : parentTraceId;
+        var spanId = Guid.NewGuid().ToString("N").Substring(0, 16);
+
+        using var client = new HttpClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, fiscalizationEndpoint)
+        {
+            Content = JsonContent.Create(new { orderNbr = order.OrderNbr, amount = order.OrderTotal })
+        };
+        request.Headers.Add("traceparent", $"00-{traceId}-{spanId}-01");
+
+        // Persist for correlation before the call, in case the callback
+        // arrives after this process has moved on
+        var log = new InterfaceLog
+        {
+            OrderNbr = order.OrderNbr,
+            TraceId = traceId,
+            Direction = "OUTBOUND",
+            Endpoint = fiscalizationEndpoint
+        };
+        interfaceLogGraph.Logs.Insert(log);
+        interfaceLogGraph.Save.Press();
+
+        var response = await client.SendAsync(request);
+        // response handling / retry logic omitted
+    }
 }</code></pre>
 </div>
-<h2 id="gitops-for-distributed">GitOps for distributed</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+
+<h2 id="debugging-a-failed-multi-hop-transaction">Debugging a failed multi-hop transaction</h2>
+<p>With trace IDs threaded through, debugging a stuck order becomes a lookup instead of a log-diffing exercise: an SO created in Acumatica fires a business event, which fires a webhook carrying <code>traceparent</code>; the receiving middleware logs the same trace ID against its own span before calling the fiscalization API; the fiscalization API's response (or timeout) is logged against that trace ID too; and the callback that updates Acumatica reads the trace ID back out of the response payload or a correlation header so the final update ties back to the original order. When something breaks, you search every system's logs for one trace ID and get the full chain in order, including which hop stalled or errored — instead of grepping four log sources by approximate timestamp and hoping nothing else fired in that window.</p>
+<div class="callout callout-warn">
+  <strong>Callbacks need the trace ID even when they can't get it for free</strong>
+  <p>Some fiscalization and tax APIs don't echo back a custom trace header — they only return their own reference number. In that case, persist a mapping (external reference number to your trace ID) at send time, the same interface log row works, so the callback handler can look up the trace ID by the reference number instead of losing the thread entirely.</p>
 </div>
-<h2 id="the-deployment-pipeline-for-acumatica">The deployment pipeline for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-distributed">SLOs and error budgets for distributed</h2>
-<p>The performance of distributed in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>Production distributed looks different from development distributed. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring distributed first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with distributed when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica distributed tracing. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Distributed tracing for Acumatica integrations isn't about instrumenting Acumatica itself with a tracing SDK — it's about generating one ID early, logging it on both sides of every hop (including inside Acumatica via a custom field), and propagating it faithfully through whatever middleware sits between Acumatica and the outside world. The payoff shows up exactly when you need it most: a customer complaint about a stuck order becomes a single trace-ID search instead of an afternoon spent cross-referencing timestamps across systems that don't share a clock.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +162,6 @@ jobs:
       <li><a href="/blog/acumatica-architecture-for-new-developers/">Acumatica Architecture — A Primer for New Developers</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

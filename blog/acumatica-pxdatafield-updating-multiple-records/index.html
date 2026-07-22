@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Updating Multiple Records with PXDataField in Acumatica | John Kihiu</title>
-<meta name="description" content="Updating Multiple Records with PXDataField in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="A client wanted a button on a Sales Order screen: select a batch of open orders in a grid, click &quot;Apply Price Increase,&quot; and have a percentage adjustment applied across every.">
 <meta name="keywords" content="Acumatica customization, Acumatica data, Acumatica cache, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-pxdatafield-updating-multiple-records/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Updating Multiple Records with PXDataField in Acumatica">
-<meta property="og:description" content="Updating Multiple Records with PXDataField in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="A client wanted a button on a Sales Order screen: select a batch of open orders in a grid, click &quot;Apply Price Increase,&quot; and have a percentage adjustment applied across every.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-pxdatafield-updating-multiple-records.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-pxdatafield-updating-multiple-records/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="cache">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Updating Multiple Records with PXDataField in Acumatica","description":"Updating Multiple Records with PXDataField in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxdatafield-updating-multiple-records.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxdatafield-updating-multiple-records/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Updating Multiple Records with PXDataField in Acumatica","description": "A client wanted a button on a Sales Order screen: select a batch of open orders in a grid, click \"Apply Price Increase,\" and have a percentage adjustment applied across every.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxdatafield-updating-multiple-records.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxdatafield-updating-multiple-records/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Updating Multiple Records with PXDataField in Acumatica","item":"https://kihiujohn.github.io/blog/acumatica-pxdatafield-updating-multiple-records/"}]}
@@ -87,105 +87,89 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Updating Multiple Records with PXDataField in Acumatica</span></nav>
     <span class="tag">Data / ML · Customization</span>
     <h1>Updating Multiple Records with PXDataField in Acumatica</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Updating Multiple Records with PXDataField in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A client wanted a button on a Sales Order screen: select a batch of open orders in a grid, click &quot;Apply Price Increase,&quot; and have a percentage adjustment applied across every.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="what-updating-multiple-records-with-pxdatafield-in-acumatica-is-for">What Updating Multiple Records with PXDataField in Acumatica is for</h2>
-<p>What Updating Multiple Records with PXDataField in Acumatica is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A client wanted a button on a Sales Order screen: select a batch of open orders in a grid, click "Apply Price Increase," and have a percentage adjustment applied across every selected line, for every selected order, in one action. My first draft did exactly what you'd expect - loop over selected rows, mutate them through the cache, call Save. It worked for a handful of orders. It fell over, slowly and visibly, once the client's actual usage pattern turned out to be several hundred orders at once. That's the story of every "why is PXDataField update slow" investigation I've done since: the honest answer to "should I use it" is almost always "it depends how many records, and whether you actually need the pipeline."</p>
+
+<h2 id="what-pxdatafield-actually-is">PXDataField and PXDataFieldAssign: SQL-level field updates, not cache mutation</h2>
+<p><code>PXDatabase.Update</code> combined with <code>PXDataField</code> selectors and <code>PXDataFieldAssign</code> values lets you write a direct, set-based SQL UPDATE against a table, matching rows by whatever WHERE-equivalent fields you specify, entirely outside any graph's cache. It's the update-side counterpart to <code>PXDatabase.Insert</code> - same tradeoff, same bypass of the event pipeline, same reason it exists: doing a bulk operation as one SQL statement instead of N cache-driven saves.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM updating
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Direct multi-record update, no cache involved</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>PXDatabase.Update&lt;SOLine&gt;(
+    new PXDataFieldAssign&lt;SOLine.curyUnitPrice&gt;(newPrice),
+    new PXDataFieldRestrict&lt;SOLine.orderType&gt;(PXDbType.Char, 2, "SO"),
+    new PXDataFieldRestrict&lt;SOLine.orderNbr&gt;(PXDbType.NVarChar, 15,
+        orderNbr, PXComp.EQ)
+);
+// One UPDATE statement, one order's lines. No FieldUpdated fires,
+// no dependent totals recalculate, no attribute re-validates.
+</code></pre>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>In the work I have done on updating multiple records with pxdatafield in acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+
+<p>This is dramatically faster than a cache-driven loop for genuinely bulk operations, for the same reason PXDatabase.Insert is faster than cache.Insert: there's no per-row, per-field event pipeline to pay for. It is also, just like PXDatabase.Insert, blind to everything that pipeline used to do - dependent field recalculation, cross-DAC totals, validation.</p>
+
+<h2 id="the-price-increase-problem-again">Why my first "obvious" fix for the price increase button was wrong twice, not once</h2>
+<p>My first version used the cache and was correct but slow. My second attempt reached straight for PXDatabase.Update and was fast but wrong - it updated <code>CuryUnitPrice</code> directly and left <code>CuryLineAmt</code>, the order's <code>CuryOrderTotal</code>, and the sales order's own cached totals completely stale, because none of that recalculation logic ran. The order screen looked wrong the next time anyone opened it, since those aggregate fields are normally kept correct by the same event handlers PXDatabase.Update skips.</p>
+
+<div class="callout-warn callout">
+  <strong>Bulk SQL updates on fields with dependent calculations need a second pass</strong>
+  <p>If the field you're updating in bulk feeds into any calculated total elsewhere - line amount from unit price and quantity, document total from line amounts, anything a RowPersisting or FieldUpdated handler normally recomputes - a raw PXDataField update leaves those totals stale until something forces a recalculation. Either recompute the dependent fields in the same bulk SQL pass explicitly, or accept the cache-driven cost specifically for rows where recalculation actually matters.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The updating is not the question; the failure mode of the multiple is.</p>
+
+<h2 id="the-actual-fix">What I actually shipped: cache-driven, but bounded and batched</h2>
+<p>For the price increase feature, the honest fix wasn't a bigger hammer, it was recognizing the record counts involved (typically dozens of orders, a few hundred lines) didn't actually justify bypassing the pipeline at all - the totals recalculation was the entire point of the feature. What I did instead was bound the operation properly: process orders individually through the graph's normal cache-driven update-and-save, but structure it as a background processing job (<code>PXLongOperation</code>) rather than a synchronous UI action, so a few hundred orders didn't time out the request even though each one paid full pipeline cost.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.updating > 0).groupBy("multiple").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Cache-driven, but off the UI thread and processed in batches</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual IEnumerable applyPriceIncrease(PXAdapter adapter)
+{
+    var selected = new PXAdapter(adapter).Get&lt;SOOrder&gt;()
+        .RowCast&lt;SOOrder&gt;().ToList();
+
+    PXLongOperation.StartOperation(Base, () =&gt;
+    {
+        var graph = PXGraph.CreateInstance&lt;SOOrderEntry&gt;();
+        foreach (SOOrder order in selected)
+        {
+            graph.Clear();
+            graph.Document.Current = graph.Document.Search&lt;SOOrder.orderNbr&gt;(order.OrderNbr);
+            foreach (SOLine line in graph.Transactions.Select())
+            {
+                line.CuryUnitPrice *= (1 + pricePct / 100m);
+                graph.Transactions.Update(line); // full pipeline: totals recalc correctly
+            }
+            graph.Save.Press();
+        }
+    });
+    return adapter.Get();
+}</code></pre>
 </div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_updating') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>The performance of multiple in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production multiple looks different from development multiple. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM updating
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring multiple first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add updating on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with multiple when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="when-pxdatafield-genuinely-earns-its-place">Where PXDataField bulk updates are actually the right call</h2>
+<p>Reach for PXDataField/PXDatabase.Update when the field being changed has no dependent calculations to worry about, and the record count is large enough that per-row pipeline cost is the actual bottleneck - flipping a status flag across thousands of archived records, clearing a deprecated custom field during a cleanup migration, updating an audit stamp on historical rows nobody's screen currently has open. None of those need FieldUpdated to fire for anything downstream to stay correct, which is exactly the condition that makes bypassing the pipeline safe rather than merely fast.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on updating multiple records with pxdatafield in acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>PXDataField-based bulk updates buy real speed by skipping the event pipeline entirely, the same tradeoff as PXDatabase.Insert on the write side. Before using it on a field with dependent totals or cross-field validation, ask honestly whether the record count actually justifies bypassing recalculation - often the right fix isn't a faster write path, it's moving a correctly-computed cache-driven update onto a background operation so it doesn't need to be fast, just non-blocking.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</a></li>
       <li><a href="/blog/acumatica-pxdatabase-insert-vs-cache-insert/">PXDatabase.Insert vs Cache.Insert in Acumatica</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
+      <li><a href="/blog/acumatica-gi-mass-update-workflow/">Acumatica Generic Inquiry — Mass Update Workflow</a></li>
+      <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

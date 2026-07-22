@@ -93,96 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Multi-tenant data isolation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Medical billing services — companies that handle claims and collections for physician practices — are a genuinely good fit for Acumatica on the accounting side, and a genuinely bad fit if anyone expects it to process claims. Worth separating those two clearly, because a medical billing company's own internal operations often get conflated with the claims-processing pipeline it runs for clients.</p>
+
+<h2 id="two-different-things">The billing service's books versus the claims it processes</h2>
+<p>A medical billing company has its own revenue (fees charged to physician-practice clients, often a percentage of collections) and its own AP, payroll, and financial reporting — completely ordinary ERP territory, and Acumatica handles it well, including the percentage-of-collections billing model via recurring or usage-based invoicing patterns. Separately, the company operates a claims clearinghouse workflow — submitting claims to payers, tracking adjudication, posting remittances — for its clients' patient billing. That second workflow is specialized healthcare claims software territory (clearinghouse integration, ANSI X12 837/835 transaction handling); Acumatica has no native claims-clearinghouse capability and should not be asked to grow one.</p>
+
+<h2 id="where-they-meet">Where the two systems meet: revenue recognition on collections</h2>
+<p>The integration point that actually matters for the billing company's own books is: when the claims system reports that a client practice collected a payment, the billing company's percentage fee becomes billable revenue. That is a legitimate, scoped integration — a summary feed, not a claims feed.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class MedicalExt : PXCacheExtension<Billing>
+  <div class="code-header"><span class="code-lang">JSON · COLLECTIONS SUMMARY TO FEE INVOICE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>POST /entity/Default/24.200.001/Invoice HTTP/1.1
+Content-Type: application/json
+
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  "CustomerID": { "value": "PRACTICE-014" },
+  "Description": { "value": "Billing service fee — June collections" },
+  "Details": [
+    { "InventoryID": { "value": "BILLSVC-FEE" },
+      "Qty": { "value": 1 },
+      "UnitPrice": { "value": 4128.60 },
+      "Description": { "value": "6% of $68,810.00 collected — June 2026" } }
+  ]
 }</code></pre>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>In the work I have done on medical billing vertical saas on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>When the work moves from design to production, the questions change. The medical is not the question; the failure mode of the billing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'medical'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>The collected amount and the fee percentage cross the boundary; the underlying claim detail, diagnosis codes, and patient identity stay in the claims system.</p>
+
+<h2 id="ar-for-the-clients-clients">Do not build patient-level AR for the practice's patients in Acumatica</h2>
+<p>The recurring bad idea in this vertical is using Acumatica to track each physician practice's individual patient AR balances, on the theory that "it's all AR, why not one system." That reintroduces the PHI-in-the-ERP problem covered in the HIPAA piece in this series, at scale, across every client practice the billing company serves — a much larger blast radius than a single provider's own patient list. Keep patient-level AR in the claims/practice management system; Acumatica tracks the billing company's own receivable from its physician-practice clients, which is one AR line per practice per period, not one per patient.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Multi-entity if the billing company itself is a multi-branch operation</strong>
+  <p>Larger medical billing services run regional offices or client-facing teams as separate cost centers. Acumatica's branch structure fits that cleanly — branch-level P&L for each regional team while consolidating at the company level — which is ordinary multi-branch ERP work, no healthcare specifics involved.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM medical
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="why-medical-on-a-horizontal-platform-beats-from-scratch">Why medical on a horizontal platform beats from-scratch</h2>
-<p>The performance of billing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="channel-partner-programs-for-billing">Channel partner programs for billing</h2>
-<p>Production billing looks different from development billing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class MedicalExt : PXCacheExtension<Billing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring billing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add medical on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with billing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on medical billing vertical saas on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>For a medical billing company's own financial operations — fee revenue, AP, multi-branch consolidation — Acumatica is a solid, unremarkable fit. Keep it there: do not let patient-level claims or AR detail migrate into the ERP, and treat the claims-processing pipeline as a separate, specialized system that feeds Acumatica only a periodic revenue summary.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/saas-billing-automation/">SaaS Billing Automation — A Field Guide</a></li>
-      <li><a href="/blog/vertical-saas-clinical-trial-acumatica/">Clinical Trial Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-dental-practice-acumatica/">Dental Practice Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-ehr-integration-acumatica/">EHR Integration Patterns for Healthcare Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-healthcare-on-acumatica/">Building a Healthcare Vertical SaaS on Acumatica — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-customer-credits-and-memos/">Acumatica Customer Credits and Memos</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-report-customer-credit-analysis/">Acumatica Report — Customer Credit Analysis</a></li>
+      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
+      <li><a href="/blog/vertical-saas-ehr-integration-acumatica/">EHR Integration Patterns on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

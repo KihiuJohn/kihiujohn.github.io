@@ -93,93 +93,25 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>Incident response for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+    <p>Acumatica licenses by concurrent usage, not by named user — a distinction that trips up almost every team the first time an integration or a batch job starts eating sessions nobody accounted for. Understanding what actually counts as a session, and how headroom is measured, is the difference between sizing your license correctly and getting a surprise lockout during month-end close.</p>
+<h2 id="what-counts-as-a-session">What actually consumes a concurrent session</h2>
+<p>Every logged-in user with an active session counts against your license's concurrent user limit, for as long as that session is alive — which is not the same as "actively clicking." A user who logs in at 8am and leaves the browser tab open all day without ever hitting an idle timeout holds a session the entire time, even during lunch. Integration users (REST/SOAP API connections) count too, and unlike a human's browser session, a poorly written integration that opens a new login per API call without logging out can leak sessions far faster than any human would.</p>
+<h2 id="session-timeout-is-your-primary-lever">Session timeout is the lever that actually matters</h2>
+<p>The single biggest factor in how many concurrent sessions your real user count consumes is the idle session timeout, configured in the site's web.config or through Acumatica's session settings. A short timeout (say, 20-30 minutes) reclaims sessions from people who stepped away, while a long or disabled timeout means your concurrency ceiling is effectively "everyone who logged in today and forgot to log out," which is a much bigger number than "everyone actively working right now."</p>
+<div class="callout-warn">
+  <strong>Integration users need explicit logout, not just timeout reliance</strong>
+  <p>An integration that authenticates per request and never calls the logout endpoint accumulates orphaned sessions until they eventually time out — during that window they consume real concurrency slots. Any custom integration built against Acumatica's REST or SOAP API should explicitly log out after each unit of work, or better, maintain one long-lived authenticated session reused across calls rather than opening a new one per request.</p>
 </div>
-<h2 id="what-acumatica-license-concurrency-explained-gives-you">What Acumatica License Concurrency Explained gives you</h2>
-<p>In the work I have done on acumatica license concurrency explained, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the license is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_license" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of license in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production license looks different from development license. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring license first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with license when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="monitoring-headroom-before-you-hit-the-wall">Monitoring headroom before you hit the wall</h2>
+<p>Acumatica's System Monitor / license utilization views (accessible to administrators) show current active sessions against the licensed concurrent limit in something close to real time. The pattern worth building is a scheduled check — even a simple Generic Inquiry or a small script hitting the login sessions data — that alerts when utilization crosses a threshold (say, 80% of licensed concurrency) well before month-end close pushes everyone into the system simultaneously and someone gets locked out mid-posting.</p>
+<h2 id="what-happens-at-the-limit">What actually happens when you hit the ceiling</h2>
+<p>When concurrent sessions reach the licensed limit, the next login attempt is rejected outright rather than queued — the user sees a licensing error, not a wait. This is the scenario that makes concurrency planning matter operationally: it tends to happen at the worst possible time, when the whole finance team is trying to close the books simultaneously and every session that should have timed out hours ago is still counted as active.</p>
+<h2 id="sizing-for-real-usage-not-headcount">Sizing the license to usage patterns, not headcount</h2>
+<p>Because it's concurrent rather than named-user licensing, the right sizing question is not "how many people have accounts" but "what's the realistic peak overlap" — a company with 200 total users where finance, sales, and warehouse rarely log in simultaneously needs meaningfully fewer concurrent licenses than the headcount suggests. Look at actual peak concurrent session data (available from the same monitoring views) across a representative period including month-end, not a guess, before negotiating license count.</p>
+<h2 id="reducing-pressure-without-buying-more-seats">Reducing pressure without buying more seats</h2>
+<p>Before assuming you need to buy more concurrent licenses, check the cheaper fixes first: tighten the idle timeout, audit integration users for sessions that never log out, and confirm no service account or scheduled process is holding a session open unnecessarily around the clock. It's common to reclaim 10-20% of apparent concurrency just by fixing timeout and integration hygiene, which is a lot cheaper than the next license tier.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica license concurrency explained. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Concurrency in Acumatica is governed almost entirely by session lifetime, not by how many people are actually working — a short idle timeout and disciplined integration login/logout behavior recover more headroom than most teams realize. Monitor real peak usage before the license renewal conversation, and you'll size correctly instead of guessing from headcount.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +122,6 @@ jobs:
       <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

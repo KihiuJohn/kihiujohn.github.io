@@ -94,101 +94,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The API landscape in 2026 is more capable than it was in 2020. REST, GraphQL, gRPC, webhooks. this is one of the parts of the modern API. This article is the part.</p>
-<h2 id="what-acumatica-rest-api-rate-limiting-and-retry-gives-you">What Acumatica REST API — Rate Limiting and Retry gives you</h2>
-<p>What Acumatica REST API — Rate Limiting and Retry gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>In the work I have done on acumatica rest api — rate limiting and retry, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>"Rate limiting" on the Acumatica REST API doesn't work the way it does on most SaaS APIs. There's no documented token-bucket or requests-per-minute quota returning a clean <code>429 Too Many Requests</code> with a <code>Retry-After</code> header. What you actually run into is a concurrency limit tied to your license.</p>
+
+<h2 id="its-a-concurrency-limit-not-a-quota">It's a concurrency limit, not a quota</h2>
+<p>Acumatica licenses define a number of concurrent API "cores" — the number of requests the instance will process for integration users at the same time. When every core is busy, the next request doesn't get rejected outright; it queues and waits for a core to free up. That's a meaningfully different failure mode than a typical rate limit: instead of a fast, explicit rejection you can detect and back off from, you get a slow request that looks identical to any other slow request until it eventually times out on your side.</p>
+
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>Don't assume a 429 exists</strong>
+  <p>Acumatica's public documentation doesn't describe a 429-based throttling contract the way Shopify or Stripe do. Treat any specific numeric limit you're quoted (requests per minute, concurrent cores) as license- and deployment-dependent, and verify it against the actual License Monitoring Console on the instance you're integrating with rather than a number from an old forum post.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the rest is.</p>
+
+<h2 id="what-actually-throttles-you">What actually throttles you in practice</h2>
+<p>In practice, the limiting factor is almost always one of: the number of concurrent API-user sessions your license allows, the number of application pool worker processes IIS has available, or plain database contention from a long-running screen-equivalent operation (a Sales Order save with heavy business logic is not cheap, REST or not). A burst of parallel requests from an integration is far more likely to produce timeouts and queuing than an explicit rejection.</p>
+
+<h2 id="reading-the-signals">Reading the signals: timeouts vs. explicit errors</h2>
+<p>Because there's no clean throttle signal, your retry logic needs to treat HTTP timeouts and 5xx responses as "maybe transient, maybe not" rather than assuming every failure is a bug in your payload. A 400 with a validation message from PXException is not retryable — retrying it will fail identically every time. A timeout, a 502/503 from IIS, or a connection reset is a reasonable candidate for retry with backoff.</p>
+
+<h2 id="a-retry-strategy-that-respects-queuing">A retry strategy that respects queuing, not just backoff</h2>
+<p>Exponential backoff with jitter is still the right shape, but size it around the fact that you're waiting for a core to free up, not for a token bucket to refill — a few seconds of backoff is often too short if the instance is genuinely saturated. Cap retries (three to five attempts is typical) and make sure retried writes are idempotent — which, thanks to PUT-based upserts, they usually are as long as you include the record's key fields.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /acumaticas/{id}:
-    get:
-      operationId: getAcumatica
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
+  <div class="code-header"><span class="code-lang">C# · POLLY RETRY POLICY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>var retryPolicy = Policy
+    .Handle&lt;TaskCanceledException&gt;()          // timeout
+    .OrResult&lt;HttpResponseMessage&gt;(r =&gt;
+        (int)r.StatusCode &gt;= 500 || r.StatusCode == HttpStatusCode.RequestTimeout)
+    .WaitAndRetryAsync(
+        retryCount: 4,
+        sleepDurationProvider: attempt =&gt;
+            TimeSpan.FromSeconds(Math.Pow(2, attempt)) +
+            TimeSpan.FromMilliseconds(new Random().Next(0, 500)));
+
+var response = await retryPolicy.ExecuteAsync(() =&gt; httpClient.PutAsync(url, content));</code></pre>
 </div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type AcumaticaResponse = {
-    id: string;
-    rest: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>The performance of rest in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production rest looks different from development rest. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/acumaticas/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await acumaticaService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rest first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rest when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="where-the-real-bottleneck-usually-is">Where the real bottleneck usually is</h2>
+<p>Before tuning retry policy, check whether the integration is even using its concurrency budget well. A common mistake is firing dozens of parallel PUTs at a single endpoint from a batch job — that's the fastest way to exhaust the API core limit and start seeing queuing that looks like a rate limit but is really self-inflicted contention. Throttling your own concurrency client-side (a semaphore capping simultaneous in-flight requests) is usually more effective than any amount of retry tuning.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica rest api — rate limiting and retry. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>There's no documented rate-limit contract to code against — there's a concurrency ceiling tied to your license and infrastructure. Retry on timeouts and 5xx, never on validation errors, back off with real headroom, and throttle your own client concurrency before you assume the API is the bottleneck.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
-      <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
-      <li><a href="/blog/acumatica-openapi-spec-generating-from-acumatica/">Generating an OpenAPI Spec from Acumatica</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
       <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
-      <li><a href="/blog/acumatica-rest-api-file-attachments/">File Attachments with the Acumatica REST API</a></li>
+      <li><a href="/blog/acumatica-rest-api-bulk-data-load/">Bulk Data Loads with the Acumatica REST API</a></li>
+      <li><a href="/blog/rest-api-rate-limiting/">REST API Rate Limiting — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-webhooks-vs-rest-polling/">Acumatica Webhooks vs REST Polling — When to Use Which</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

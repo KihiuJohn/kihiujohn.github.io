@@ -93,78 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Turning a working Acumatica customization into something you can sell is mostly not a coding exercise — it is a packaging and discipline exercise. A project that runs fine on the one tenant you built it for can still fail validation, break on a customer's next upgrade, or stall in marketplace review because of things you never had to think about while it was bespoke. This checklist is what I run through before calling an Acumatica solution ready to publish.</p>
+
+<h2 id="package-cleanly">Package as a self-contained customization project</h2>
+<p>Everything the solution needs must travel inside the customization project — DAC extensions, graph extensions, screens, generic inquiries, reports, and any supporting DLL. Nothing should depend on a manual step someone did once on your dev box. Build the project from a clean source-controlled state, export it, then import it into a <em>fresh</em> tenant and confirm it publishes with no errors and no missing references. If publishing needs a SQL script or a data seed, ship those as part of the project (custom tables, database scripts) rather than as a README instruction, because instructions get skipped.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Isv>
+  <div class="code-header"><span class="code-lang">C# · DAC EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Every added field is Usr-prefixed and lives in a cache extension,
+// so a customer upgrade never collides with a future base field.
+public class SOOrderExt : PXCacheExtension&lt;PX.Objects.SO.SOOrder&gt;
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    [PXDBString(30)]
+    [PXUIField(DisplayName = "Warranty Plan")]
+    public virtual string UsrWarrantyPlan { get; set; }
+    public abstract class usrWarrantyPlan : PX.Data.BQL.BqlString.Field&lt;usrWarrantyPlan&gt; { }
 }</code></pre>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on acumatica isv solution — publish checklist, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="validate">Run the customization validation and code review</h2>
+<p>Before you ship, use the platform's built-in <strong>Validate Customization</strong> against a target build to catch references to members that changed or were removed. Then run the ISV code-analysis / upgrade-compatibility tooling Acumatica provides for solution certification — it flags the patterns most likely to break on upgrade: direct base modifications, unpublished dependencies, deprecated API use, and DAC fields without the <code>Usr</code> prefix. Fix these before submission, not after a reviewer sends the package back.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Usr prefix is not optional for a shipped product</strong>
+  <p>On a one-off customization a missing prefix is a latent bug. In a distributed solution it is a guaranteed upgrade collision on someone else's tenant, months from now, that you will be paged for. Every custom field on a base DAC starts with <code>Usr</code>.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the isv is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'acumatica'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-acumatica-on-a-horizontal-platform-beats-from-scratch">Why acumatica on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="channel-partner-programs-for-isv">Channel partner programs for isv</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM acumatica
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-acumatica">Marketplace listing for acumatica</h2>
-<p>The performance of isv in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-isv">SOC 2 and ISO 27001 for isv</h2>
-<p>Production isv looks different from development isv. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Isv>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+
+<h2 id="version-strategy">Pin a target version and plan for the next one</h2>
+<p>Decide exactly which Acumatica build your release targets and record it in the project description and your release notes — customers need to know the minimum version. Acumatica ships new major versions on a regular cadence, and a solution that compiles against one may need adjustment for the next. Keep a branch per supported major version rather than trying to make one package span all of them, and test-publish against each supported build before you claim compatibility. When a base API you rely on is deprecated, plan the migration ahead of the version that removes it, not after.</p>
+
+<h2 id="isolate-tenant-assumptions">Remove single-tenant assumptions</h2>
+<p>Code that was fine on one company breaks when it lands on someone else's configuration. Audit for hard-coded IDs, branch or company references, hard-coded account or subaccount values, and assumptions about which features are enabled. Anything site-specific belongs in a setup screen or a preferences record the customer fills in, not a constant in your source. Test the solution on a tenant with multiple branches and a different chart of accounts than your dev box — that is where these assumptions surface.</p>
+
+<h2 id="license-and-package">Sign, license, and name the package</h2>
+<p>If your solution includes a compiled DLL, sign it and be deliberate about the assembly and namespace names so they will not clash with another vendor's package on the same tenant. Give the customization project a unique, vendor-prefixed name for the same reason — two ISVs shipping a project called <code>Extensions</code> is a support ticket waiting to happen. If you gate features by license level, make the enforcement fail safe and legible, so a customer without the right entitlement gets a clear message rather than a stack trace.</p>
+
+<h2 id="docs-and-submission">Documentation and marketplace submission</h2>
+<p>Package the things a reviewer and a customer both need: an install/publish guide, the target-version statement, a description of every screen and field added, and release notes. For the Acumatica marketplace / ISV program, the submission flow expects a certified package plus this documentation and a demonstration that the solution passes validation. Treat the first submission as a review conversation — reviewers will ask for the upgrade-compatibility evidence and the install steps — and keep the exact package you submitted under source control so you can reproduce it.</p>
+
+<h2 id="checklist">The pre-publish checklist</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring isv first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with isv when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Area</th><th>Gate before you ship</th></tr>
+  <tr><td>Packaging</td><td>Publishes clean on a fresh tenant with no manual steps or missing references</td></tr>
+  <tr><td>Validation</td><td>Passes Validate Customization + ISV upgrade-compatibility analysis</td></tr>
+  <tr><td>Fields</td><td>Every base-DAC field is Usr-prefixed and in a cache extension</td></tr>
+  <tr><td>Versioning</td><td>Target build stated; branch per supported major version</td></tr>
+  <tr><td>Portability</td><td>No hard-coded IDs; site-specific values in setup screens</td></tr>
+  <tr><td>Packaging identity</td><td>Signed DLL, unique vendor-prefixed project and assembly names</td></tr>
+  <tr><td>Docs</td><td>Install guide, version statement, screen/field reference, release notes</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica isv solution — publish checklist. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The gap between "works on my tenant" and "shippable product" is almost entirely the boring diligence above: clean packaging, passing validation, no hidden single-tenant assumptions, and a version story you can stand behind. Get those right and the marketplace review is a formality; skip them and you find out the hard way on a customer's upgrade weekend. If you are getting an Acumatica solution ready to publish, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +153,6 @@ public class AcumaticaExt : PXCacheExtension<Isv>
       <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

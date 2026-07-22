@@ -93,107 +93,73 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="how-to-debug-crm-in-production">How to debug crm in production</h2>
-<p>How to debug crm in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The reason to run CRM inside Acumatica instead of bolting on a separate system is one word: continuity. A lead becomes a contact and business account, the account grows opportunities, an opportunity produces a quote, the quote becomes a sales order, the order ships and invoices, and the invoice posts to AR — all in one database, one security model, one audit trail. No sync jobs, no duplicate customer masters, no "which system is right" arguments. But that continuity only materializes if you configure the handoffs deliberately, and the handoffs are where every implementation I've done needed real work.</p>
+
+<h2 id="stage-1-lead-to-opportunity">Stage 1: Lead → contact + business account</h2>
+<p>Leads (CR301000) are deliberately lightweight — a name, a company, a source. The important design decision is your <strong>qualification workflow</strong>: what has to be true before a lead converts? Acumatica's conversion action creates a contact and, optionally, a business account of type Prospect. The classic mistake is converting too eagerly and flooding Business Accounts with junk prospects that later collide with real customer records. I configure the lead workflow so conversion is only available from a Qualified state, and I put duplicate validation (built into CRM configuration) in blocking mode on both email and account name — cleaning duplicate business accounts after the fact is miserable because documents hang off them.</p>
+
+<h2 id="stage-2-opportunity-to-quote">Stage 2: Opportunity → quote</h2>
+<p>Opportunities (CR304000) carry the pipeline: stage, probability, amount, and crucially <strong>products</strong> — line items with inventory IDs, quantities and prices. Whether teams fill in products or just a total amount is the fork in the road. If sales only types a number, the downstream automation dies here, because a quote and a sales order need lines. Getting salespeople to build product lines on the opportunity is an adoption battle, but it's the one battle worth fighting; everything after it is configuration.</p>
+<p>From an opportunity you create a <strong>sales quote</strong> (CR304500), which snapshots the products, applies real pricing (price classes, discounts, taxes via the tax zone), and becomes the printable/emailable document. Quotes version properly — a revised quote supersedes the old one on the opportunity — and the approval map can require sign-off above a discount threshold, which I've wired for clients who kept discovering rogue 30% discounts at invoice time.</p>
+
+<div class="callout">
+  <strong>Prospect vs customer conversion timing</strong>
+  <p>A business account of type Prospect cannot receive a sales order. The "Convert to Customer" step — assigning a customer class, terms, credit limit — is the real gate between CRM and ERP. Decide who owns that step (sales ops? finance?) and put it in the workflow explicitly. Implementations that leave it implicit get sales orders blocked at month-end and angry reps.</p>
+</div>
+
+<h2 id="stage-3-quote-to-order-to-cash">Stage 3: Quote → sales order → shipment → invoice</h2>
+<p>Converting a won quote creates the sales order with lines, prices and discounts intact. From there it's standard distribution: allocation, shipment (SO302000), confirm, prepare invoice, release to AR. Two configuration points matter for the CRM-to-cash seam:</p>
+<ul>
+<li><strong>Credit hold.</strong> The moment a prospect becomes a customer with real terms, the credit checking rules on the customer class take over. If the class defaults credit limit to zero, every first order goes on hold. Set sensible class defaults or the "first deal" experience is a support ticket.</li>
+<li><strong>Owner continuity.</strong> The salesperson on the opportunity should flow to the order and invoice for commission tracking. The default mapping mostly does this, but check it — commission disputes are the fastest way to lose sales-team trust in the system.</li>
+</ul>
+
+<h2 id="automating-the-seams">Automating the seams</h2>
+<p>The handoffs are also where small customizations pay off. A favorite: when an opportunity is marked Won, validate it actually has products before allowing the stage change. Ten lines in a graph extension:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCrmExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class OpportunityMaintExt : PXGraphExtension&lt;OpportunityMaint&gt;
 {
-    [PXOverride]
-    public virtual void Crm(Acumatica doc)
+    protected virtual void _(Events.RowPersisting&lt;CROpportunity&gt; e)
     {
-        // Custom crm logic for acumatica crm lead
-        if (doc?.Crm == null) return;
-        Base.Crm(doc);
+        var row = e.Row;
+        if (row == null || row.StageID != "W") return;   // Won
+
+        CROpportunityProducts product =
+            SelectFrom&lt;CROpportunityProducts&gt;
+            .Where&lt;CROpportunityProducts.quoteID
+                .IsEqual&lt;@P.AsGuid&gt;&gt;
+            .View.SelectSingleBound(Base, null, row.QuoteNoteID);
+
+        if (product == null)
+            throw new PXRowPersistingException(
+                nameof(CROpportunity.stageID), row.StageID,
+                "An opportunity cannot be Won without product lines.");
     }
 }</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>In the work I have done on acumatica crm — lead to cash process, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="why-acumatica-crm-lead-to-cash-process-matters-in-production">Why Acumatica CRM — Lead to Cash Process matters in production</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the crm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of crm in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Production crm looks different from development crm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaCrmExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Crm(Acumatica doc)
-    {
-        // Custom crm logic for acumatica crm lead
-        if (doc?.Crm == null) return;
-        Base.Crm(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring crm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with crm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>Business events cover the notification layer: opportunity idle in a stage for 14 days, quote expiring, first order for a converted customer. These are configuration, not code, and they're what makes the pipeline feel alive to a sales manager.</p>
+
+<h2 id="reporting-across-the-whole-funnel">Reporting across the whole funnel</h2>
+<p>Because everything shares one database, a Generic Inquiry can join leads to opportunities to orders to invoices and answer questions bolt-on CRMs answer only with export gymnastics: actual revenue by lead source, quote-to-order conversion by salesperson, average days from qualification to first payment. Build the funnel GI early — it's the artifact that convinces the sales team the data entry is worth it.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica crm — lead to cash process. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Lead-to-cash in Acumatica is less a feature than a chain of well-defined handoffs: qualify before converting, force product lines before Won, gate the prospect-to-customer step explicitly, and let standard distribution carry it home. Configure the seams, automate the nagging with business events, and the single-database continuity does the rest.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-customer-screen-deep-dive/">Acumatica Customer Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-lead-screen-deep-dive/">Acumatica Lead Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-opportunity-screen-deep-dive/">Acumatica Opportunity Screen — A Deep Dive</a></li>
-      <li><a href="/blog/acumatica-back-to-back-order-workflow/">Acumatica Back-to-Back Order Workflow</a></li>
-      <li><a href="/blog/acumatica-case-screen-deep-dive/">Acumatica Case Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-lead-screen-deep-dive/">Acumatica Lead Screen — Deep Dive</a></li>
+      <li><a href="/blog/acumatica-opportunity-screen-deep-dive/">Acumatica Opportunity Screen — Deep Dive</a></li>
+      <li><a href="/blog/acumatica-sales-orders-from-quote-to-invoice/">Acumatica Sales Orders — From Quote to Invoice</a></li>
+      <li><a href="/blog/acumatica-cr-crm-extension/">Acumatica CR CRM Extension</a></li>
+      <li><a href="/blog/acumatica-workflow-customer-onboarding/">Acumatica Workflow — Customer Onboarding</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,107 +93,86 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"It was fast last week" is one of the most useless and most common statements I hear when a client reports Acumatica has gotten slow. Useless because without historical data there's nothing to compare against, and by the time someone escalates the complaint, the bad query plan has usually been running for days and nobody captured what changed. SQL Server's Query Store solves exactly this problem, and turning it on against an Acumatica database is one of the highest-value, lowest-effort things I do on any client engagement that involves performance work.</p>
+
+<h2 id="what-query-store-actually-does">Query Store persists execution plans and runtime stats, across plan changes</h2>
+<p>Query Store, once enabled on a database, automatically captures every query's execution plan and runtime statistics (duration, CPU, logical reads, execution count) over time, and critically, it keeps a history of every plan a query has used, not just the current one. This is the feature that matters for Acumatica specifically: BQL compiles to parameterized SQL, and the SQL Server optimizer can and does choose different plans for the same query shape depending on statistics, parameter sniffing, and index changes. Without Query Store, "the plan changed and got worse" is invisible until someone notices the symptom; with it, you can see exactly when the regression happened and what the plan looked like before.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSqlExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sql(Acumatica doc)
-    {
-        // Custom sql logic for acumatica sql query
-        if (doc?.Sql == null) return;
-        Base.Sql(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · enabling Query Store on an Acumatica database</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>ALTER DATABASE [AcumaticaDB] SET QUERY_STORE = ON;
+ALTER DATABASE [AcumaticaDB] SET QUERY_STORE (
+    OPERATION_MODE = READ_WRITE,
+    QUERY_CAPTURE_MODE = AUTO,        -- ignore trivial/ad-hoc noise
+    MAX_STORAGE_SIZE_MB = 2000,
+    INTERVAL_LENGTH_MINUTES = 15,
+    STALE_QUERY_THRESHOLD_DAYS = 30
+);
+</code></pre>
 </div>
-<h2 id="the-sql-edge-cases-i-have-shipped">The sql edge cases I have shipped</h2>
-<p>In the work I have done on acumatica sql query store — tuning with historical data, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sql is.</p>
+
+<p><code>QUERY_CAPTURE_MODE = AUTO</code> matters on an Acumatica database specifically because the platform generates a huge volume of ad-hoc, rarely-repeated queries (dynamic BQL from Generic Inquiries, ad-hoc filters) alongside a smaller set of genuinely hot, repeated queries from screens users hit constantly. Capturing everything (<code>ALL</code> mode) fills the store with noise that makes the actually-important regressions harder to find; <code>AUTO</code> filters out queries that aren't executed or expensive enough to matter.</p>
+
+<h2 id="finding-plan-regressions">Finding a regression: the query that changed plans, not just the slow one</h2>
+<p>The most valuable Query Store report for Acumatica troubleshooting isn't "top queries by duration," it's the plan comparison view, because a query that's always been moderately expensive is a design decision to live with, while a query that was fast for months and suddenly picked a bad plan after a statistics update or an index change is an actual regression worth fixing immediately.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · finding queries with multiple plans and degrading average duration</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+    q.query_id,
+    qt.query_sql_text,
+    COUNT(DISTINCT p.plan_id) AS plan_count,
+    AVG(rs.avg_duration) AS avg_duration_us,
+    MAX(rs.avg_duration) AS worst_duration_us
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+WHERE rs.last_execution_time > DATEADD(DAY, -14, GETUTCDATE())
+GROUP BY q.query_id, qt.query_sql_text
+HAVING COUNT(DISTINCT p.plan_id) &gt; 1
+ORDER BY MAX(rs.avg_duration) DESC;
+</code></pre>
 </div>
-<h2 id="how-to-debug-sql-in-production">How to debug sql in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>A query showing up here with two or more plans and a big spread between average and worst duration is almost always a parameter sniffing case, common on Acumatica screens where a BQL filter's selectivity varies wildly by customer (a small customer's open orders vs a huge distributor's), and the cached plan optimized for one shape performs badly for the other.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Query Store lets you force the good plan back without touching application code</strong>
+  <p>Once you've identified a regressed plan, <code>sp_query_store_force_plan</code> pins a specific known-good plan_id for a query_id, immediately stabilizing performance while you investigate the root cause (usually stale statistics or an index change) at leisure. This is the single fastest mitigation I've deployed for a client production incident: identify the regression in Query Store, force the prior good plan, buy time, then fix the underlying cause without an emergency deployment of any Acumatica customization.</p>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="acumatica-specific-noise">Filtering Acumatica's own query noise out of the picture</h2>
+<p>A raw Query Store report on an Acumatica database is dominated by framework-generated housekeeping queries, session and cache management, license checks, audit logging, that aren't worth optimizing and just add noise. Filtering the query text for the actual DAC-backed table names your customization or client's heavy screens touch (<code>ARInvoice</code>, <code>SOOrder</code>, <code>INTran</code>, whatever the client's specific pain point is) narrows the report to signal fast.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · narrowing to a specific hot table</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>WHERE qt.query_sql_text LIKE '%SOOrder%'
+  AND qt.query_sql_text NOT LIKE '%sysdiagrams%'
+  AND rs.last_execution_time > DATEADD(DAY, -7, GETUTCDATE())
+</code></pre>
 </div>
-<h2 id="why-acumatica-sql-query-store-tuning-with-historical-data-matters-in-production">Why Acumatica SQL Query Store — Tuning with Historical Data matters in production</h2>
-<p>The performance of sql in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production sql looks different from development sql. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSqlExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Sql(Acumatica doc)
-    {
-        // Custom sql logic for acumatica sql query
-        if (doc?.Sql == null) return;
-        Base.Sql(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sql first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sql when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="retention-and-overhead">Retention settings and the overhead conversation clients always ask about</h2>
+<p>Query Store's overhead is genuinely small (typically low single-digit percent CPU) for the visibility it buys, but on a busy production Acumatica instance it's worth capping <code>MAX_STORAGE_SIZE_MB</code> deliberately and monitoring it rather than leaving the default, because a store that fills up switches to read-only and silently stops capturing new data, which defeats the entire point right when you need it most, during an active incident. I set an alert on <code>sys.database_query_store_options.actual_state</code> flipping away from <code>READ_WRITE</code> on every client instance where I've enabled this, specifically so the store never goes quiet without someone noticing.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sql query store — tuning with historical data. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Query Store turns "it was fast last week" from an unfalsifiable complaint into an actual investigation with historical plans and runtime data to compare against. Enable it with <code>AUTO</code> capture mode to avoid drowning in Acumatica's own housekeeping query noise, use the plan-comparison view to catch parameter sniffing regressions specifically, and keep an eye on storage so the store never silently stops capturing during the exact incident you'll want the data for. It is one of the cheapest performance investments available on any Acumatica SQL Server instance, and most clients I work with have never turned it on.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-perf-connection-pooling/">Acumatica Performance — Connection Pooling</a></li>
-      <li><a href="/blog/acumatica-perf-database-sharding/">Acumatica Performance — Database Sharding</a></li>
-      <li><a href="/blog/acumatica-perf-slow-disk-io/">Acumatica Performance — Diagnosing Slow Disk I/O</a></li>
-      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Diagnosing a Slow GI</a></li>
+      <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">Acumatica SQL Server — Indexing for Acumatica DACs</a></li>
       <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
+      <li><a href="/blog/acumatica-perf-memory-leak-hunting/">Acumatica Performance — Memory Leak Hunting</a></li>
+      <li><a href="/blog/acumatica-report-designer-performance-tuning/">Acumatica Report Designer — Performance Tuning</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

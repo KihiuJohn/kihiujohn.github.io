@@ -93,107 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>Migration path when acumatica changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaArchitectureExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Architecture(Acumatica doc)
-    {
-        // Custom architecture logic for acumatica architecture primer
-        if (doc?.Architecture == null) return;
-        Base.Architecture(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="how-to-debug-architecture-in-production">How to debug architecture in production</h2>
-<p>In the work I have done on acumatica architecture — a primer for new developers, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the architecture is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-architecture-a-primer-for-new-developers-matters-in-production">Why Acumatica Architecture — A Primer for New Developers matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Every developer I onboard onto an Acumatica project asks some version of the same question in week one: "where do I even start reading?" Acumatica is not a small framework, and unlike a typical web stack you cannot get productive by learning one library — you need a mental map of five or six layers that all talk to each other. This is the map I actually draw on a whiteboard for new hires.</p>
+
+<h2 id="the-tiers">Three physical tiers, one logical model</h2>
+<p>Physically, an on-premise or private-cloud Acumatica deployment is a fairly ordinary ASP.NET application: IIS hosts the web tier, which talks to SQL Server (or on some deployments, other RDBMS options historically supported), with an optional separate application server tier for scale-out. SaaS instances hide all of this behind a URL, but the logical model underneath is identical whether you can see the servers or not.</p>
+<p>Logically, though, Acumatica is not "MVC with a database." It is built around a small number of recurring abstractions that show up everywhere once you learn to spot them:</p>
+<ul>
+<li><strong>DAC (Data Access Class)</strong> — a C# class describing one row of one table (or a computed projection), where attributes on each property define storage, validation, defaulting, and UI behavior simultaneously.</li>
+<li><strong>PXGraph</strong> — the business-logic controller for a screen. A graph holds one or more <code>PXSelect</code>-based data views, wires up event handlers, and exposes actions. Roughly one graph per screen, though graphs can be reused across multiple screens and invoked headlessly from code.</li>
+<li><strong>PXCache</strong> — the in-memory, per-graph object that tracks every row's state (Inserted/Updated/Deleted/Unchanged) between load and save. Nothing you do to a DAC instance matters until the cache knows about it.</li>
+<li><strong>BQL</strong> — Business Query Language, a strongly-typed, attribute-aware query syntax that compiles to SQL but also respects tenant isolation and row-level security automatically.</li>
+<li><strong>The event pipeline</strong> — FieldDefaulting, FieldVerifying, FieldUpdated, RowSelected, RowInserting, RowPersisting, RowPersisted, and friends, fired by the cache as data moves through it.</li>
+</ul>
+<p>Everything else — Generic Inquiries, the REST API, Business Events, the mobile framework, Modern UI — is built on top of these five ideas, not alongside them. Learn these cold and the rest of the platform stops looking like a pile of unrelated screens.</p>
+
+<h2 id="request-lifecycle">What actually happens when a screen loads</h2>
+<p>Trace a single page load and the abstractions click into place. The browser requests the screen; the web tier resolves the screen ID to a graph type and instantiates it (or resumes it from session state — graphs are stateful across a user's editing session, which surprises developers coming from stateless web frameworks). The graph's primary <code>PXSelect</code> view executes a BQL query, populating a cache. Each row entering the cache fires <code>RowSelected</code> for every field, letting attributes and your event handlers adjust UI state — enabling fields, applying conditional visibility — before the grid ever paints. The rendered screen definition (ASPX markup, or a Modern UI screen definition file) maps controls to DAC fields by name, and that is the entire binding mechanism; there is no separate view-model layer to configure.</p>
+<p>Saving reverses the flow: edits mutate cache-tracked rows, <code>RowPersisting</code> fires per row as a last validation gate, and only after every row passes does the graph open a transaction and call each DAC's persist logic. One unhandled exception anywhere in that chain rolls the whole save back — Acumatica does not do partial saves, which is a deliberate consistency guarantee worth knowing before you're tempted to catch-and-swallow an exception "just for this one field."</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Sessions are stateful, and that has consequences</strong>
+  <p>Because a graph instance persists across requests for the duration of a user's screen session, code that "leaks" — a static field holding request-specific data, an event handler that assumes it only runs once — causes bugs that only appear after a user navigates away and back, or after the app pool recycles under load. Coming from stateless REST controllers, this is the single biggest mental adjustment.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>The performance of architecture in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production architecture looks different from development architecture. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaArchitectureExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Architecture(Acumatica doc)
-    {
-        // Custom architecture logic for acumatica architecture primer
-        if (doc?.Architecture == null) return;
-        Base.Architecture(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring architecture first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with architecture when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="extension-not-modification">The one rule that explains the rest of the framework</h2>
+<p>Acumatica's customization model exists to answer one question: how do you let thousands of partners modify the same shipped codebase without forking it? The answer is extension, never modification. <code>PXCacheExtension&lt;T&gt;</code> adds fields to a DAC without touching its source. <code>PXGraphExtension&lt;T&gt;</code> adds behavior to a graph the same way. Screen customizations layer UI changes on top of a base screen definition rather than replacing the file. Every layer of the platform — DAC, graph, screen, even reports — follows this same extend-don't-replace pattern, and once you see it in one place you recognize it everywhere, including in the newer Modern UI and Mobile frameworks that arrived years after the core model was designed.</p>
+
+<h2 id="where-to-actually-start">A realistic first-month reading order</h2>
+<p>I tell new developers to resist the urge to read the whole T200/T300 training catalogue up front. Instead: build one small customization end-to-end (a custom field, a validation rule, a button) to see the DAC/graph/screen triangle in miniature; read the DAC fundamentals material until attributes stop feeling like magic; then spend real time in the event pipeline until RowSelected-vs-RowInserted-vs-RowPersisting firing order is intuitive, because that firing order is where most beginner bugs live. Everything past that point — Generic Inquiries, the REST API, Business Events, Modern UI, Mobile — is a specialization of the same five ideas, easier to pick up once, not five times.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica architecture — a primer for new developers. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica rewards developers who learn the shape of the framework before they learn any specific screen. DAC, graph, cache, BQL, and the event pipeline are the whole game; extension-over-modification is the rule that makes the whole game upgrade-safe. Everything else you'll touch on a real project is built from those pieces, so time spent understanding them properly in week one saves months of confused debugging later.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
-      <li><a href="/blog/acumatica-developer-setup-from-zero/">Acumatica Developer Setup — From Zero</a></li>
-      <li><a href="/blog/acumatica-vs-other-erps-comparison/">Acumatica vs Other ERPs — A Developer's Comparison</a></li>
-      <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
-      <li><a href="/blog/acumatica-aws-vs-azure-vs-on-prem/">Acumatica — AWS vs Azure vs On-Prem</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-developer-setup-from-zero/">Acumatica Developer Setup From Zero</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-screen-editor-vs-code-editor/">Acumatica Screen Editor vs Code Editor</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -93,107 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="why-acumatica-vs-other-erps-a-developer-s-comparison-matters-in-production">Why Acumatica vs Other ERPs — A Developer's Comparison matters in production</h2>
-<p>Why Acumatica vs Other ERPs — A Developer's Comparison matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOtherExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Other(Acumatica doc)
-    {
-        // Custom other logic for acumatica other erps
-        if (doc?.Other == null) return;
-        Base.Other(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica vs other erps — a developer's comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the other is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Prospective clients evaluating ERPs ask me to compare Acumatica against whatever else is on their shortlist - usually NetSuite, Dynamics 365 Business Central, or occasionally SAP Business One - and I try to be genuinely even-handed about it, because I've had to work adjacent to all three at various points and each one gets real things right. This is a developer's comparison, specifically about what it's like to build and maintain customizations, not a sales comparison of feature checklists.</p>
+
+<h2 id="the-licensing-model-shapes-everything-downstream">Licensing model is the decision that shapes every other decision</h2>
+<p>Acumatica licenses by resource consumption, not by named user, which is the single most consequential difference from NetSuite and Business Central for any business with more occasional users than core power users - a manufacturing floor with dozens of people who need to log a few transactions a day, for instance, costs radically differently under Acumatica's model than under a per-seat model. This isn't a technical architecture point, but it drives technical decisions downstream: businesses choose Acumatica partly because the licensing model lets them expose more of the system to more people, which in turn means more custom screens, more mobile framework usage, and more Business Events-driven automation than I typically see budgeted on a per-seat-licensed competitor, where the client is more careful about who even gets a login.</p>
+
+<h2 id="extension-model-vs-the-alternatives">The extension model, compared honestly</h2>
+<p>Acumatica's extend-never-modify customization model (PXCacheExtension, PXGraphExtension, layered screen customizations) produces genuinely upgrade-safe customizations when the discipline in the graph-extension-patterns material on this site is followed - and I've maintained Acumatica customizations across several major version upgrades with minimal rework, which has not been my experience on every platform.</p>
+<ul>
+<li><strong>NetSuite (SuiteScript/SuiteCloud)</strong> has a broadly similar philosophy - scripts and customizations layered on a shared multi-tenant codebase, not forking it - and in practice feels architecturally closer to Acumatica's extension model than the other two. The scripting-language-first approach (SuiteScript, JavaScript-based) versus Acumatica's compiled C# is the biggest day-to-day developer experience difference: faster iteration in SuiteScript, stronger typing and tooling in Acumatica's C#-based model.</li>
+<li><strong>Dynamics 365 Business Central (AL language, extensions)</strong> also follows an extension model post-"Business Central" rearchitecture, conceptually close to Acumatica's - both learned the same lesson that direct-modification customization doesn't survive vendor upgrades at scale. AL's event-publisher/subscriber pattern is a reasonable analogue to Acumatica's event pipeline, though Acumatica's DAC attribute model gives you more declarative power over field-level behavior in one place than I've found in AL's more procedural event subscribers.</li>
+<li><strong>SAP Business One</strong> is the outlier here - its customization story (SDK-based UI API layered on top, or the newer Service Layer for integrations) feels less unified than the other three; UI customization and business logic customization are more separate concerns than Acumatica's DAC/graph/screen triad, which was designed as one coherent model from the start.</li>
+</ul>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Multi-tenancy: Acumatica's real technical differentiator</strong>
+  <p>Acumatica's underlying multi-tenant architecture - the same platform instance genuinely capable of hosting multiple isolated tenants, with the tenant boundary enforced at the BQL/data layer rather than through separate application instances - is architecturally closer to how a modern SaaS product is built than a traditional single-tenant-per-customer ERP deployment model. This is why Acumatica-hosted partners can offer true multi-tenant SaaS economics, and it's discussed in more depth in the multi-tenant customization considerations post on this site. NetSuite is natively multi-tenant too; Business Central and Business One's SaaS offerings lean more on per-tenant instance isolation than a shared multi-tenant data layer.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of other in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production other looks different from development other. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaOtherExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Other(Acumatica doc)
-    {
-        // Custom other logic for acumatica other erps
-        if (doc?.Other == null) return;
-        Base.Other(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring other first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with other when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="rest-api-and-integration-story">Integration and API surface</h2>
+<p>Acumatica's contract-based REST API - generated from the same DAC/BQL definitions that drive the UI, so a custom field you add is automatically exposed through the API without hand-writing an endpoint - is one of the more developer-friendly integration stories among the four. NetSuite's SuiteTalk (SOAP and REST) is mature but noticeably more verbose to work with. Business Central's OData/API pages require more explicit page definition work to expose custom fields than Acumatica's largely automatic contract generation. Business One's Service Layer is REST-based and reasonably clean but has a smaller ecosystem of pre-built integration tooling around it than the other three, in my experience finding pre-built connectors for a given SaaS tool.</p>
+
+<h2 id="where-acumatica-loses">Where I'd steer a client toward something else</h2>
+<p>Honesty matters more than loyalty to the platform I specialize in. NetSuite's ecosystem of pre-built SuiteApps is larger and more mature for certain verticals (particularly retail and subscription billing) than Acumatica's marketplace, meaning less custom development for a client whose needs map closely to an existing SuiteApp. SAP Business One, despite its more fragmented customization story, has deeper out-of-the-box manufacturing and supply chain functionality for certain complex manufacturing scenarios than Acumatica's native Manufacturing Edition covers without customization. And for a business already deeply embedded in the Microsoft ecosystem (Power Platform, Dataverse, existing AL customizations elsewhere), Business Central's native integration with that stack can outweigh Acumatica's architectural advantages if the client's team already has AL expertise and no Acumatica experience at all.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica vs other erps — a developer's comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>As a developer, I'd rank Acumatica's extension model and contract-based REST API among the strongest in this comparison set, closely matched by NetSuite's SuiteScript model and Business Central's AL extensions, with SAP Business One's more fragmented customization story trailing the other three. But the right ERP choice depends far more on licensing fit, vertical-specific out-of-the-box functionality, and existing team expertise than on which platform has the cleaner customization architecture - a technically superior extension model doesn't matter if the client's licensing costs or missing vertical functionality force heavy customization anyway.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-architecture-for-new-developers/">Acumatica Architecture — A Primer for New Developers</a></li>
-      <li><a href="/blog/acumatica-acumatica-erp-glossary/">Acumatica ERP Glossary — Every Term You Need</a></li>
-      <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
-      <li><a href="/blog/acumatica-aws-vs-azure-vs-on-prem/">Acumatica — AWS vs Azure vs On-Prem</a></li>
-      <li><a href="/blog/acumatica-branch-vs-company-vs-tenant/">Acumatica Branch vs Company vs Tenant</a></li>
+      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-monolith-vs-modular/">Acumatica Monolith vs Modular</a></li>
+      <li><a href="/blog/acumatica-multi-tenant-customization-considerations/">Acumatica Multi-Tenant Customization Considerations</a></li>
+      <li><a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension — Choosing the Right Tool</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

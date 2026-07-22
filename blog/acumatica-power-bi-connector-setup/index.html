@@ -93,107 +93,72 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-acumatica-power-bi-connector-setup-and-best-practices-matters-in-production">Why Acumatica Power BI Connector — Setup and Best Practices matters in production</h2>
-<p>Why Acumatica Power BI Connector — Setup and Best Practices matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every Acumatica client eventually asks for Power BI, and the path from "we want dashboards" to a refresh that doesn't time out is full of small decisions that matter. The core mechanism is simple — Acumatica exposes Generic Inquiries as OData feeds and Power BI consumes OData natively — but I've rescued enough gasping refresh schedules to know the defaults will not carry you past a few hundred thousand rows. Here's the setup I actually use.</p>
+
+<h2 id="the-plumbing">The plumbing: GI → OData → Power BI</h2>
+<p>Acumatica publishes two OData surfaces. The classic one at <code>/odata/&lt;CompanyName&gt;</code> (OData v3) exposes any Generic Inquiry with the <em>Expose via OData</em> checkbox ticked. The newer one at <code>/odatav4/&lt;CompanyName&gt;</code> (OData v4) can additionally expose DACs directly. For Power BI I use GIs on either version — exposing raw DACs sounds attractive until you realise you've just handed report authors tables with no business logic, no joins, and internal status codes.</p>
+
+<p>Setup, end to end:</p>
+<ol>
+<li>Enable the <em>OData</em> feature on Enable/Disable Features (CS100000).</li>
+<li>Build your GI, tick <strong>Expose via OData</strong> on the summary tab, save.</li>
+<li>In Power BI Desktop: <em>Get Data → OData feed</em>, URL <code>https://instance.example.com/odata/MyCompany</code>, authentication <strong>Basic</strong> with a dedicated API user.</li>
+<li>Pick your GIs from the navigator — each exposed GI appears as an entity set.</li>
+</ol>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPowerExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Power(Acumatica doc)
-    {
-        // Custom power logic for acumatica power connector
-        if (doc?.Power == null) return;
-        Base.Power(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GET /odata/MyCompany/BI-SalesLines?$filter=LastModifiedDateTime ge
+    datetimeoffset'2026-06-01T00:00:00Z'&amp;$select=OrderNbr,InventoryCD,
+    ExtPrice,LastModifiedDateTime HTTP/1.1
+Host: instance.example.com
+Authorization: Basic &lt;base64 user:password&gt;</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on acumatica power bi connector — setup and best practices, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the power is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="the-api-user">The API user: dedicated, licensed, least-privilege</h2>
+<p>Never point Power BI at a human's login. Two reasons beyond hygiene: Acumatica ties licence session counts to users, and a scheduled refresh hammering the same account as a person mid-close will lock someone out at the worst moment. Create a <code>bi.service</code> user with a role restricted to the inquiry screens it needs. Bonus: row-level security applied to that role becomes your data boundary — the OData feed respects it, so a GI over all branches serves only permitted branches to the BI user.</p>
+
+<h2 id="design-gis-for-bi">Design GIs for BI, not for humans</h2>
+<p>The single biggest performance mistake: pointing Power BI at the GIs users browse in the UI. Screen GIs are wide, join everything for display, and format values. A BI feed wants the opposite:</p>
+<ul>
+<li><strong>Flat and narrow.</strong> One GI per fact (sales lines, AR balances, stock movements), only the columns the model uses. Every extra joined table multiplies the SQL cost of the full-table scan a refresh performs.</li>
+<li><strong>Keys, not labels.</strong> Export <code>CustomerID</code> and build a separate small customer-dimension GI, rather than joining customer name, class, and salesperson onto every fact row. Star schemas are Power BI's native shape anyway.</li>
+<li><strong>No parameters that matter.</strong> OData reads a GI without its screen-side parameter values; a GI whose correctness depends on a user-supplied parameter will silently return something else over OData. Filters that must always apply belong on the GI's Conditions tab.</li>
+</ul>
+
+<h2 id="incremental-refresh">Incremental refresh: the difference between 4 minutes and 4 hours</h2>
+<p>A full refresh re-reads every GI end to end, and Acumatica pages OData responses server-side, so a multi-million-row inquiry means thousands of sequential page fetches while a SQL connection holds open. The fix is Power BI's incremental refresh against <code>LastModifiedDateTime</code>:</p>
+<ol>
+<li>Include <code>LastModifiedDateTime</code> in the GI.</li>
+<li>In Power Query, filter the table between the <code>RangeStart</code> and <code>RangeEnd</code> parameters — and make sure the filter <em>folds</em> into the OData <code>$filter</code> (check with View Native Query; if it doesn't fold, the gateway downloads everything and filters locally, which defeats the purpose).</li>
+<li>Configure the incremental policy: store 3 years, refresh last 7 days, done.</li>
+</ol>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Watch the fold</strong>
+  <p>Power Query only pushes simple comparisons down to OData. Type conversions, custom columns, or merges applied <em>before</em> the RangeStart/RangeEnd filter will break query folding silently. Filter first, transform after.</p>
 </div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of power in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production power looks different from development power. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaPowerExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Power(Acumatica doc)
-    {
-        // Custom power logic for acumatica power connector
-        if (doc?.Power == null) return;
-        Base.Power(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring power first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with power when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="gateway-and-scheduling">Gateway, scheduling, and not hurting production</h2>
+<p>SaaS-hosted Acumatica with a public URL needs no gateway — the Power BI service connects directly. Self-hosted instances behind a firewall need the on-premises data gateway installed somewhere with line of sight to the instance. Either way, schedule refreshes off-peak: an OData read is a real SQL workload on your production database, and I've watched an 8am refresh schedule add two seconds to every sales order save during morning order entry. For heavy analytical loads, the grown-up answer is replicating to a warehouse and pointing Power BI there — the OData feed is the right tool up to a few million rows, not beyond.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica power bi connector — setup and best practices. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The recipe: OData-exposed GIs designed as narrow facts and small dimensions, a dedicated least-privilege API user, incremental refresh with verified query folding, and off-peak schedules. None of it is exotic, but each piece you skip converts directly into refresh timeouts or a production database that mysteriously crawls at 8am. Set it up properly once and the connector layer disappears from your problem list.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gi-data-warehouse-feed/">Acumatica GI as a Data Warehouse Feed</a></li>
-      <li><a href="/blog/business-intelligence-trends-2026/">Business Intelligence Trends 2026</a></li>
+      <li><a href="/blog/acumatica-generic-inquiries-the-definitive-guide/">Acumatica Generic Inquiries — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-rest-api-pagination-and-odata/">Acumatica REST API — Pagination and OData</a></li>
+      <li><a href="/blog/acumatica-gi-realtime-vs-snapshot/">Acumatica GI — Real-Time vs Snapshot Patterns</a></li>
       <li><a href="/blog/embedded-analytics-patterns/">Embedded Analytics Patterns — A Field Guide</a></li>
       <li><a href="/blog/self-service-analytics/">Self-Service Analytics — A Field Guide</a></li>
-      <li><a href="/blog/acumatica-amazon-marketplace-integration/">Acumatica Amazon Marketplace Integration — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

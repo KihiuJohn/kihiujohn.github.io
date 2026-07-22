@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Custom Actions in Acumatica — Async Patterns | John Kihiu</title>
-<meta name="description" content="Custom Actions in Acumatica — Async Patterns is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="A custom action button that recalculates a handful of fields on the current row can run synchronously without a second thought.">
 <meta name="keywords" content="Acumatica customization, Acumatica graph, Acumatica async, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-custom-actions-async-patterns/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Custom Actions in Acumatica — Async Patterns">
-<meta property="og:description" content="Custom Actions in Acumatica — Async Patterns is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="A custom action button that recalculates a handful of fields on the current row can run synchronously without a second thought.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-custom-actions-async-patterns.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-custom-actions-async-patterns/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="async">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Custom Actions in Acumatica — Async Patterns","description":"Custom Actions in Acumatica — Async Patterns is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-custom-actions-async-patterns.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-custom-actions-async-patterns/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Custom Actions in Acumatica — Async Patterns","description": "A custom action button that recalculates a handful of fields on the current row can run synchronously without a second thought.","image":"https://kihiujohn.github.io/assets/og/acumatica-custom-actions-async-patterns.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-custom-actions-async-patterns/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Custom Actions in Acumatica — Async Patterns","item":"https://kihiujohn.github.io/blog/acumatica-custom-actions-async-patterns/"}]}
@@ -87,113 +87,91 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Custom Actions in Acumatica — Async Patterns</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>Custom Actions in Acumatica — Async Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Custom Actions in Acumatica — Async Patterns is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A custom action button that recalculates a handful of fields on the current row can run synchronously without a second thought.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-version-of-custom-that-works">The version of custom that works</h2>
-<p>The version of custom that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A custom action button that recalculates a handful of fields on the current row can run synchronously without a second thought. A custom action that needs to touch ten thousand rows, call an external API per row, or regenerate a large report is a different problem entirely, and the naive synchronous version of that button times out, locks the UI, or trips the web tier's request timeout on a slow client network. Here's how I actually decide between the patterns, and where each one bites.</p>
+
+<h2 id="synchronous-is-the-default-and-should-stay-that-way">Start synchronous, and mean it</h2>
+<p>A <code>PXAction</code> handler runs on the request thread by default, and for the overwhelming majority of custom actions - validate this row, set that field, redirect to a related screen - that's correct and you should not add complexity you don't need:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CustomActionsExt : PXGraphExtension<CustomEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public PXAction&lt;SOOrder&gt; RecalculateDiscount;
+[PXUIField(DisplayName = "Recalculate Discount")]
+[PXButton]
+protected virtual IEnumerable recalculateDiscount(PXAdapter adapter)
 {
-    [PXOverride]
-    public virtual void Actions(Custom doc)
-    {
-        // Custom actions logic for custom actions acumatica
-        if (doc?.Actions == null) return;
-        Base.Actions(doc);
-    }
+    var order = Base.Document.Current;
+    if (order == null) return adapter.Get();
+
+    order.UsrDiscountPct = ComputeDiscount(order);
+    Base.Document.Update(order);
+    return adapter.Get();
 }</code></pre>
 </div>
-<h2 id="why-custom-actions-in-acumatica-async-patterns-matters-in-production">Why Custom Actions in Acumatica — Async Patterns matters in production</h2>
-<p>In the work I have done on custom actions in acumatica — async patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The custom is not the question; the failure mode of the actions is.</p>
+
+<p>The failure mode I actually see is developers reaching for async infrastructure - a scheduled processing screen, a background thread - on an action like this one, purely because "async sounds more scalable." It adds a queue, a status field, a polling UI, and a debugging story, for a button that would have returned in under a second synchronously. Don't.</p>
+
+<h2 id="pxlongoperation-the-actual-middle-ground">PXLongOperation: async without leaving the screen</h2>
+<p>When an action needs real work - a loop over hundreds of rows, an external HTTP call with meaningful latency, generating a large export - but the user is still expected to stay on the screen and watch a progress indicator, <code>PXLongOperation</code> is the right tool. It runs the work on a background thread while returning control to the UI immediately with a progress bar:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for custom
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="custom-implementation-walkthrough">Custom implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-custom">Performance and observability for custom</h2>
-<p>The performance of actions in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production actions looks different from development actions. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CustomActionsExt : PXGraphExtension<CustomEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public PXAction&lt;SOOrder&gt; SyncToWarehouseSystem;
+[PXUIField(DisplayName = "Sync to Warehouse System")]
+[PXButton]
+protected virtual IEnumerable syncToWarehouseSystem(PXAdapter adapter)
 {
-    [PXOverride]
-    public virtual void Actions(Custom doc)
+    var order = Base.Document.Current;
+    if (order == null) return adapter.Get();
+
+    PXLongOperation.StartOperation(Base, () =&gt;
     {
-        // Custom actions logic for custom actions acumatica
-        if (doc?.Actions == null) return;
-        Base.Actions(doc);
-    }
+        // Runs on a background thread. Needs its own graph instance  - 
+        // never touch Base's cache from here, it belongs to the request thread.
+        var graph = PXGraph.CreateInstance&lt;SOOrderEntry&gt;();
+        var doc = graph.Document.Search&lt;SOOrder.orderNbr&gt;(order.OrderNbr);
+        CallWarehouseApi(doc);
+        graph.Document.Current.UsrWarehouseSynced = true;
+        graph.Save.Press();
+    });
+
+    return adapter.Get();
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring actions first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add custom on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with actions when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<div class="callout-warn callout">
+  <strong>The background delegate runs on a fresh graph, not Base - this is the single most common PXLongOperation bug</strong>
+  <p>Capturing <code>Base</code>'s cache or <code>Base.Document.Current</code> inside the lambda and mutating it directly produces intermittent, hard-to-reproduce corruption, because the request thread's graph and the background thread's execution aren't safe to share. Always create a fresh <code>PXGraph</code> instance inside the delegate, re-fetch the row you need by key, and save through that instance. I've inherited more than one client customization that "usually worked" and occasionally corrupted a save, and every one traced back to this exact mistake.</p>
+</div>
+
+<h2 id="scheduled-processing-for-real-batch-work">Automation/scheduled processing screens for genuinely large batches</h2>
+<p>When the volume is large enough that even a background thread on the web tier is the wrong place to run it - tens of thousands of rows, a nightly reconciliation, anything that should survive an app pool recycle or run unattended on a schedule - that's a job for Acumatica's Automation Schedules against a processing graph, not a button at all. The processing graph pattern (<code>PXProcessing&lt;T&gt;</code>) is built for exactly this: paged row processing, per-row error isolation so one bad row doesn't fail the whole batch, and a status screen users already know how to read. If a "long operation" button is regularly taking minutes and users are learning to just close the tab and check back later, that's the signal it should have been a scheduled processing screen from the start.</p>
+
+<h2 id="idempotency-is-the-part-nobody-designs-for">Design every async action to be safely re-run</h2>
+<p>The question I ask before shipping any async action: what happens if the user clicks it twice, or the app pool recycles mid-operation, or the background thread throws halfway through a loop over five hundred rows? A synchronous action that fails mid-way rolls back cleanly inside its transaction. A <code>PXLongOperation</code> that fails at row 300 of 500 has already committed rows 1 through 299 if each row saves independently - so the action needs to be safe to re-run against the same data, typically by checking a status field per row before processing it again, rather than assuming a clean slate on retry.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on custom actions in acumatica — async patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Default to synchronous for anything fast - most custom actions are. Reach for PXLongOperation when the user needs to stay on screen through real but bounded work, and always build the background delegate against a fresh graph instance, never Base's. Move to a scheduled processing graph once volume crosses into genuine batch territory, where a button was never the right UI in the first place. And design for partial failure and re-runs from the first version, not as a bug fix after the first client complains about a stuck sync.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code-Side Patterns</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-license-concurrency-explained/">Acumatica License Concurrency Explained</a></li>
+      <li><a href="/blog/acumatica-gi-mass-update-workflow/">Acumatica GI Mass Update Workflow</a></li>
       <li><a href="/blog/acumatica-event-handler-order-precedence/">Acumatica Event Handler Order Precedence — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-business-events-patterns/">Acumatica Business Events Patterns — A Field Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

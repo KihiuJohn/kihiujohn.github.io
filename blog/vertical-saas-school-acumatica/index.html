@@ -93,96 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real vertical SaaS projects, this is rarely the question. The question is the multi-tenant data isolation, the feature flags, the channel partner program. This article is the implementation.</p>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The vertical SaaS model on a horizontal platform is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A K-12 private school's finance office has one recurring, structurally awkward problem: tuition billing that needs to feel like a subscription (recurring monthly charges, family accounts with multiple children, sibling discounts, payment plans) sitting on top of a fund/grant-aware nonprofit accounting need if the school takes donations or restricted grants. Acumatica handles both halves, but neither is a purpose-built "school module" — both are standard modules configured deliberately for the way a school actually bills families.</p>
+
+<h2 id="no-sis-here-either">Acumatica is not a Student Information System</h2>
+<p>Same honesty as the church and hotel pieces: gradebooks, attendance, class scheduling, and parent portals for report cards are Student Information System (SIS) territory — PowerSchool, or regional equivalents — and Acumatica should not be pitched as replacing one. The financial office is where Acumatica belongs: tuition AR, family billing, payroll, and if applicable, fund accounting for donations and restricted grants (the same sub-account fund pattern covered in the church piece).</p>
+
+<h2 id="family-accounts-not-student-accounts">Bill the family, not the student</h2>
+<p>The recurring modeling mistake I see in school implementations: setting each enrolled student up as a separate Customer/Business Account in Acumatica AR. That breaks the moment a family has two or three children enrolled and expects one consolidated statement, one payment applied proportionally, and a sibling discount calculated across the whole family's tuition rather than per child. The correct model is one Business Account per family, with each enrolled child tracked as a sub-item or a custom child-record extension linked to that account, and tuition invoicing done at the family level.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class SchoolExt : PXCacheExtension<Management>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · FAMILY-LEVEL BILLING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Business Account:   FAM-0142 "Otieno Family"
+  Linked children:   Custom "Enrolled Student" extension records,
+                      each with GradeLevel, TuitionPlan, SiblingRank
+Billing:             Acumatica recurring billing (Auto-Bill / Billing Rules)
+                      generates one monthly invoice per family,
+                      line items per child, sibling discount applied
+                      as a rule keyed on SiblingRank &gt; 1</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>In the work I have done on school management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>When the work moves from design to production, the questions change. The school is not the question; the failure mode of the management is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'school'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="recurring-billing-with-payment-plans">Tuition plans are recurring billing, not one-time sales orders</h2>
+<p>Acumatica's recurring billing (Auto-Bill / Billing Rules engine, the same mechanism referenced in the billing-rule-extension post linked below) is a solid native fit for tuition payment plans — annual tuition split into 10 or 12 monthly charges, with proration for mid-year enrollment. This is standard Acumatica AR configuration, not a customization, and I would push back on any quote that treats basic tuition-plan billing as bespoke work; it becomes genuinely custom only when the school wants business rules Acumatica's billing engine does not express natively (e.g. auto-suspending a payment plan and notifying admissions after two missed payments).</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Late-payment holds usually need a small extension</strong>
+  <p>Schools often want a rule like "flag the family record after 30 days past due" feeding into a re-enrollment or portal-access hold. Base Acumatica AR has aging and dunning letters, but "hold" logic that reaches outside AR (blocking re-enrollment, notifying a non-financial system) is a graph extension — a PXAction or event handler watching the aging bucket, not something the billing engine does unprompted.</p>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM school
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of management in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="why-school-on-a-horizontal-platform-beats-from-scratch">Why school on a horizontal platform beats from-scratch</h2>
-<p>Production management looks different from development management. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class SchoolExt : PXCacheExtension<Management>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring management first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add school on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with management when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="grants-and-donations">If the school takes donations or restricted grants, reuse the fund pattern</h2>
+<p>For schools with a development/fundraising arm alongside tuition, the sub-account fund accounting pattern from the church piece applies directly — restricted scholarship funds, building campaigns, and general operating all as fund sub-accounts under one chart of accounts, giving a consolidated view without separate ledgers.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on school management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The two decisions that make or break a school implementation are billing at the family level rather than the student level, and using Acumatica's native recurring billing engine for tuition plans rather than treating it as custom work it usually is not. Keep the SIS as the SIS, and reserve real customization budget for the edge cases — payment-hold workflows and any fund/grant complexity — rather than the basic billing, which the platform already does.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-training-acumatica/">Training and Coaching Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-university-acumatica/">University Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
+      <li><a href="/blog/vertical-saas-university-acumatica/">University Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-church-acumatica/">Church Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-nonprofit-acumatica/">Nonprofit Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-customer-management-ext/">Acumatica Customer Management Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

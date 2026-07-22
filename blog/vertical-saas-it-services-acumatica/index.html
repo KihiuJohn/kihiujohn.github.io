@@ -93,100 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have worked with enough SaaS founders to know the metrics that matter. this is one of them, but only if you measure it correctly. The common misinterpretations are the ones that get the team off-track. This article is the correct measurements and the common traps.</p>
-<h2 id="why-services-is-the-first-thing-to-look-at">Why services is the first thing to look at</h2>
-<p>Why services is the first thing to look at is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>IT services firms are consulting firms with one extra wrinkle: a chunk of revenue is usually recurring managed-services contracts (a flat monthly fee for support/monitoring) sitting alongside project-based implementation work billed T&M or fixed-fee. Acumatica handles both, but they are genuinely different configurations, and firms that try to force MSP contracts through the same billing rule as project work end up with invoices nobody can reconcile against the ticketing system.</p>
+
+<h2 id="two-revenue-types-one-instance">Model the two revenue types separately</h2>
+<p>Project/implementation work is a standard Projects-module setup — tasks, budgets, T&M or fixed-fee billing rules, exactly as any consulting engagement. Managed-services contracts are better modeled as a recurring billing schedule tied to a Project with minimal task structure (or, for firms with real contract complexity — tiered SLAs, per-device pricing — a small customization adding contract line items that drive the recurring invoice amount). Keep them as separate Projects per client even when the client has both, so budget-vs-actual reporting on the implementation work isn't diluted by the flat recurring fee.</p>
+
+<h2 id="ticketing-integration">The ticketing system is the actual source of truth for time</h2>
+<p>Almost no IT services firm wants staff logging time twice — once in a PSA/ticketing tool (ConnectWise, Autotask, Freshservice, Jira) and again in Acumatica. The workable pattern is one-directional sync: time entries created in the ticketing tool, pushed into Acumatica as Time Activities via the REST API on a schedule (I use a 15-30 minute batch job, not real-time, because ticket time gets edited/corrected for the first hour after entry and you don't want to bill a correction window).</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">REST · POST TIME ACTIVITY FROM PSA SYNC</span><button class="copy-btn" type="button">Copy</package>
+<pre><code>POST /entity/Default/24.200.001/TimeActivity
+{
+  "Project": { "value": "PROJ-000412" },
+  "ProjectTask": { "value": "SUPPORT" },
+  "Employee": { "value": "EP-0034" },
+  "Date": { "value": "2026-07-08" },
+  "TimeSpent": { "value": "01:30" },
+  "Billable": { "value": true },
+  "Description": { "value": "Ticket #8821 — mail flow troubleshooting" }
+}</code></pre>
 </div>
-<h2 id="how-firm-distorts-the-picture">How firm distorts the picture</h2>
-<p>In the work I have done on it services firm management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<div class="callout-warn callout">
+  <strong>Reconcile ticket count against billed hours, not just totals</strong>
+  <p>A batch sync that fails silently on one malformed ticket will under-bill a client for a month before anyone notices — the invoice total still looks plausible. Build a reconciliation check comparing ticket count synced against ticket count in the source system, not just a dollar total, and alert on a mismatch. This is the single highest-value guardrail on these integrations and the cheapest to build.</p>
 </div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>When the work moves from design to production, the questions change. The services is not the question; the failure mode of the firm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="the-cohort-retention-curve-for-services">The cohort retention curve for services</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="when-services-is-a-leading-indicator-vs-a-lagging-one">When services is a leading indicator vs a lagging one</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, firm, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="what-it-services-firm-management-vertical-on-acumatica-actually-measures">What IT Services Firm Management Vertical on Acumatica actually measures</h2>
-<p>The performance of firm in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Production firm looks different from development firm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring firm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add services on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with firm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="contractor-margin">Subcontracted engineers: pay-and-bill spread</h2>
+<p>IT services firms leaning on subcontracted engineers need the spread between what the contractor is paid and what the client is billed visible per engagement, which means the contractor's cost rate and the client's billing rate both need to be configured on the Project — cost rate on the Employee/Labor Item, billing rate on the Project Task or Customer-specific rate table. Get this wrong (e.g. cost rate defaulted to zero for a 1099/contractor employee type) and the Project Status margin report quietly overstates profitability all engagement long.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on it services firm management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Keep project work and managed-services recurring billing as distinct Project configurations, treat the PSA/ticketing tool as the system of record for time with a one-directional sync into Acumatica, and verify contractor cost rates are actually populated — that last one is a five-minute check that prevents a quarter of wrong margin numbers.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-accounting-firm-acumatica/">Accounting Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-legal-practice-acumatica/">Legal Practice Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount</a></li>
+      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

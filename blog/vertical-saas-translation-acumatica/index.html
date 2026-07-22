@@ -93,100 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough fiscalisation projects to know the patterns that work. They share a few traits: the device stores its private key in a vault, the offline buffer is sized for the worst case, and the audit trail is the source of truth. This article is the patterns.</p>
-<h2 id="what-translation-agency-vertical-on-acumatica-is-for">What Translation Agency Vertical on Acumatica is for</h2>
-<p>What Translation Agency Vertical on Acumatica is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Translation and localization agencies are a narrower variant of the staffing/consulting pattern: work is billed to the client (usually per word, sometimes per hour or per project), delivered by a large pool of freelance linguists paid per word or per hour, and margin depends on the same pay-and-bill spread problem staffing firms have — just priced per word instead of per hour, which changes the unit but not the underlying architecture.</p>
+
+<h2 id="per-word-billing">Per-word billing is a rate table problem, not a special feature</h2>
+<p>"Per word" billing is not natively modeled as a distinct unit in Acumatica, but it doesn't need to be — it's a unit-of-measure and rate configuration on the Project Task, the same mechanism used for any non-hourly billing unit. A translation job is a Project Task with a quantity (word count) and a rate ($ per word, varying by language pair and often by translator skill tier), billed as a fixed quantity-times-rate line rather than time-and-material hours.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">PROJECT TASK · PER-WORD BILLING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Task: Translate Manual — EN to French (Canada)
+  Quantity (UOM = WORD): 14,200
+  Client Rate:            $0.14 / word  = $1,988.00 billed
+  Linguist Pay Rate:       $0.06 / word  = $852.00 cost (AP, per-project vendor bill)
+  Spread:                  $0.08 / word = 42.9% margin on this task
+
+Language-pair rate variance handled via a rate table
+keyed on (SourceLang, TargetLang, SkillTier), not
+hardcoded per project.</code></pre>
 </div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>In the work I have done on translation agency vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+
+<h2 id="freelancer-pool-as-vendors">The linguist pool is a large, high-turnover AP vendor base</h2>
+<p>Freelance translators are best modeled as Vendors, paid via AP against the Project/Task once a job is marked delivered and (usually) reviewed. The operational challenge is volume and churn — an agency may work with hundreds of freelancers, most doing occasional jobs — so vendor onboarding needs to be lightweight (a self-service vendor setup form feeding the REST API rather than manual AP vendor entry for every new linguist) or the AP team becomes the bottleneck on every new job.</p>
+
+<h2 id="cat-tool-integration">CAT tool / TMS integration is the real system boundary</h2>
+<p>Actual translation work happens in a translation-management system or CAT (computer-assisted translation) tool (memoQ, Phrase, XTM, etc.), which tracks word counts, fuzzy-match discounts (a segment that's 95% similar to a previously translated segment bills at a reduced rate), and delivery status. Acumatica should not try to replicate that — the integration boundary is: job delivered and word-count-with-fuzzy-adjustments confirmed in the TMS triggers the Project Task quantity and both billing and vendor-cost lines in Acumatica via the API, one-directional, same pattern as the ATS integration for recruitment.</p>
+
+<div class="callout-warn callout">
+  <strong>Fuzzy-match discounts must flow into both the bill rate and the pay rate</strong>
+  <p>A 95%-match segment usually bills the client at a reduced rate — but the linguist reviewing it is also typically paid a reduced (not zero) rate for the touch-up work. If the integration only adjusts the client-billed quantity and not the vendor-cost quantity, margin reporting silently breaks on every job with fuzzy matches, which in practice is most jobs. Confirm both sides of the word-count adjustment are mapped before trusting the margin report.</p>
 </div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>When the work moves from design to production, the questions change. The translation is not the question; the failure mode of the agency is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The performance of agency in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production agency looks different from development agency. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring agency first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add translation on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with agency when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on translation agency vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Translation billing is a per-word rate-table variant of the standard Projects billing pattern, with the linguist pool modeled as high-volume AP vendors. The integration work with the CAT/TMS tool — and specifically making sure fuzzy-match quantity adjustments hit both the client bill and the linguist pay side — matters more to getting accurate margin than anything on the Acumatica configuration side alone.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/ai-agent-translation/">AI Agent for Real-Time Translation</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
-      <li><a href="/blog/cac-payback-period/">CAC Payback Period — A Field Guide</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen Deep Dive</a></li>
+      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

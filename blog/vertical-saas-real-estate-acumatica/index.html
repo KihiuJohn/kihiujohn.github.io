@@ -93,96 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="channel-partner-programs-for-estate">Channel partner programs for estate</h2>
-<p>Channel partner programs for estate is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Real estate on Acumatica" splits into two genuinely different problems depending on which side of real estate a company is on, and conflating them is where a lot of scoping conversations go sideways. A real estate <em>developer</em> building and selling properties is fundamentally a project-costing problem — extremely close to how Acumatica's Construction Edition already thinks. A real estate <em>investor/landlord</em> holding and leasing properties is the property-management problem covered in the companion post, with the lease-administration gap and all.</p>
+
+<h2 id="development-side">Development: genuinely close to a native fit</h2>
+<p>For a developer, each property or phase of a development is a Project with a real budget — land acquisition, site work, construction draws, soft costs (permits, architecture, financing fees) — and this is exactly the job/project costing that Acumatica's Construction Edition and the core Projects module are built around. Committed cost tracking (purchase orders and subcontracts committing future spend before it's actually incurred) matters more here than in most professional-services verticals, because a developer needs to know total committed cost against budget, not just cost incurred to date, to avoid a nasty surprise near completion.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class RealExt : PXCacheExtension<Estate>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PROJECT BUDGET · COMMITTED VS ACTUAL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Task: Site Work (Phase 2)
+  Original Budget:     $420,000
+  Committed (open POs/subcontracts): $385,000
+  Actual to date:       $210,000
+  Remaining exposure:   Budget - Committed = $35,000 uncommitted headroom
+                        (the number a developer actually needs, and the
+                        one a plain "budget minus actual" report hides)</code></pre>
 </div>
-<h2 id="marketplace-listing-for-real">Marketplace listing for real</h2>
-<p>In the work I have done on real estate management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-estate">SOC 2 and ISO 27001 for estate</h2>
-<p>When the work moves from design to production, the questions change. The real is not the question; the failure mode of the estate is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'real'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="revenue-recognition">Revenue recognition on units sold</h2>
+<p>Selling completed units or lots needs percentage-of-completion or completed-contract revenue recognition tied to the project budget — Acumatica's Projects module supports revenue recognition rules that post based on percent-complete, which is the mechanism to use rather than manual journal entries at each milestone. Getting the recognition method right (and consistent with the firm's actual accounting policy, which is a conversation with the client's auditor, not just a system default) is worth confirming explicitly before go-live rather than defaulting to whatever the demo used.</p>
+
+<h2 id="investor-side">Investment/holding side: same gap as property management</h2>
+<p>Once a development is complete and the developer holds units for lease rather than selling them, the problem becomes the property-management one — lease administration, CAM, escalations — none of which is native, all of which is customization on top of the AR/GL core, exactly as described in the property-management post. A developer that also holds a portfolio needs both patterns in the same instance, cleanly separated by Project type so a leasing property doesn't accidentally inherit construction-budget reporting fields it doesn't need.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Don't assume one native "real estate module" covers both sides</strong>
+  <p>I have seen proposals imply a single native real-estate capability handles development and leasing uniformly. It doesn't — development leans on genuinely strong native Projects/Construction functionality; leasing leans on customization. Scope and quote them separately even within one client relationship.</p>
 </div>
-<h2 id="what-real-estate-management-vertical-on-acumatica-is-for">What Real Estate Management Vertical on Acumatica is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM real
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The performance of estate in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Production estate looks different from development estate. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class RealExt : PXCacheExtension<Estate>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring estate first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add real on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with estate when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on real estate management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>If the client is developing and selling, Acumatica's Projects/Construction capability is a strong, largely native fit — budget the effort into getting committed-cost tracking and revenue recognition configured correctly. If the client is holding and leasing, treat it as the property-management customization problem, and don't let a client-facing pitch blur the two.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Rental Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Report — Project Status</a></li>
+      <li><a href="/blog/acumatica-pm-projects-extension/">Acumatica PM Projects Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-billing-rule-ext/">Acumatica Billing Rule Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-gl-period-end-close-checklist/">Acumatica GL Period-End Close Checklist</a></li>
       <li><a href="/blog/vertical-saas-property-management-acumatica/">Property Management Vertical on Acumatica</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
-      <li><a href="/blog/arr-vs-mrr/">ARR vs MRR — A Field Guide</a></li>
-      <li><a href="/blog/burn-multiple/">Burn Multiple for SaaS — A Field Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

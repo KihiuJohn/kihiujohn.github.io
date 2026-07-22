@@ -93,82 +93,35 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real fiscalisation projects, this is rarely the question. The question is the regulatory framework: what does the authority require, what does the device do, what happens when the network is down. This article is the implementation.</p>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>The implementation architecture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+    <p>Acumatica's tax engine is built to handle more than one jurisdiction from a single tenant, but "supports it" and "is configured correctly" are different claims. The building blocks — tax zones, tax categories, and tax schedules — are simple in isolation and easy to tangle once a company operates across borders. Get the combination wrong and the symptom is rarely an error message; it is a VAT return that doesn't reconcile three months later.</p>
+
+<h2 id="the-three-building-blocks">The three building blocks</h2>
+<p>Acumatica separates tax logic into three pieces that combine at transaction time. A <strong>Tax Category</strong> sits on the stock item or non-stock item and answers "what kind of thing is this" — standard-rated goods, zero-rated exports, exempt services. A <strong>Tax Zone</strong> sits on the customer, vendor, or branch and answers "where does this tax apply" — it's the jurisdiction. A <strong>Tax Schedule</strong> is the matrix that maps categories to zones and resolves to the actual tax codes, rates, and GL accounts. When a Sales Order line is entered, Acumatica looks up the customer's tax zone, the item's tax category, checks the applicable tax schedule, and applies whichever tax codes match — output VAT, withholding, or a combination.</p>
+<p>The part people miss: the branch also carries a tax zone (usually inherited from its address), and branch and customer zones can disagree. If a Kenyan branch bills a Ugandan customer, the resolved tax isn't automatically "Kenyan VAT" or "Ugandan VAT" — it's whatever the tax schedule says applies to that zone pairing, which is exactly why the schedule needs to be built deliberately rather than left on defaults.</p>
+
+<h2 id="one-tenant-three-tax-regimes">One tenant, three tax regimes</h2>
+<p>A company running Kenya, Uganda, and Tanzania from one Acumatica instance typically models each country as a branch under one or more tenants, with a distinct tax zone per country and often per sub-jurisdiction (Kenya's VAT vs Uganda's VAT vs Tanzania's VAT are different rates, different registration thresholds, and different filing cadences). The naming convention matters more than people expect, because tax zones and categories are the thing an auditor — or the next consultant — has to read cold, six months from now.</p>
+<div class="callout">
+  <strong>Naming convention keeps the matrix legible</strong>
+  <p>A pattern that scales cleanly: prefix tax zones with the ISO country code (KE-VAT-STD, UG-VAT-STD, TZ-VAT-STD, KE-VAT-ZERO) and keep tax categories generic (STANDARD, ZERO-RATED, EXEMPT, EXPORT) rather than country-specific. The country lives in the zone; the classification lives in the category. That way the same category set works everywhere and only the schedule matrix changes per country.</p>
 </div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>In the work I have done on acumatica tax engine — configuring multi-country tax, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Where this breaks down is shared items and shared customers. If the same non-stock item (say, a consulting service) is sold from the Kenyan branch to a Kenyan customer and from the Tanzanian branch to a Tanzanian customer, the item's tax category stays constant but the resolved tax differs entirely based on zone — that's correct and expected. The failure case is a customer with operations in two countries sharing one customer record with one tax zone; invoices from the "wrong" branch either apply the wrong country's tax or, worse, apply none because no schedule entry matches that zone/category pair.</p>
+
+<h2 id="standard-vs-advanced-tax-engine">Standard vs advanced tax engine</h2>
+<p>Acumatica ships two modes. The standard tax engine calculates one tax per line based on the zone/category/schedule lookup described above — fine for single-tax jurisdictions like most VAT/GST countries. The <strong>advanced tax engine</strong> (Enable Advanced Taxes feature) supports tax dependent on other taxes, tax reporting by multiple authorities on the same transaction, and cumulative or compound tax calculations — the shape you need for jurisdictions with layered taxes (a state tax plus a local tax plus a special levy, each calculated differently) or for withholding tax that needs to be netted against output VAT rather than just added as a separate line. Multi-country deployments spanning East Africa rarely need the full advanced engine unless withholding tax (common in Kenya on services) has to interact with VAT reporting on the same invoice — at that point the standard engine's single-tax-per-line model runs out of room.</p>
+
+<h2 id="reporting-groups-and-statutory-returns">Reporting groups and statutory box mapping</h2>
+<p>Each Tax Reporting Group ties a set of tax zones to a specific statutory return and filing authority — this is what lets the system aggregate "all Ugandan VAT transactions this period" separately from Kenyan ones even though both post to the same tenant's GL. Individual tax codes within a schedule map to boxes on the return (output tax box, input tax box, zero-rated sales box, exempt sales box), and that mapping is configured once per tax code, not per transaction. Get the box mapping wrong at setup and every return generated from that tax code inherits the error — it's a config-time bug that surfaces as a filing-time crisis, usually discovered by the tax authority rather than by the company.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>Don't let one tax code serve two reporting groups</strong>
+  <p>It's tempting to reuse a "Standard VAT" tax code across countries to keep the chart of tax codes small. Don't — a shared tax code can only map to one reporting group's box structure. Each country needs its own tax codes even where the rate happens to match, because the statutory return, not the rate, is what determines the code.</p>
 </div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the tax is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="why-acumatica-requires-a-vault">Why acumatica requires a vault</h2>
-<p>The performance of tax in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="certificate-lifecycle-for-tax">Certificate lifecycle for tax</h2>
-<p>Production tax looks different from development tax. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tax first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tax when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="pitfalls-with-cross-jurisdiction-items-and-customers">Pitfalls when items or customers span jurisdictions</h2>
+<p>The recurring failure modes on multi-country tax projects: a customer master shared across branches without a zone override at the branch-customer level, causing every invoice to use the customer's "home" zone regardless of which branch actually sold to them; an item tax category set once at item creation and never revisited when the item starts selling into a new country with different classification rules (a zero-rated export in one country can be standard-rated as a domestic sale in another); and tax zones left at system defaults during a rushed go-live, discovered only when the first VAT return is due and half the transactions have no tax code at all. The fix for all three is the same discipline — treat the tax zone/category/schedule matrix as a piece of configuration that gets reviewed per country before go-live, not something inherited from a template tenant.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica tax engine — configuring multi-country tax. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Multi-country tax in Acumatica is a modeling exercise before it's a technical one: get the zone-category-schedule matrix right per jurisdiction, keep tax codes country-specific even when rates coincide, and map reporting groups to the actual statutory return rather than a convenient shortcut. Done deliberately, one tenant can run Kenya, Uganda, and Tanzania without the finance team dreading month-end. Done on defaults, it works fine until the first cross-border invoice or the first VAT return, and then it doesn't.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +132,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-cash-management-bank-reconciliation/">Acumatica Cash Management — Bank Reconciliation</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

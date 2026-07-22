@@ -93,93 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="the-deployment-pipeline-for-acumatica">The deployment pipeline for acumatica</h2>
-<p>The deployment pipeline for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-upgrade">SLOs and error budgets for upgrade</h2>
-<p>In the work I have done on acumatica upgrade checklist — r1 to r2, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Acumatica ships two major releases a year — historically labelled things like 2024 R1 and 2024 R2 — and each one carries platform updates, UI changes, and the occasional deprecated API alongside the feature work. Upgrading is routine if you treat it as routine: a checklist run every six months rather than a scramble triggered by an ISV or a client asking why they're three versions behind.</p>
+
+<h2 id="what-actually-changes-between-releases">What actually changes between releases</h2>
+<p>Beyond the headline features, every R1/R2 release tends to touch three things that affect existing customizations: the underlying platform (.NET framework version, database engine support), the API surface (contract-based API endpoints occasionally get new required fields or deprecated ones get removed a release or two after warning), and the UI layer, where screens continue migrating to the modern Fluent-based UI framework — which can change how custom fields and buttons added via customization projects render, even when the underlying DAC and graph logic is untouched. None of this is usually breaking on its own, but a customization built two years ago against an older screen layout is the most common thing that quietly stops working after an upgrade.</p>
+
+<h2 id="pre-upgrade-checklist">Pre-upgrade checklist</h2>
+<p>The work before the upgrade window matters more than the upgrade itself. Compile every Customization Project against the target release in a sandbox first — the Customization Project publish/compile step will surface broken references to removed or renamed API members immediately, long before a user finds them. Check every installed ISV solution against the vendor's published compatibility matrix for the target version; ISV packages that haven't been updated for the new release are the single most common upgrade blocker. Take a full snapshot/backup of the site and database immediately before starting, even though the upgrade process itself is usually non-destructive — the backup is your rollback path, not a formality. And run the whole thing once in a staging or sandbox tenant that mirrors production data volume before touching the live tenant; upgrade timing on a large database can differ meaningfully from a small sandbox.</p>
 <div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+  <strong>Don't upgrade the tenant nobody tested</strong>
+  <p>It's common to have a "clean" test tenant that upgrades without issue and a production tenant loaded with years of customizations and ISV add-ons that behaves completely differently. Test in a copy of production, not in a bare sandbox — a clean upgrade in staging tells you the platform works, not that your specific customizations survive.</p>
 </div>
-<h2 id="incident-response-for-acumatica">Incident response for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the upgrade is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_upgrade" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="what-acumatica-upgrade-checklist-r1-to-r2-gives-you">What Acumatica Upgrade Checklist — R1 to R2 gives you</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The performance of upgrade in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>Production upgrade looks different from development upgrade. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+
+<h2 id="the-upgrade-window">The upgrade window itself</h2>
+<p>Acumatica upgrades (whether self-hosted or on Acumatica Cloud) typically run through the standard update mechanism against a maintained instance, applying database schema changes and platform binaries in sequence. For self-hosted or partner-hosted environments, this means scheduling a maintenance window, disabling scheduled processing (import scenarios, automation schedules, business events that fire on a timer) beforehand so nothing runs mid-upgrade against a half-migrated schema, and confirming the application pool or service account has the permissions the installer expects. For Acumatica Cloud tenants, the update is largely handled by Acumatica, but the pre- and post-upgrade validation responsibility stays with you.</p>
+
+<h2 id="post-upgrade-validation">Post-upgrade validation</h2>
+<p>Once the upgrade completes, re-publish every Customization Project explicitly rather than assuming it survived the migration silently — a project that compiled fine pre-upgrade can still need republishing against the new platform assemblies. Walk through the integrations: confirm outbound webhooks and business events still fire (a screen ID rename or field deprecation can silently break a business event's source query), and re-test any scheduled REST/SOAP API integrations against a real transaction, not just a login check. Custom reports (Report Designer or SSRS-based) should be spot-checked too, since report data sources built against DACs that changed shape between releases can fail or silently return wrong columns. Finally, have a small group of real users exercise their daily screens before declaring the upgrade done — automated smoke tests catch schema breaks, not "this button moved and confused everyone."</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring upgrade first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with upgrade when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Phase</th><th>Checklist item</th></tr>
+  <tr><td rowspan="4">Pre-upgrade</td><td>Compile all Customization Projects against target release in sandbox</td></tr>
+  <tr><td>Verify ISV solution compatibility with target version</td></tr>
+  <tr><td>Full site/database snapshot before starting</td></tr>
+  <tr><td>Full dry-run in staging tenant with production-like data volume</td></tr>
+  <tr><td rowspan="2">During</td><td>Disable scheduled processing and timed business events</td></tr>
+  <tr><td>Confirm service account permissions for the installer</td></tr>
+  <tr><td rowspan="4">Post-upgrade</td><td>Re-publish all Customization Projects</td></tr>
+  <tr><td>Verify webhooks and business events still fire correctly</td></tr>
+  <tr><td>Spot-check custom reports against changed DACs</td></tr>
+  <tr><td>User walkthrough of daily-use screens</td></tr>
 </table>
+
+<h2 id="rollback-planning">Rollback planning</h2>
+<p>Have the rollback path decided before you start, not improvised after something breaks. For most deployments that means restoring the pre-upgrade snapshot/backup and reverting to the prior application binaries — which is exactly why the pre-upgrade backup step isn't optional. Set a go/no-go checkpoint after the upgrade completes but before you re-enable scheduled processing and open access to end users: if the core smoke tests (login, a Sales Order save, a Bill entry, one business event firing) fail at that checkpoint, roll back rather than trying to hotfix a customization live against a partially-validated new release.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica upgrade checklist — r1 to r2. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>An Acumatica upgrade is low-risk almost entirely because of the work done before the maintenance window — compiling customizations against the target release, confirming ISV compatibility, and rehearsing the whole thing in a staging tenant that actually resembles production. Skip that rehearsal and the upgrade itself becomes the incident.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +139,6 @@ jobs:
       <li><a href="/blog/acumatica-canary-deployment/">Acumatica Canary Deployment</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

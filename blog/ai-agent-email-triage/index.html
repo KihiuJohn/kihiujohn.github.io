@@ -93,98 +93,58 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Memory, context, and state management is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A shared support, sales, or AP inbox gets dozens to hundreds of emails a day, and most of the value in triaging them isn't answering — it's routing correctly and extracting the right facts fast. An email triage agent reads each message, classifies it, pulls out structured entities, and decides whether to draft a reply, auto-route it, or hand it to a person untouched. The hard part isn't the classification; it's making sure the agent never sends something wrong on its own authority.</p>
+<h2 id="classification-and-entity-extraction">Classification and entity extraction</h2>
+<p>The first LLM call does two things in one pass: assigns a category (support, sales lead, AP invoice query, spam, other) and extracts entities relevant to that category — a ticket or order number, an invoice reference, a dollar amount, a sentiment signal. Doing both in a single structured call is cheaper than separate passes and keeps the extraction grounded in the same classification reasoning.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · TRIAGE TOOL CALL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>triage_tool = {
+    "name": "triage_email",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string",
+                "enum": ["support", "sales_lead", "ap_invoice_query", "spam", "other"]
+            },
+            "urgency": {"type": "string", "enum": ["low", "normal", "high"]},
+            "entities": {
+                "type": "object",
+                "properties": {
+                    "order_number": {"type": ["string", "null"]},
+                    "invoice_number": {"type": ["string", "null"]},
+                    "amount_mentioned": {"type": ["number", "null"]}
+                }
+            },
+            "requires_human": {"type": "boolean"},
+            "confidence": {"type": "number"}
+        },
+        "required": ["category", "urgency", "requires_human", "confidence"]
+    }
+}</code></pre>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>In the work I have done on ai agent for email triage, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<p>Entity extraction fails quietly more often than it fails loudly — an invoice number gets read off a forwarded thread instead of the original message, or a dollar figure in a quoted reply is picked up instead of the one in the new text. Test extraction against real historical threads, not clean single-message examples, because threading and quoting is where it breaks.</p>
+<h2 id="draft-vs-auto-route">Deciding whether to draft, route, or hold</h2>
+<p>Not every category deserves the same level of agent autonomy. Routing a message to the right queue is low-risk and reversible — a misrouted ticket just gets re-routed. Drafting a reply for a human to send is medium-risk. Auto-sending a reply is high-risk, because the moment it goes out you can't unsend it, and a wrong answer to a customer about pricing, a refund, or a contractual term is a real cost. The design decision that matters most here is which category gets which treatment, and it should be a conservative, explicit whitelist rather than something the model decides at runtime.</p>
+<div class="callout-warn">
+  <strong>Never let the model decide it can auto-send</strong>
+  <p>The auto-send decision belongs to your routing code, keyed off category and confidence, not to a field the LLM fills in on its own judgment. An LLM asked "should I send this automatically" will say yes more often than your risk tolerance allows, because it has no skin in the game and no visibility into what a wrong reply costs you.</p>
 </div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the email is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-email">Prompt patterns that work for email</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>The performance of email in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Production email looks different from development email. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="guardrails-against-bad-auto-sends">Guardrails against bad auto-sends</h2>
+<p>For the narrow set of categories allowed to auto-send (typically "acknowledgment received" style replies, or password-reset-style deterministic responses), add a second, independent check before the send: a regex or classifier that scans the drafted reply for red flags — mentions of specific dollar amounts, promises, legal language, or a tone mismatch with the incoming urgency. If the draft trips any of those checks, downgrade it to human review regardless of the original confidence score. This second pass costs almost nothing and catches the cases where the first model hallucinated a commitment it shouldn't have made.</p>
+<h2 id="the-review-queue-and-feedback-loop">The review queue and feedback loop</h2>
+<p>Every drafted-not-sent reply goes into a queue where a human can edit and send, reject, or escalate. Log the diff between what the agent drafted and what the human actually sent — that diff is your evaluation signal. If drafts are consistently getting heavily edited for a particular category, that's a sign the prompt or the underlying knowledge base for that category needs work, not that the model needs to be trusted more.</p>
+<h2 id="latency-and-inbox-volume">Latency and inbox volume at scale</h2>
+<p>A single triage call at a few hundred milliseconds to a couple seconds is fine for interactive use, but a shared inbox with a backlog needs a queue-based worker rather than synchronous processing on email arrival — pull from a queue, classify, write results, move on. Batch the classification calls where the provider supports it if you're processing a large historical backlog; there's no need to pay interactive-latency pricing for triaging a week-old backlog overnight.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring email first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with email when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Category</th><th>Action</th><th>Human involvement</th></tr>
+  <tr><td>Spam / newsletter</td><td>Auto-archive</td><td>None — spot-audited</td></tr>
+  <tr><td>Support, routine</td><td>Auto-route to queue</td><td>Agent handles from queue</td></tr>
+  <tr><td>Support, ambiguous</td><td>Draft reply</td><td>Reviewer edits and sends</td></tr>
+  <tr><td>AP / sales, financial terms mentioned</td><td>Route only, no draft</td><td>Full manual response</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for email triage. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Email triage is a good agent use case because most of the volume is low-stakes and routing mistakes are cheap to fix. The design work is in drawing a hard line around what the agent is allowed to send unattended, backing that line with an independent check rather than trusting the model's own confidence field, and building a review queue whose edit patterns tell you where the system still needs work.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +155,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-anthropic-acumatica/">Anthropic Claude + Acumatica Integration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Custom Attributes on PXSelect in Acumatica | John Kihiu</title>
-<meta name="description" content="Custom Attributes on PXSelect in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Attributes stacked on a DAC field look declarative and simple until you write your own and discover how much is actually happening under the hood: attribute order affects.">
 <meta name="keywords" content="Acumatica customization, Acumatica bql, Acumatica attributes, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-custom-attributes-on-pxselect/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Custom Attributes on PXSelect in Acumatica">
-<meta property="og:description" content="Custom Attributes on PXSelect in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Attributes stacked on a DAC field look declarative and simple until you write your own and discover how much is actually happening under the hood: attribute order affects.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-custom-attributes-on-pxselect.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-custom-attributes-on-pxselect/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="attributes">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Custom Attributes on PXSelect in Acumatica","description":"Custom Attributes on PXSelect in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-custom-attributes-on-pxselect.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-custom-attributes-on-pxselect/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Custom Attributes on PXSelect in Acumatica","description": "Attributes stacked on a DAC field look declarative and simple until you write your own and discover how much is actually happening under the hood: attribute order affects.","image":"https://kihiujohn.github.io/assets/og/acumatica-custom-attributes-on-pxselect.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-custom-attributes-on-pxselect/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Custom Attributes on PXSelect in Acumatica","item":"https://kihiujohn.github.io/blog/acumatica-custom-attributes-on-pxselect/"}]}
@@ -87,113 +87,103 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Custom Attributes on PXSelect in Acumatica</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>Custom Attributes on PXSelect in Acumatica</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Custom Attributes on PXSelect in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Attributes stacked on a DAC field look declarative and simple until you write your own and discover how much is actually happening under the hood: attribute order affects.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="the-version-of-custom-that-works">The version of custom that works</h2>
-<p>The version of custom that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Attributes stacked on a DAC field look declarative and simple until you write your own and discover how much is actually happening under the hood: attribute order affects behavior, some attributes only make sense on a selected (bound) field versus an unbound one, and a badly-written custom attribute can silently break BQL projections it was never tested against. This is a walk through building a real custom attribute and the traps I've hit doing it.</p>
+
+<h2 id="what-an-attribute-actually-is">An attribute is a PXEventSubscriberAttribute wiring itself into the cache's event pipeline</h2>
+<p>Every Acumatica field attribute - <code>PXDBString</code>, <code>PXDefault</code>, <code>PXUIField</code>, all of them - ultimately derives from <code>PXEventSubscriberAttribute</code>, and what it "does" is attach handlers to the cache's event pipeline (FieldDefaulting, FieldVerifying, FieldSelecting, RowPersisting) for the field it decorates. A custom attribute is not magic; it's a reusable bundle of the same event handlers you'd otherwise write by hand in a graph extension, packaged so you can apply it declaratively to many fields:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CustomAttributesExt : PXGraphExtension<CustomEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXAttributeFamily]
+public class PXPercentRangeAttribute : PXEventSubscriberAttribute, IPXFieldVerifyingSubscriber
 {
-    [PXOverride]
-    public virtual void Attributes(Custom doc)
+    protected decimal _Min;
+    protected decimal _Max;
+
+    public PXPercentRangeAttribute(double min, double max)
     {
-        // Custom attributes logic for custom attributes pxselect
-        if (doc?.Attributes == null) return;
-        Base.Attributes(doc);
+        _Min = (decimal)min;
+        _Max = (decimal)max;
+    }
+
+    public virtual void FieldVerifying(PXCache sender, PXFieldVerifyingEventArgs e)
+    {
+        if (e.NewValue == null) return;
+        var value = (decimal)e.NewValue;
+        if (value &lt; _Min || value &gt; _Max)
+        {
+            throw new PXSetPropertyException(
+                "Value must be between {0}% and {1}%.", PXErrorLevel.Error, _Min, _Max);
+        }
     }
 }</code></pre>
 </div>
-<h2 id="why-custom-attributes-on-pxselect-in-acumatica-matters-in-production">Why Custom Attributes on PXSelect in Acumatica matters in production</h2>
-<p>In the work I have done on custom attributes on pxselect in acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The custom is not the question; the failure mode of the attributes is.</p>
+
+<p>Applying it is just decorating the field, same as any built-in attribute: <code>[PXPercentRange(0, 100)]</code> above a decimal property. The point of writing your own instead of a one-off RowPersisting check is reuse - apply the same validation rule to a dozen fields across several DACs without copy-pasting the logic into a dozen event handlers.</p>
+
+<h2 id="attribute-order-is-not-cosmetic">Stacking order on a field genuinely changes behavior</h2>
+<p>Attributes on a property fire in the order they're declared, top to bottom, for events that multiple attributes both subscribe to. This matters concretely: a <code>PXDefault</code> attribute needs to run and set a value before a validation attribute that rejects nulls gets a chance to complain about a still-empty field. I've debugged a "why does this field always show a validation error on a new row" issue that came down to a validation attribute declared above the defaulting attribute instead of below it:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for custom
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Wrong order - validation attribute fires FieldVerifying before
+// PXDefault has had a chance to populate the field on a new row
+[PXPercentRange(0, 100)]
+[PXDefault(TypeCode.Decimal, "0.0")]
+public decimal? UsrDiscountPct { get; set; }
+
+// Correct - default first, validation second
+[PXDefault(TypeCode.Decimal, "0.0")]
+[PXPercentRange(0, 100)]
+public decimal? UsrDiscountPct { get; set; }</code></pre>
 </div>
-<h2 id="custom-implementation-walkthrough">Custom implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<p>In practice this specific example often still works because FieldVerifying only fires on an actual value change, but the general rule holds across enough attribute combinations that I always declare defaulting and formatting attributes above validation attributes as a habit, not case by case.</p>
+
+<h2 id="pxselect-and-unbound-projected-fields">Custom attributes on fields that only exist in a PXSelect projection</h2>
+<p>A field declared directly inside a <code>PXSelect</code>'s projection - an aggregate, a calculated column pulled in via a join, not a real DAC property - can still carry attributes, but only the ones that make sense for a read-only, non-persisted value. Applying <code>PXDBDecimal</code> (a storage attribute expecting a real column) to a projected aggregate field is a mistake I've seen cause a schema-sync error or a silent no-op, because there's no actual column behind it for the attribute to bind storage behavior to:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-custom">Performance and observability for custom</h2>
-<p>The performance of attributes in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production attributes looks different from development attributes. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CustomAttributesExt : PXGraphExtension<CustomEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// A projected, read-only aggregate - use unbound attributes only
+[PXQuickJoin]
+public class OpenBalanceByCustomer : PXBqlTable, IBqlTable
 {
-    [PXOverride]
-    public virtual void Attributes(Custom doc)
-    {
-        // Custom attributes logic for custom attributes pxselect
-        if (doc?.Attributes == null) return;
-        Base.Attributes(doc);
-    }
+    [PXDecimal(2)]                 // unbound decimal formatting - correct here
+    [PXUIField(DisplayName = "Open Balance", Enabled = false)]
+    public virtual decimal? OpenBalance { get; set; }
+    public abstract class openBalance : PX.Data.BQL.BqlDecimal.Field&lt;openBalance&gt; { }
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring attributes first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add custom on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with attributes when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p><code>PXDecimal</code> (no DB prefix) versus <code>PXDBDecimal</code> is exactly this distinction: the former formats and rounds an in-memory value with no storage semantics, the latter declares an actual mapped column. Mixing them up on a projection field is a small but common mistake for developers who've only ever worked with real table-backed DACs.</p>
+
+<h2 id="testing-a-custom-attribute-against-bql">A custom attribute needs to survive being selected, not just validated interactively</h2>
+<p>The trap that catches people writing their first real custom attribute: it works fine when a user types into the field in the UI, and then breaks - or worse, silently does nothing - the moment the field is populated via a bulk BQL update, an import scenario, or a REST API PUT, because those paths don't necessarily fire every UI-oriented event the same way manual entry does. If validation logic genuinely needs to hold regardless of entry path, put the authoritative check in <code>RowPersisting</code> as a backstop, and treat FieldVerifying as the fast, interactive layer on top of it, not the only layer.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on custom attributes on pxselect in acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A custom attribute is a reusable bundle of the same cache event handlers you'd write by hand, and its behavior is genuinely sensitive to declaration order relative to other attributes on the same field. Keep storage attributes off projected, unbound fields, use their PXDecimal-style unbound counterparts instead, and never trust FieldVerifying alone to enforce something that also has to hold for bulk BQL updates and API writes - back it with a RowPersisting check when correctness actually matters.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>
       <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-formula-evaluation-context/">Acumatica Formula Evaluation Context</a></li>
       <li><a href="/blog/acumatica-field-level-attribs-decimal-precision/">Acumatica Field Attributes — Decimal Precision and the Ones That Bite</a></li>
-      <li><a href="/blog/acumatica-rest-api-vs-bql-when-to-choose-bql/">Acumatica REST API vs BQL — When to Choose BQL</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Cross-Field DAC Validation in Acumatica</a></li>
+      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

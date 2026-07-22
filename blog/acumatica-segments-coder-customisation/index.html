@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Segments Coder Customisation | John Kihiu</title>
-<meta name="description" content="Acumatica Segments Coder Customisation is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Account numbers, sub-accounts, and inventory item IDs in Acumatica aren't just strings — they're segmented keys, built from the Segmented Keys (Coder) mechanism, where each.">
 <meta name="keywords" content="Acumatica customization, Acumatica dac, Acumatica finance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-segments-coder-customisation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Segments Coder Customisation">
-<meta property="og:description" content="Acumatica Segments Coder Customisation is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Account numbers, sub-accounts, and inventory item IDs in Acumatica aren't just strings — they're segmented keys, built from the Segmented Keys (Coder) mechanism, where each.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-segments-coder-customisation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-segments-coder-customisation/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="finance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Segments Coder Customisation","description":"Acumatica Segments Coder Customisation is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-segments-coder-customisation.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-segments-coder-customisation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Segments Coder Customisation","description": "Account numbers, sub-accounts, and inventory item IDs in Acumatica aren't just strings — they're segmented keys, built from the Segmented Keys (Coder) mechanism, where each.","image":"https://kihiujohn.github.io/assets/og/acumatica-segments-coder-customisation.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-segments-coder-customisation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Segments Coder Customisation","item":"https://kihiujohn.github.io/blog/acumatica-segments-coder-customisation/"}]}
@@ -87,113 +87,73 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Segments Coder Customisation</span></nav>
     <span class="tag">Acumatica · Customization</span>
     <h1>Acumatica Segments Coder Customisation</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Segments Coder Customisation is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Account numbers, sub-accounts, and inventory item IDs in Acumatica aren't just strings — they're segmented keys, built from the Segmented Keys (Coder) mechanism, where each.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>Performance and observability for acumatica is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Segmented keys are one of those Acumatica features that look purely cosmetic until a client's chart of accounts needs to encode a company code, a department, and a natural account all inside one field with validated, independently-configurable segments. The Coder infrastructure that backs Inventory IDs, Subaccounts, and any custom segmented key you build yourself is more capable than most developers realize the first time they need to customize it.</p>
+
+<h2 id="what-coder-actually-is">Coder: a validated, segmented string, not just a formatted one</h2>
+<p>A segmented key in Acumatica (configured on screens like Segmented Keys, CS202000, for Subaccount or Inventory ID, or built for a custom entity) is a string composed of independently validated segments, each with its own length, its own value set (free text, a lookup against another table, or a fixed list), and its own separator character. The critical distinction from a plain formatted string: each segment is independently queryable and independently subject to security and validation rules, which is what lets a subaccount like <code>100-410-KE</code> support "restrict this role to department 410 only" without parsing the string yourself.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSegmentsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Segments(Acumatica doc)
-    {
-        // Custom segments logic for acumatica segments coder
-        if (doc?.Segments == null) return;
-        Base.Segments(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Segmented Key: SUBACCOUNT
+  Segment 1: COMPANY   (3 chars, validated list)
+  Segment 2: DEPT      (3 chars, validated list, lookup to Department)
+  Segment 3: REGION    (2 chars, free text)
+
+  Example value: 100-410-KE
+</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on acumatica segments coder customisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the segments is.</p>
+
+<h2 id="dac-side-attribute">Wiring a DAC field to a segmented key</h2>
+<p>On the DAC side, a segmented key field uses <code>AcctSubAttribute</code> or, for custom segmented entities, a generated attribute class Acumatica builds when you define the key through Segmented Keys, and applying it is what gives the field its segment-aware editor control, its per-segment validation, and its combination-level security:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[PXDBString(30, IsUnicode = true)]
+[PXUIField(DisplayName = "Subaccount")]
+[SubAccount(typeof(GLTran.branchID))]      // segmented-key aware attribute
+public string SubID { get; set; }
+public abstract class subID : PX.Data.BQL.BqlString.Field&lt;subID&gt; { }
+</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<p>Custom segmented keys you define yourself get a generated attribute the same way, tied to the segmented key ID you configured, and applying that attribute to a custom DAC field gets you the combination-box editor and validation for free, without writing a custom edit control from scratch.</p>
+
+<h2 id="combination-level-security">Combination-level restriction is the feature people actually want</h2>
+<p>The reason clients ask for segmented keys instead of a plain lookup field is almost always combination-level access control: restrict certain users to certain segment value combinations, not just to individual segment values in isolation. A user might be allowed department 410 in company 100, but not department 410 in company 200, a rule that is meaningless if department and company are just two unrelated fields rather than segments of one validated key with combination rules configured against it.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Configure restriction groups against the combination, test with an actual restricted user</strong>
+  <p>It is easy to configure segment-level restriction groups correctly and still ship a screen where a restricted user can see combinations they should not, because the restriction needs to be applied consistently everywhere the segmented key is selectable, not just on the primary entry screen. I always test with a genuinely restricted test user account against every screen touching that key, GI's included, before calling a segmented-key security requirement done.</p>
 </div>
-<h2 id="the-segments-edge-cases-i-have-shipped">The segments edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The performance of segments in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-segments-in-production">How to debug segments in production</h2>
-<p>Production segments looks different from development segments. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaSegmentsExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Segments(Acumatica doc)
-    {
-        // Custom segments logic for acumatica segments coder
-        if (doc?.Segments == null) return;
-        Base.Segments(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring segments first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with segments when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="custom-segmented-entities">Building your own segmented key for a custom entity</h2>
+<p>Beyond Subaccount and Inventory ID, you can define an entirely new segmented key for a custom DAC through the same Segmented Keys infrastructure, useful when a client needs a custom "Project Code" or "Asset Tag" field with the same validated, combination-aware behavior as the built-in ones rather than reinventing segment parsing by hand. Define the key, its segments, and their value sources on the Segmented Keys screen, then apply the generated attribute to your custom field, the same pattern as any built-in segmented field, which is the part developers unfamiliar with Coder tend to miss, assuming segmented keys are a fixed platform feature rather than something you can extend to your own entities.</p>
+
+<h2 id="performance-and-length">Segment length changes after data exists are expensive</h2>
+<p>Changing a segment's length or adding a new segment to a key that already has live data is not a free configuration change, existing values need to be reformatted to the new structure, and any code, GI, or report that assumed the old fixed positions (substring-based parsing outside the Coder API, for instance) breaks silently. I have inherited more than one instance where a developer bypassed the segmented-key API and did direct string-splitting against a subaccount value in a report, and a later segment-length change broke that report without anyone connecting the two changes for weeks. Always resolve segment values through the Coder-aware BQL fields or the segmented key API, never through positional string manipulation, specifically so a future segment structure change does not require hunting down every place someone assumed today's fixed widths.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica segments coder customisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Segmented keys exist to give a composite value independently validated, independently securable pieces, and the combination-level access control is usually the actual business requirement hiding behind what looks like a formatting request. Wire custom fields to Coder-generated attributes rather than hand-building segment parsing, test restriction groups with a genuinely restricted user across every screen and GI that touches the key, and treat segment structure changes on live data as a real migration, not a quick configuration tweak.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cash-management-extension/">Acumatica Cash Management — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-fa-fixed-assets-extension/">Acumatica Fixed Assets — Extension Patterns</a></li>
-      <li><a href="/blog/acumatica-multicurrency-dac-handling/">Multi-Currency DAC Handling in Acumatica</a></li>
-      <li><a href="/blog/acumatica-advanced-validation-attributes/">Advanced Validation Attributes in Acumatica</a></li>
-      <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-numbering-sequences-customisation/">Acumatica Numbering Sequences — Customisation Patterns</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-custom-attributes-on-pxselect/">Custom Attributes on PXSelect in Acumatica</a></li>
+      <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

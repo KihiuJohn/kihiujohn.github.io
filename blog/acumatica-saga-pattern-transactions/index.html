@@ -93,82 +93,66 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Fiscalisation is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to push the integration towards being boring, recoverable, and audit-ready. This article is the discipline.</p>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>The implementation architecture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>In the work I have done on acumatica saga pattern for transactions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the saga is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>The moment a business process spans Acumatica and an external system — a payment gateway, a 3PL warehouse, a marketplace — the neat guarantee of a database transaction disappears. Acumatica can commit a Sales Order in a single BQL transaction; it cannot also commit "charge the card" and "reserve the pallet" atomically, because those live in someone else's database behind someone else's API. The saga pattern is how you get correctness back without a distributed transaction coordinator, which nobody sane runs across SaaS boundaries anyway.</p>
+
+<h2 id="why-acid-stops-at-the-tenant-boundary">Why ACID stops at the tenant boundary</h2>
+<p>A two-phase commit needs every participant to expose a prepare/commit protocol and to hold locks until the coordinator says go. Acumatica's API doesn't offer that, and neither does Stripe, nor a third-party WMS. So the instant a workflow touches more than one system, you've left ACID territory whether you planned to or not. The failure mode people underestimate isn't "the whole thing fails" — it's the partial failure: the Sales Order is created, the payment gateway charges the customer, and then the warehouse reservation call times out. Nothing rolled back, because nothing was ever in the same transaction to begin with.</p>
+
+<h2 id="the-saga-pattern-in-plain-terms">The saga pattern in plain terms</h2>
+<p>A saga replaces one big transaction with a sequence of small local transactions, each of which is paired with a compensating action that undoes it if a later step fails. Step 1 creates the Sales Order. Step 2 reserves inventory. Step 3 charges the payment gateway. If step 3 fails, you don't roll back the database — you run the compensations for steps 1 and 2 in reverse: release the inventory reservation, then void or cancel the Sales Order. The guarantee a saga gives you is weaker than ACID (the system passes through visibly inconsistent intermediate states) but it's the only guarantee available once a workflow crosses process boundaries, and it's enough as long as every step has a real compensating action.</p>
+
+<h2 id="orchestration-vs-choreography">Orchestration vs. choreography</h2>
+<p>There are two ways to coordinate the steps. In an <strong>orchestrated saga</strong>, a central coordinator — typically a middleware service or an integration layer sitting outside Acumatica — calls each participant in order, waits for success or failure, and decides which compensations to fire. This is easier to reason about and debug because the whole state machine lives in one place. In a <strong>choreographed saga</strong>, there's no central brain: each system reacts to events published by the previous one and publishes its own event when done, including failure events that downstream (or upstream) systems listen for to trigger their own compensation. Choreography scales better with more participants but gets hard to trace once you have more than three or four steps — you end up reconstructing the flow from logs across systems you don't all own. For an Acumatica integration with two or three external dependents, orchestration is almost always the less painful choice.</p>
 <div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
+  <strong>Pick orchestration until it hurts</strong>
+  <p>Choreography looks more "event-driven" and elegant on a whiteboard, but debugging a stuck saga across four independently-owned event logs at 2am is not where you want to be. Start with a single orchestrator service that owns the saga state; only decompose into choreography if the orchestrator becomes an actual bottleneck.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="a-concrete-acumatica-example">A concrete Acumatica example</h2>
+<p>Take an order flow: create a Sales Order in Acumatica, reserve stock, then charge the customer through an external payment gateway. The saga looks like this: Step 1 creates the SO via the Acumatica REST API (contract-based endpoint) and leaves it in an Open, unconfirmed state. Step 2 calls the gateway's authorization endpoint to hold funds — not capture yet. Step 3, once authorization succeeds, captures the payment and only then does the orchestrator flip the Sales Order to a confirmed status (or trigger shipment confirmation). If the capture step fails, the compensating actions run in reverse: void the authorization at the gateway, and either cancel the Sales Order or move it to a "payment failed" status rather than leaving it looking like a valid confirmed order. The key design decision is to authorize before you touch inventory in any way that's hard to undo, and to capture last, since capture is the step with the worst compensating action (a refund, which has its own delay and failure modes).</p>
+
+<h2 id="where-business-events-and-the-api-fit">Where business events and the API fit</h2>
+<p>Acumatica's business events are a natural trigger point for saga steps, but they work best as the notifier, not the orchestrator. A business event on the Sales Order (fired on a status change, for example) can push a webhook or message to your external orchestrator saying "SO created, proceed to inventory reservation" — the actual sequencing and compensation logic should live in that external service, not in generic inquiry-driven business event chains inside Acumatica itself. Trying to build a multi-step saga entirely out of chained business events tends to produce a fragile, hard-to-debug web of triggers with no single place to see saga state. Use business events to emit "this local transaction completed" signals, and keep the compensating-action logic and step tracking in code you control outside Acumatica.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
+  <div class="code-header"><span class="code-lang">C# · SAGA STEP WITH COMPENSATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class ChargePaymentStep : ISagaStep
+{
+    public async Task&lt;StepResult&gt; ExecuteAsync(SagaContext ctx)
+    {
+        var auth = await _gateway.Authorize(ctx.OrderId, ctx.Amount);
+        if (!auth.Success)
+            return StepResult.Failed(auth.ErrorMessage);
+
+        ctx.Set("authorizationId", auth.AuthorizationId);
+        return StepResult.Succeeded();
+    }
+
+    public async Task CompensateAsync(SagaContext ctx)
+    {
+        // Undo: void the hold, do not touch the SO here —
+        // the orchestrator calls the SO compensation step separately
+        var authId = ctx.Get&lt;string&gt;("authorizationId");
+        if (authId != null)
+            await _gateway.VoidAuthorization(authId);
+    }
+}
+
+// Orchestrator, simplified
+foreach (var step in steps)
+{
+    var result = await step.ExecuteAsync(context);
+    if (!result.Success)
+    {
+        foreach (var completed in executedSteps.Reverse())
+            await completed.CompensateAsync(context);
+        break;
+    }
+    executedSteps.Add(step);
+}</code></pre>
 </div>
-<h2 id="why-acumatica-requires-a-vault">Why acumatica requires a vault</h2>
-<p>The performance of saga in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="certificate-lifecycle-for-saga">Certificate lifecycle for saga</h2>
-<p>Production saga looks different from development saga. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring saga first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with saga when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica saga pattern for transactions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Sagas aren't a framework you install — they're a discipline of pairing every cross-system action with a compensating one and tracking saga state somewhere durable, outside of Acumatica's own transaction log. Get the compensations right (especially for payment capture, the hardest one to undo cleanly) before you worry about orchestration vs. choreography, and lean on Acumatica business events as triggers rather than as the coordination engine itself.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -179,9 +163,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-domain-driven-design/">Acumatica Domain-Driven Design</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

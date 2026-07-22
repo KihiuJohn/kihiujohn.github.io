@@ -93,98 +93,32 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="how-to-evaluate-act-in-production">How to evaluate act in production</h2>
-<p>How to evaluate act in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_act(query: str) -> str:
-    """List act matching the query."""
-    response = requests.get(
-        f"https://api.example.com/act",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="act", func=list_act, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on eu ai act compliance for erp ai agents, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-compliance-in-the-agent-loop">The role of compliance in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The act is not the question; the failure mode of the compliance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="what-eu-ai-act-compliance-for-erp-ai-agents-actually-does">What EU AI Act Compliance for ERP AI Agents actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of compliance in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production compliance looks different from development compliance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_act(query: str) -> str:
-    """List act matching the query."""
-    response = requests.get(
-        f"https://api.example.com/act",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="act", func=list_act, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+    <p>The EU AI Act is not a data-privacy law wearing an AI costume — it's a product-safety framework that sorts AI systems into risk tiers and attaches obligations to each tier. If you're bolting an LLM agent onto Acumatica for AP coding, HR screening, or credit decisions, and any of your users or affected individuals are in the EU, the tier your use case lands in determines whether you need a light disclosure notice or a full conformity assessment. This is a plain walk through the tiers and where a typical ERP agent falls.</p>
+<h2 id="the-four-risk-tiers">The four risk tiers</h2>
+<p>The Act defines four tiers. <strong>Unacceptable risk</strong> practices are banned outright — things like social scoring of individuals by public authorities and AI systems that use manipulative subliminal techniques to materially distort behavior in a way that causes harm. Almost no legitimate ERP feature lands here; it exists mainly to rule out a narrow set of practices, not to worry a finance team.</p>
+<p><strong>High-risk</strong> is the tier that matters for ERP work. It covers systems listed in the Act's Annex III categories, which include AI used in employment and worker management (screening or evaluating candidates, making decisions about promotion or termination) and AI used to evaluate creditworthiness. An AI agent that screens resumes, ranks candidates, or scores an applicant before a human sees them is squarely high-risk. So is an agent that produces a credit or payment-terms recommendation that's treated as decisive rather than advisory.</p>
+<p><strong>Limited risk</strong> covers systems that carry transparency obligations rather than a full compliance program — chiefly, telling people they're interacting with an AI system. A chatbot embedded in a customer portal, or an internal assistant answering "what's my PO status," typically sits here: disclose that it's AI, and you've met the bar. <strong>Minimal risk</strong> is everything else — most internal productivity tooling, spell-check-style assistance, and low-stakes automation — with no Act-specific obligations attached.</p>
+<h2 id="mapping-erp-agent-use-cases-to-tiers">Mapping common ERP agent use cases to tiers</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring compliance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add act on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with compliance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Use case</th><th>Likely tier</th><th>Why</th></tr>
+  <tr><td>AP invoice coding assistant (suggests GL codes, human approves)</td><td>Minimal / limited</td><td>Advisory only, human makes the actual decision, no Annex III category applies</td></tr>
+  <tr><td>Resume screening / candidate ranking agent</td><td>High-risk</td><td>Falls under the employment/worker-management Annex III category</td></tr>
+  <tr><td>Customer support chatbot inside the ERP portal</td><td>Limited risk</td><td>Transparency obligation — disclose it's an AI system</td></tr>
+  <tr><td>Credit limit / payment terms scoring agent</td><td>High-risk</td><td>Falls under the creditworthiness Annex III category</td></tr>
+  <tr><td>Internal report-writing or summarization assistant</td><td>Minimal risk</td><td>No Annex III category, no manipulation risk</td></tr>
 </table>
+<h2 id="what-high-risk-actually-requires">What high-risk actually requires</h2>
+<p>If your agent lands in a high-risk category, the obligations are substantive and mostly fall on the <strong>provider</strong> (whoever develops or puts the AI system on the market) rather than the <strong>deployer</strong> (the company using it) — though deployers carry real obligations too, like ensuring human oversight in practice and monitoring the system's operation. The core requirements: a documented risk management system covering the system's lifecycle, data governance practices for training and input data, technical documentation describing how the system works, logging sufficient to trace the system's decisions after the fact, human oversight designed into the workflow (not just a theoretical "a human could override this"), and a conformity assessment before the system is placed on the market. If you're building the resume-screening agent in-house on top of Acumatica's HR module, you may be acting as both provider and deployer, which means both sets of obligations land on you.</p>
+<div class="callout-warn">
+  <strong>"A human reviews it" is not automatically sufficient human oversight</strong>
+  <p>Regulators and guidance around the Act are consistently skeptical of oversight that's nominal — a human who rubber-stamps 200 AI-ranked candidates a day without a realistic ability to catch errors doesn't satisfy the intent of the requirement. Oversight has to be structured so a person can meaningfully intervene, which usually means smaller review batches, visible confidence signals, and time to actually look.</p>
+</div>
+<h2 id="the-phased-timeline">The phased timeline</h2>
+<p>The Act entered into force in August 2024. The bans on unacceptable-risk practices became applicable in February 2025. Obligations for general-purpose AI models (the GPAI rules that affect foundation-model providers like the ones your agent is built on) became applicable in August 2025. Most of the high-risk system obligations become applicable in August 2026, with some Annex III categories on a slightly later timeline. If you're scoping a high-risk ERP agent today, August 2026 is the date to build backward from, not a future problem — technical documentation and risk management processes take real time to stand up.</p>
+<h2 id="practical-first-steps">Practical first steps for an ERP agent project</h2>
+<p>Before writing any prompt, classify the use case against Annex III honestly — "it's just a suggestion" doesn't move a resume-screening tool out of high-risk if its output materially influences who gets an interview. If you land in limited risk, build the AI-disclosure into the UI now; it's cheap and there's no reason to wait. If you land in high-risk, start the risk management documentation and logging design at the same time as the agent architecture, not after — retrofitting audit trails onto an agent that was never designed to log its reasoning is far more expensive than building it in from the start.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on eu ai act compliance for erp ai agents. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Most ERP AI agent work — invoice coding assistants, report summarizers, internal chat interfaces — sits in minimal or limited risk and needs little beyond honest disclosure. The exceptions are real, though: anything touching hiring decisions or creditworthiness scoring is high-risk under the Act's own Annex III categories, and the obligations that come with that tier are substantial enough to affect your architecture, not just your paperwork. Classify early, and build logging and human oversight into the design rather than bolting them on before the 2026 deadline.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +129,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-anthropic-acumatica/">Anthropic Claude + Acumatica Integration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

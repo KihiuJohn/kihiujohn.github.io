@@ -93,93 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The CI/CD pipeline integration is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every Acumatica customization project sits on a small state machine: edit, compile, publish, verify. Teams that skip steps or get the order wrong end up with a site stuck "compiling" during business hours, a generic inquiry that silently vanished, or two projects that overwrite each other's DAC extension. None of that is exotic — it's almost always a sequencing mistake that a checklist would have caught.</p>
+<h2 id="compile-vs-publish-vs-rebuild">Compile vs. publish vs. rebuild</h2>
+<p>These three actions in the Customization Projects screen look similar but do very different things. <strong>Compile</strong> only validates that the project's code, DAC extensions, and graph extensions build cleanly — it does not touch the running site. Use it constantly while developing; it's cheap and safe to run against a live instance because nothing gets replaced.</p>
+<p><strong>Publish</strong> compiles and then deploys — it replaces the site's running assemblies, updates the database schema for any DAC changes, regenerates the site map, and triggers an application pool recycle. Every user gets bounced and the site is unavailable for the duration. <strong>Rebuild</strong> (via "Rebuild All" or "Clear Cache and Rebuild") forces a full recompilation of the customization runtime rather than an incremental one — it's a troubleshooting step, not something you run as part of a normal release, because it's slower and clears cached generic inquiry and screen metadata across the board.</p>
+<h2 id="publish-order-and-project-dependencies">Publish order and project dependencies</h2>
+<p>Acumatica lets you select multiple customization projects and publish them together, and in most cases that's the safer option — the platform resolves dependencies between the selected projects in a single compile pass. The trouble starts when projects are published separately and one depends on another: a project that extends a DAC field added by a different project will fail to compile if that base project isn't published first (or alongside it). If you maintain a suite of projects — say a core "Data Model" project and several feature projects layered on top — publish them as one selection whenever possible rather than clicking through them one at a time.</p>
+<p>Two projects modifying the same table are the other common failure. If Project A adds a column to a DAC and Project B independently adds a same-named field or an incompatible index on the same table, publish will throw a schema conflict. Keep a single project (or a clearly owned subset) responsible for shared DAC changes, and have feature projects extend it rather than duplicate it.</p>
+<h2 id="what-goes-wrong-during-publish">What goes wrong during publish</h2>
+<p>On constrained cloud or trial instances, publish can time out on large codebases — the app pool recycle takes longer than the request timeout and the browser reports a failure even though the publish is still finishing server-side. Don't panic-click publish again; check the trace log first. A failed or interrupted publish can also leave orphaned entries: generic inquiries or site map nodes that were partially created before the rollback, which then show up as broken links or duplicate menu items until cleaned up manually.</p>
+<p>The other common symptom is the site sitting in an unresponsive or "compiling" state for anyone hitting it during the publish window. There's no partial availability — end users need to be warned or locked out, which is why publishing to production mid-morning on a Tuesday is asking for a support ticket.</p>
+<div class="callout-warn">
+  <strong>Never publish blind to production</strong>
+  <p>Publish to a sandbox or test tenant first — ideally one restored from a recent production snapshot — and let it sit long enough to catch startup errors in the trace log and Windows Event Viewer. A clean compile in isolated storage does not guarantee a clean publish against production's actual data and existing customizations.</p>
+</div>
+<h2 id="promotion-pipeline-dev-to-test-to-production">Promotion pipeline: dev to test to production</h2>
+<p>Treat the customization project like a build artifact, not a live-edited document. Export the finished project as a .zip package from the dev environment, import it into the test tenant, publish there, and only promote the same .zip to production once it's verified — rather than re-creating the changes by hand in each environment. This keeps the three environments byte-identical and makes rollback trivial: if production publish fails, you still have the last-known-good .zip to re-import.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">POWERSHELL · EXPORT/IMPORT VIA CUSTOMIZATION CLI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Export from dev after a clean local publish
+CustomizationCli.exe export `
+  -url https://dev.example.com `
+  -project "CoreDataModel;ARInvoiceExtensions" `
+  -output C:\releases\core-2026-04-30.zip
+
+# Import + publish into the test tenant, dependencies resolved together
+CustomizationCli.exe import `
+  -url https://test.example.com `
+  -file C:\releases\core-2026-04-30.zip `
+  -publish
+
+# Same package promoted to production after sign-off, outside business hours
+CustomizationCli.exe import `
+  -url https://prod.example.com `
+  -file C:\releases\core-2026-04-30.zip `
+  -publish</code></pre>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>In the work I have done on acumatica rebuild and publish best practices, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the rebuild is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_rebuild" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="why-acumatica-is-the-on-call-s-best-friend">Why acumatica is the on-call's best friend</h2>
-<p>The performance of rebuild in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="gitops-for-rebuild">GitOps for rebuild</h2>
-<p>Production rebuild looks different from development rebuild. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<p>Before that last step: take a database backup or system snapshot, export the currently-live customization project as a fallback, and schedule the window outside business hours. After publish completes, watch the trace log for a few minutes — startup exceptions from a bad DAC extension or a missing dependency usually surface in the first requests, not immediately at publish completion.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rebuild first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rebuild when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Action</th><th>What it does</th><th>When to use it</th></tr>
+  <tr><td>Compile</td><td>Validates build only, no deployment</td><td>Continuously during development</td></tr>
+  <tr><td>Publish (incremental)</td><td>Compiles, deploys, recycles app pool</td><td>Normal releases, scheduled windows</td></tr>
+  <tr><td>Rebuild All / Clear Cache</td><td>Forces full recompilation, clears cached metadata</td><td>Troubleshooting stale screens or GI results only</td></tr>
+  <tr><td>Multi-project publish</td><td>Resolves dependencies across selected projects together</td><td>Any time projects share DAC/graph extensions</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica rebuild and publish best practices. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -190,9 +149,7 @@ jobs:
       <li><a href="/blog/acumatica-am-manufacturing-extension/">Acumatica Manufacturing — Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

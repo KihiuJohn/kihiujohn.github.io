@@ -93,98 +93,69 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="what-ai-agent-for-case-routing-and-triage-actually-does">What AI Agent for Case Routing and Triage actually does</h2>
-<p>What AI Agent for Case Routing and Triage actually does is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Case routing is a classification-plus-priority problem before it is anything else, and that framing keeps the AI agent honest. Given an inbound support case — subject, body, customer account, product line, historical ticket volume for that customer — the agent has to pick a queue, set a priority, and often tag the likely root cause, all before a human reads it. Done well, that shaves the 10-20 minutes a triage lead spends re-reading and re-routing every misfiled case; done badly, it silently drops urgent cases into the wrong queue where they sit until someone notices.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="why-classification-not-chat">Why this is a classification problem, not a chat problem</h2>
+<p>The temptation is to hand the case text to an LLM and ask "what should I do with this?" in free text. That produces plausible-sounding answers that don't map cleanly onto your actual queue structure, and it's hard to evaluate at scale. The better design treats routing as structured output: the model calls a single <code>route_case</code> tool with an enum of valid queue IDs, a priority level, and a confidence score, constrained by function-calling schemas so the response is always parseable. Anthropic's tool-use API and OpenAI's function calling both support this — the model doesn't choose free text, it fills in the arguments of a function you defined.</p>
+<p>Confidence score is the field that makes the difference between a toy and a production system. Below a threshold — say 0.7 — the case falls back to a human triage queue with the model's reasoning attached as a suggestion, not an action. Above it, the routing applies automatically. You tune that threshold against measured accuracy, not intuition.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="what-context-the-model-needs">What context the agent actually needs</h2>
+<p>A raw case description is rarely enough to route well. The agent needs the customer's tier (an enterprise account escalates differently than a trial account), open case history (a fourth case about the same issue this month is a different priority than a first-time report), and product/module metadata pulled from the ERP or CRM record. This is where retrieval comes in: rather than stuffing the entire case history into the prompt, embed past case summaries and retrieve the 3-5 most similar prior cases via vector search, then include only those plus structured account fields pulled directly from the database.</p>
+<div class="callout">
+  <strong>Retrieval beats memory</strong>
+  <p>Don't try to keep a running conversational memory of every case a customer has ever filed. Pull what's relevant per-request from a vector store or SQL query. It's cheaper in tokens, easier to audit, and doesn't drift as the account's history grows.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>In the work I have done on ai agent for case routing and triage, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="the-tool-schema">Designing the routing tool schema</h2>
+<p>The schema is the actual product here — get it wrong and every downstream decision inherits the mistake. Queue IDs should be a closed enum pulled from your live queue configuration, not free text the model invents. Priority should map to your existing SLA tiers. And the schema should require a short justification string, which does double duty: it's what a human reviewer scans when confidence is low, and it's what you log for auditing why a case landed where it did.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · TOOL SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "name": "route_case",
+  "description": "Assign a support case to a queue and priority",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "queue_id": {
+        "type": "string",
+        "enum": ["billing", "technical", "onboarding", "escalations"]
+      },
+      "priority": {
+        "type": "string",
+        "enum": ["low", "normal", "high", "urgent"]
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "justification": { "type": "string", "maxLength": 280 }
+    },
+    "required": ["queue_id", "priority", "confidence", "justification"]
+  }
+}</code></pre>
+</div>
+
+<h2 id="human-in-the-loop">Human-in-the-loop for the cases that matter</h2>
+<p>Not every misroute is equally costly. A billing question routed to technical support costs a few minutes of reassignment. A security-incident report routed to a low-priority general queue can cost hours. Rather than a single global confidence threshold, weight the threshold by the downside: cases mentioning keywords like "data breach," "payment failed," or "cannot access" from an enterprise account should require human confirmation regardless of the model's confidence score. This is a cheap rule-based override sitting in front of the LLM decision, not a second model call.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Don't let the agent close cases</strong>
+  <p>Routing and prioritizing are reversible, low-risk actions. Closing a case or issuing a refund is not. Keep the agent's authority scoped to routing decisions and require a human to take any action that can't be cheaply undone.</p>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the case is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The performance of case in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>Production case looks different from development case. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="measuring-routing-accuracy">Measuring routing accuracy over time</h2>
+<p>You need a held-out evaluation set — a few hundred historical cases with their correct queue and priority already known from what actually happened — and you re-run it every time you touch the prompt or the underlying model. Track precision per queue, not just overall accuracy, because a model that's 95% accurate but consistently misroutes escalations is worse than one that's 90% accurate uniformly. Log every routing decision with its confidence score and eventual human override (if any); overridden decisions are your ongoing training signal for adjusting the confidence threshold and catching drift after a model version change.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring case first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with case when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal</th><th>Used for</th></tr>
+  <tr><td>Confidence score</td><td>Auto-route vs. human review gate</td></tr>
+  <tr><td>Keyword/account override rules</td><td>Force review on high-stakes cases regardless of confidence</td></tr>
+  <tr><td>Retrieved similar cases</td><td>Grounding without stuffing full history into context</td></tr>
+  <tr><td>Human override log</td><td>Ongoing accuracy measurement and threshold tuning</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for case routing and triage. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Case routing is one of the safer places to start with agentic automation because the action is reversible and the failure mode is annoyance rather than financial loss. Keep the model's job narrow — classify and score confidence — back it with real account context via retrieval, and let simple override rules catch the cases where being wrong is expensive. That combination gets you most of the time savings without needing the agent to be right 100% of the time.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +166,7 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-customer-segmentation/">AI Agent for Customer Segmentation</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
+
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

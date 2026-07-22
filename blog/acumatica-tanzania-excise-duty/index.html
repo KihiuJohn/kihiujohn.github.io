@@ -92,82 +92,26 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Tax fiscalisation in East and Southern Africa is a per-jurisdiction problem. this is the pattern that handles the specific regulatory requirements without making the codebase unmaintainable. This article is the field-tested implementation, with the device registration, the offline buffering, and the audit trail.</p>
-<h2 id="certificate-lifecycle-for-tanzania">Certificate lifecycle for tanzania</h2>
-<p>Certificate lifecycle for tanzania is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<h2 id="clock-sync-and-acumatica">Clock sync and acumatica</h2>
-<p>In the work I have done on acumatica tanzania excise duty configuration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
-</div>
-<h2 id="the-audit-trail-for-tanzania">The audit trail for tanzania</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the tanzania is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Excise duty is where a lot of Tanzania implementations trip up, because it behaves differently from VAT in ways that aren't obvious until the first invoice comes out wrong. TRA (Tanzania Revenue Authority) levies excise on a defined list of goods and services — beer, spirits, wine, soft drinks, bottled water, cigarettes and tobacco, and telecom airtime and data among them — and unlike VAT, excise is often specific (a fixed amount per litre or per unit) rather than a straight percentage of price, though some categories are ad valorem. Getting an Acumatica tax setup that reflects that distinction correctly is the difference between a clean filing and a reconciliation headache every month.</p>
+
+<h2 id="how-excise-differs-from-vat">How excise differs from VAT</h2>
+<p>VAT in Tanzania is calculated as a flat percentage of the taxable value of a supply. Excise duty is calculated first — either as a fixed amount per unit of quantity (for example, a specific shilling amount per litre of beer or per stick of cigarettes) or as a percentage of value for categories TRA taxes ad valorem — and then it cascades into the VAT base. That ordering matters: VAT is charged on the price <em>plus</em> excise, not on the pre-excise price. If you configure excise as just another tax alongside VAT rather than one that feeds into the other's base, the VAT collected will be understated and won't reconcile against what TRA expects on the VAT 3 return.</p>
+
+<h2 id="configuring-excise-in-tax-zones-and-categories">Configuring excise in Tax Zones and Tax Categories</h2>
+<p>The clean approach in Acumatica is to model excise as its own tax within a Tax Category assigned to the excisable item, separate from the VAT tax, with the tax calculation level set so excise calculates before VAT and VAT's taxable base includes the excise amount. Item-level Tax Categories let you scope excise to only the SKUs that actually attract it — a soft drink manufacturer's finished goods, for instance — while leaving unrelated inventory items on a category with VAT only. For specific-rate excise (per litre, per stick), the tax is normally set up as a fixed amount per unit rather than a percentage, which means the tax calculation needs to reference quantity, not just the extended price. Keep excise and VAT as genuinely separate tax lines on the invoice — TRA's return format and most audit requests expect to see them broken out, not netted into one number.</p>
 <div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
+  <strong>Model excise-inclusive pricing carefully</strong>
+  <p>Many excisable products in Tanzania are sold at a shelf price that already includes excise and VAT. If your price lists are excise-inclusive but Acumatica's tax engine is configured to add excise on top of the entered price, you'll double-count it. Decide up front whether item prices are tax-inclusive or exclusive and configure the Tax Category consistently — this is the single most common excise misconfiguration.</p>
 </div>
-<h2 id="what-acumatica-tanzania-excise-duty-configuration-is-for">What Acumatica Tanzania Excise Duty Configuration is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>The performance of tanzania in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>Production tanzania looks different from development tanzania. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tanzania first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tanzania when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="efd-considerations">EFD considerations for TRA</h2>
+<p>Tanzania requires electronic fiscal devices (EFDs) for most VAT-registered businesses issuing receipts, and excisable goods invoices flow through the same fiscal receipting requirement as any other taxable supply. In practice this means the invoice or receipt generated in Acumatica needs to reach the EFD (or a virtual fiscal device integration where TRA has migrated a taxpayer to VFD) with the excise and VAT amounts clearly itemised before a fiscal receipt number and QR code are issued. If your integration pushes only a total taxable amount to the EFD without separating out the excise component, the fiscal receipt won't match what's required for excise reporting, and reconciling the EFD's Z-reports against the general ledger becomes a manual exercise instead of an automated one.</p>
+
+<h2 id="common-pitfalls">Common implementation pitfalls</h2>
+<p>The three mistakes that show up repeatedly: treating excise as a percentage tax when the product category is actually specific-rate (per unit), which produces a wildly wrong amount the moment volumes are large; forgetting that excise-registered manufacturers and importers have separate excise return obligations from VAT, so the Acumatica tax reports need to support pulling excise figures independently of the VAT 3 numbers; and missing exemptions — certain excisable goods have exemptions or reduced rates for specific use cases (denatured spirits for industrial use, for example), and if the item master doesn't distinguish those SKUs from their standard-rated counterparts, exempt sales get taxed anyway.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica tanzania excise duty configuration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Excise in Tanzania is a layered tax, not a parallel one — it sits under VAT and changes the VAT base, so the Acumatica configuration has to enforce that calculation order, not just add another line to the invoice. Scope it tightly by item through Tax Categories, keep the EFD integration itemising excise separately from VAT, and audit your item master periodically for products that should carry excise but don't, or exemptions that aren't being honoured.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +122,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-zambia-turnover-tax/">Acumatica Zambia Turnover Tax — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

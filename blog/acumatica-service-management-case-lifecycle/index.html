@@ -93,94 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation in production is 20% integration and 80% error handling. this is one of the parts of the error handling. The pattern that works is to push the workflow towards being observable, with a runbook for the failure modes that the integration tools don't cover.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+    <p>A support case in Acumatica is a state machine wearing a form. The <strong>Case</strong> screen (CR306000) looks like a data-entry screen, but the value is in the lifecycle behind it: how a case moves from New to Closed, which SLA clock is running, when it escalates, and how billable time turns into an invoice. Get the lifecycle configured properly and the Service Management module runs support as a tracked process instead of an inbox.</p>
+
+<h2 id="case-anatomy">The anatomy of a case</h2>
+<p>A case belongs to a <strong>customer</strong> (or a contact), sits in a <strong>case class</strong>, and carries a <strong>status</strong>, a <strong>severity</strong>, and a <strong>reason</strong>. The case class is the most important choice you make — it drives the default SLA, whether the case is billable, the workflow it follows, and the assignment map. Two customers with different contracts should sit in different case classes so their cases inherit different behaviour without anyone remembering to set it by hand.</p>
+<div class="callout">
+  <strong>Configure the class, not the case</strong>
+  <p>Almost everything that makes cases behave — SLA duration, billing, the activities that count toward resolution — is set on the case class, not on the individual case. When someone asks "why isn't this case billing", the answer is nearly always in the class, not the record.</p>
 </div>
-<h2 id="why-acumatica-fails-at-3-am-and-what-to-do">Why acumatica fails at 3 AM and what to do</h2>
-<p>In the work I have done on acumatica service management — case lifecycle, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="the-status-flow">The status flow</h2>
+<p>Out of the box a case moves through a small set of statuses, and each transition means something to the SLA and to reporting. The typical path is New → Open → (Pending Customer) → Resolved → Closed, with the SLA clock pausing while you are waiting on the customer and resuming when the ball is back in your court.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TEXT · STATUS FLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>New        -> case created, SLA clock starts, awaiting first response
+Open       -> assigned and being worked
+Pending    -> waiting on customer; SLA clock paused
+Resolved   -> fix delivered, awaiting customer confirmation
+Closed     -> confirmed; case is read-only, time is billable</code></pre>
+</div>
+<p>The distinction that matters for SLA reporting is <em>who you are waiting on</em>. Time spent in a Pending-Customer status should not count against your response or resolution SLA — that is the customer's clock, not yours. Configure the pending statuses so the SLA calculation excludes them, or your first-response metrics will look terrible for reasons outside your team's control.</p>
+
+<h2 id="sla-and-escalation">SLA and escalation</h2>
+<p>The SLA is defined against the case class and, in Service Management, against the service contract or severity. It sets a target for first response and for resolution. Escalation is what happens when that target is at risk: the case bumps to a higher escalation level, reassigns to a lead or a group, and (if you wire it up) fires a business event to notify someone. The mechanics come from the schedule and the business-event engine, not from a person watching a queue.</p>
 <div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+  <strong>Escalation needs a working calendar</strong>
+  <p>SLA and escalation timing respect the working-hours calendar. If the calendar is wrong — no holidays, wrong time zone, a 24/7 calendar on a 9-to-5 team — every SLA will be miscalculated and cases will escalate at 2 AM local time. Set the calendar up before you trust a single SLA number.</p>
 </div>
-<h2 id="ordering-and-sequencing-in-service">Ordering and sequencing in service</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the service is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processService(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>The performance of service in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="what-acumatica-service-management-case-lifecycle-is-for">What Acumatica Service Management — Case Lifecycle is for</h2>
-<p>Production service looks different from development service. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
+
+<h2 id="assignment-and-ownership">Assignment and ownership</h2>
+<p>Assignment maps route a new case to the right owner or workgroup based on the case class, customer, or attributes. The alternative — manual triage — is where cases go to die, because nobody owns "unassigned". Use an assignment map to give every incoming case an owner at creation, and use workgroups rather than named individuals so a case is still owned when someone is on leave.</p>
+
+<h2 id="billing-the-case">Turning case work into a bill</h2>
+<p>The reason Service Management sits close to the financials is billing. Time and activities logged against a billable case class accumulate on the case, and when the case is closed those billable lines flow into an AR invoice through the case's billing setup. The two levers are whether the case class is billable at all, and whether each logged activity is marked billable — a non-billable activity on a billable case simply does not bill.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring service first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with service when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Lever</th><th>Where it lives</th><th>Effect</th></tr>
+  <tr><td>Billable case class</td><td>Case class setup</td><td>Enables billing for cases in the class</td></tr>
+  <tr><td>Billable activity</td><td>The activity / time entry</td><td>Decides whether that line reaches the invoice</td></tr>
+  <tr><td>Rate / labor item</td><td>Employee / contract</td><td>Sets the amount per billable hour</td></tr>
+  <tr><td>Contract coverage</td><td>Service contract</td><td>Can zero-out billing under a prepaid plan</td></tr>
 </table>
+
+<h2 id="reporting-the-lifecycle">Reporting the lifecycle</h2>
+<p>Because every transition is timestamped, the case history is a clean dataset: time-to-first-response, time-to-resolution, SLA breach rate, and reopen rate all fall out of the status changes. The one thing to watch is that generic inquiries and dashboards must exclude the paused (pending-customer) time to be meaningful — the same correction that makes the SLA fair makes the reports honest.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica service management — case lifecycle. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat the Case screen as the surface of a state machine and the module does its job: cases enter with an owner and an SLA, pause the clock while they wait on the customer, escalate before they breach, and turn billable work into an invoice on close. The configuration all lives on the case class and the SLA schedule — get those right and the day-to-day is just moving cases through a flow that already knows what to do. If you are wiring up a specific SLA or billing rule, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -191,9 +149,6 @@ return items.map(item =&gt; ({
       <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica Employee Self-Service — Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

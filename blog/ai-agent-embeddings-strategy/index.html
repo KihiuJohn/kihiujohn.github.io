@@ -93,81 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Observability: lineage, monitoring, alerts is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM embeddings
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on embeddings strategy for erp knowledge bases, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="why-embeddings-in-the-warehouse-beats-in-the-lake">Why embeddings in the warehouse beats in the lake</h2>
-<p>When the work moves from design to production, the questions change. The embeddings is not the question; the failure mode of the strategy is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.embeddings > 0).groupBy("strategy").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="schema-evolution-for-strategy">Schema evolution for strategy</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Retrieval quality for an ERP knowledge base lives or dies on decisions made long before any query hits a vector index: how the source docs are chunked, which embedding model represents them, and whether search combines keyword and semantic signals or relies on vectors alone. Get these wrong and every downstream RAG answer inherits the error, no matter how good the generation model is.</p>
+<h2 id="chunking-strategy-for-erp-documentation">Chunking strategy for ERP documentation</h2>
+<p>ERP help content and internal documentation is structurally different from generic prose — it's full of numbered procedures, screen field references, and tables that lose meaning if split mid-table. A naive fixed-size chunker (e.g., 512 tokens with 50-token overlap) will happily cut a procedure in half between step 3 and step 4, and the retrieved chunk becomes useless on its own. Chunk on document structure first — heading boundaries, procedure blocks, table boundaries — and only fall back to fixed-size splitting within a section that's still too long. Keep the parent heading path (e.g., "AP > Bill Entry > Approval Workflow") attached as metadata on every chunk, and prepend it to the chunk text before embedding, because a chunk that just says "select the Approve checkbox and click Save" is meaningless without knowing which screen it's on.</p>
+<p>Target chunk size is a tradeoff, not a fixed number: too small and you lose context needed to answer the question; too large and irrelevant text dilutes the embedding and burns context window at generation time. For procedural ERP docs, 200-400 tokens per chunk with structural boundaries tends to outperform arbitrary 512-token windows, because most individual procedures are naturally that length.</p>
+<h2 id="choosing-an-embedding-model">Choosing an embedding model</h2>
+<p>For most ERP knowledge base use cases, a hosted embedding model (OpenAI's text-embedding-3-large, Voyage AI's models, or Cohere embed-v3) is the pragmatic default — you're optimizing for retrieval quality and low operational overhead, not for keeping data fully on-prem, though that constraint does push some regulated deployments toward a self-hosted model like BGE or E5 run locally. Whatever you pick, don't mix embedding models within one index — cosine similarity between vectors from two different models is meaningless — and re-embed the full corpus if you ever change models, rather than only embedding new documents going forward.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Evaluate retrieval, not just vibes</strong>
+  <p>Build a small evaluation set of 50-100 real questions with known correct source chunks, and measure recall@k before and after any chunking or model change. Without this, "the new model feels better" is not a decision you can defend six months later when someone asks why search got worse for a specific query type.</p>
 </div>
-<h2 id="cost-optimisation-for-embeddings">Cost optimisation for embeddings</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="vector-db-choice-and-hybrid-search">Vector DB choice and hybrid search</h2>
+<p>For an ERP knowledge base in the tens of thousands to low millions of chunks, pgvector alongside your existing Postgres is usually the right call — one less system to operate, and you get transactional consistency between the source-of-truth tables and the index. Dedicated vector databases (Pinecone, Qdrant, Weaviate) earn their keep at larger scale or when you need features like multi-tenant namespace isolation out of the box, but they're a second system to keep in sync with your source content, which is its own maintenance burden.</p>
+<p>Pure vector search underperforms on exact-match queries — a user searching for an error code like "PX.20.10" or a specific field name wants that literal string to rank first, and embedding similarity alone won't reliably surface it. Hybrid search — combining a keyword index (Postgres full-text search or BM25) with vector similarity, merged with reciprocal rank fusion — consistently beats either approach alone for this kind of technical content.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_embeddings') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · HYBRID SEARCH WITH PGVECTOR</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>WITH semantic AS (
+  SELECT id, content, 1 - (embedding &lt;=&gt; $1::vector) AS score
+  FROM kb_chunks
+  ORDER BY embedding &lt;=&gt; $1::vector
+  LIMIT 40
+),
+keyword AS (
+  SELECT id, content, ts_rank(tsv, plainto_tsquery('english', $2)) AS score
+  FROM kb_chunks
+  WHERE tsv @@ plainto_tsquery('english', $2)
+  ORDER BY score DESC
+  LIMIT 40
+)
+SELECT id, content,
+  COALESCE(1.0 / (60 + s.rank), 0) + COALESCE(1.0 / (60 + k.rank), 0) AS rrf_score
+FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY score DESC) AS rank FROM semantic) s
+FULL OUTER JOIN (SELECT *, ROW_NUMBER() OVER (ORDER BY score DESC) AS rank FROM keyword) k
+  USING (id)
+ORDER BY rrf_score DESC
+LIMIT 10;</code></pre>
 </div>
-<h2 id="the-testing-pyramid-for-strategy">The testing pyramid for strategy</h2>
-<p>The performance of strategy in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-embeddings">Backfills and rollbacks for embeddings</h2>
-<p>Production strategy looks different from development strategy. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM embeddings
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="re-ranking-the-candidates">Re-ranking the candidates</h2>
+<p>Retrieve a wider candidate set (30-50 chunks) from the hybrid search step, then re-rank with a cross-encoder (Cohere Rerank, or a self-hosted model) before handing the top 5-8 to the generation model. Cross-encoders score the query and chunk together rather than comparing pre-computed vectors, which makes them slower but meaningfully more accurate at judging actual relevance — worth the extra latency at the retrieval stage since it happens once per query, not once per generated token.</p>
+<h2 id="staleness-and-re-indexing">Staleness and re-indexing when source docs change</h2>
+<p>An ERP knowledge base tied to product documentation goes stale the moment a screen changes in the next release, and a stale chunk that ranks highly is worse than no answer at all because it actively misleads. Treat re-indexing as a triggered pipeline, not a cron job that runs blind: hook into whatever publishes the source docs (a CMS webhook, a git push to a docs repo) and re-embed only the changed documents, tracking a content hash per source doc so unchanged sections are never needlessly re-embedded. For docs where staleness risk is high, surface the source doc's last-updated date alongside the answer so users can judge freshness themselves.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring strategy first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add embeddings on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with strategy when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Component</th><th>Default choice</th><th>Reach for the alternative when</th></tr>
+  <tr><td>Chunking</td><td>Structure-aware (headings/procedures)</td><td>Content is truly unstructured prose</td></tr>
+  <tr><td>Embedding model</td><td>Hosted (OpenAI / Voyage / Cohere)</td><td>Data residency forbids external calls</td></tr>
+  <tr><td>Vector store</td><td>pgvector in existing Postgres</td><td>&gt;5M chunks or multi-tenant isolation needed</td></tr>
+  <tr><td>Search mode</td><td>Hybrid (keyword + vector) with RRF</td><td>Never — hybrid rarely loses to vector-only</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on embeddings strategy for erp knowledge bases. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of the individual pieces here are exotic — structure-aware chunking, a mainstream embedding model, hybrid search, a cross-encoder re-rank step, and a triggered re-indexing pipeline. The quality gap between a mediocre and a genuinely useful ERP knowledge base search almost always traces back to one of these being skipped, not to the choice of generation model sitting on top.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +152,6 @@ LIMIT 100;</code></pre>
       <li><a href="/blog/vector-embeddings-models/">Vector Embeddings Models — A Comparison</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -93,100 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On a SaaS P&L, this is rarely the headline. The headline is revenue and churn. this is the metric that tells you whether the headline is going up or down. This article is how to measure it correctly and how to act on it.</p>
-<h2 id="why-marketing-is-the-first-thing-to-look-at">Why marketing is the first thing to look at</h2>
-<p>Why marketing is the first thing to look at is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Marketing agencies land in the same Projects-module bucket as consulting and IT services firms, with one recurring twist: a meaningful share of project cost is media spend and third-party vendor pass-through (ad platforms, printers, freelance creative), and clients expect to see that cost billed through — often with an agency markup — cleanly separated from the agency's own labor billing.</p>
+
+<h2 id="retainer-vs-project">Retainer-plus-project is the default shape</h2>
+<p>Most agencies run a base monthly retainer (ongoing account management, reporting) plus discrete campaign or production projects billed separately. Model these as they are: the retainer as a recurring billing schedule against a low-task-count Project (same pattern as an IT services managed-services contract), and each campaign as its own Project with its own budget and task breakdown, even if it's the same client. Collapsing everything into one giant client-level project is the setup mistake that makes campaign profitability impossible to see later — you want "was the Q3 product launch profitable" answerable on its own, not buried in a year of retainer noise.</p>
+
+<h2 id="pass-through-cost">Billing through vendor spend with markup</h2>
+<p>Media buys and vendor costs come in as AP bills against the Project (AP bill entry lets you code a bill line to a Project and Project Task directly). The billing side then needs a markup rule rather than a straight pass-through:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">PM207000 · PASS-THROUGH WITH MARKUP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Billing step: Time and Material
+Source:       AP-coded project expenses (media, print, freelance)
+Markup:       15% agency handling fee on vendor cost lines
+              (set on the billing rule step, applies at invoice time —
+              not baked into the AP bill amount, so vendor cost and
+              client-billed amount stay reconcilable to two different
+              numbers on purpose)</code></pre>
 </div>
-<h2 id="how-agency-distorts-the-picture">How agency distorts the picture</h2>
-<p>In the work I have done on marketing agency management vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>When the work moves from design to production, the questions change. The marketing is not the question; the failure mode of the agency is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="the-cohort-retention-curve-for-marketing">The cohort retention curve for marketing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>Keeping the markup at the billing-rule level rather than inflating the AP bill itself matters for two reasons: the agency's actual vendor cost stays accurate for its own margin reporting, and if a client renegotiates the markup percentage mid-contract, you change one rule instead of re-entering historical bills.</p>
+
+<h2 id="production-vs-media-budgets">Separate production labor budget from media budget</h2>
+<p>A campaign project budget conflated into one number ("Q3 launch: $80,000") tells a producer nothing useful. Split the Project Task structure so labor hours and media/vendor spend have independent budgets and independent burn tracking — a campaign can be under budget on creative hours and dangerously over on ad spend at the same time, and the Project Status report only surfaces that if the tasks are actually separated.</p>
+
 <div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+  <strong>Approval routing on vendor spend, not just amount</strong>
+  <p>Agencies burn media budgets fast; an AP approval workflow gated purely on dollar amount misses the more useful trigger, which is spend velocity against the remaining campaign budget. A $2,000 media bill is unremarkable in isolation but alarming if it's the fourth one this week against a $10,000 budget. This needs a small workflow condition referencing cumulative project-task spend, not just the bill's own amount — worth the half-day of workflow configuration for any agency spending real media dollars through the system.</p>
 </div>
-<h2 id="when-marketing-is-a-leading-indicator-vs-a-lagging-one">When marketing is a leading indicator vs a lagging one</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, agency, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="what-marketing-agency-management-vertical-on-acumatica-actually-measures">What Marketing Agency Management Vertical on Acumatica actually measures</h2>
-<p>The performance of agency in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Production agency looks different from development agency. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring agency first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add marketing on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with agency when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on marketing agency management vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Agencies fit the Projects-module pattern well once retainer and project work are split and vendor pass-through billing uses a markup rule instead of inflated AP bills. The detail that actually earns its keep is separating labor and media budgets at the task level — that's the difference between a Project Status report producers trust and one they ignore.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/saas-content-marketing/">SaaS Content Marketing — A Field Guide</a></li>
-      <li><a href="/blog/vertical-saas-content-strategy/">Content Strategy for Vertical SaaS</a></li>
-      <li><a href="/blog/vertical-saas-marketing-funnel/">Marketing Funnel for Vertical SaaS</a></li>
-      <li><a href="/blog/vertical-saas-seo-strategy/">SEO Strategy for Vertical SaaS</a></li>
-      <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects — Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress vs Milestone</a></li>
+      <li><a href="/blog/acumatica-ap-bill-screen-deep-dive/">Acumatica AP Bill Screen Deep Dive</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Report — Project Status</a></li>
+      <li><a href="/blog/vertical-saas-consulting-acumatica/">Consulting Firm Vertical on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PXDatabase.Insert vs Cache.Insert in Acumatica | John Kihiu</title>
-<meta name="description" content="PXDatabase.Insert vs Cache.Insert in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one.">
 <meta name="keywords" content="Acumatica customization, Acumatica cache, Acumatica sql, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-pxdatabase-insert-vs-cache-insert/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PXDatabase.Insert vs Cache.Insert in Acumatica">
-<meta property="og:description" content="PXDatabase.Insert vs Cache.Insert in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-pxdatabase-insert-vs-cache-insert.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-pxdatabase-insert-vs-cache-insert/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="sql">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PXDatabase.Insert vs Cache.Insert in Acumatica","description":"PXDatabase.Insert vs Cache.Insert in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxdatabase-insert-vs-cache-insert.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxdatabase-insert-vs-cache-insert/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PXDatabase.Insert vs Cache.Insert in Acumatica","description": "Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one.","image":"https://kihiujohn.github.io/assets/og/acumatica-pxdatabase-insert-vs-cache-insert.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-pxdatabase-insert-vs-cache-insert/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PXDatabase.Insert vs Cache.Insert in Acumatica","item":"https://kihiujohn.github.io/blog/acumatica-pxdatabase-insert-vs-cache-insert/"}]}
@@ -87,106 +87,91 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PXDatabase.Insert vs Cache.Insert in Acumatica</span></nav>
     <span class="tag">SaaS · Customization</span>
     <h1>PXDatabase.Insert vs Cache.Insert in Acumatica</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PXDatabase.Insert vs Cache.Insert in Acumatica is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS metrics are a discipline, not a dashboard. this is one of the metrics that the discipline tracks. The pattern is to measure the metric correctly, to act on the signal, and to ignore the noise. This article is the discipline.</p>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>Cohort cuts that reveal the truth is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one <code>cache.Insert()</code> and <code>Base.Save()</code> per record. It works, and it is also the slowest possible way to get those rows into the database, because every one of those inserts pays for the entire event pipeline: FieldDefaulting, FieldVerifying, FieldUpdated, RowInserting, RowInserted, RowPersisting, and every attribute's validation logic, per field, per row. <code>PXDatabase.Insert</code> is the escape hatch, and understanding exactly what it skips is the whole reason to reach for it deliberately instead of by accident.</p>
+
+<h2 id="what-cache-insert-buys-you">Cache.Insert: the whole framework, and its cost</h2>
+<p><code>cache.Insert(row)</code> puts a row into the cache with status Inserted and fires the complete event pipeline immediately - defaults get applied, attributes validate, your event handlers run. This is correct, and necessary, for anything a real user does through a screen, because the business rules encoded in those events are exactly what keeps the data consistent. The cost is real: dozens of small operations per field, per row, all in-process but not free, and none of it touches SQL until <code>Base.Save()</code> actually commits the transaction.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · The normal path, and why it's slow at volume</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>foreach (var csvRow in importRows) // 40,000 rows
+{
+    INTran tran = new INTran();
+    tran = Base.Transactions.Insert(tran); // full event pipeline, every time
+    tran.InventoryID = csvRow.InventoryID;
+    tran.Qty = csvRow.Qty;
+    Base.Transactions.Update(tran);        // FieldVerifying, FieldUpdated per field
+}
+Base.Save.Press(); // one transaction, but 40,000 rows of pipeline already paid for
+</code></pre>
 </div>
-<h2 id="the-cohort-retention-curve-for-pxdatabase">The cohort retention curve for pxdatabase</h2>
-<p>In the work I have done on pxdatabase.insert vs cache.insert in acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="when-pxdatabase-is-a-leading-indicator-vs-a-lagging-one">When pxdatabase is a leading indicator vs a lagging one</h2>
-<p>When the work moves from design to production, the questions change. The pxdatabase is not the question; the failure mode of the insert is.</p>
+
+<h2 id="what-pxdatabase-insert-does">PXDatabase.Insert: SQL, and nothing else</h2>
+<p><code>PXDatabase.Insert</code> writes directly to the underlying table with a parameterized SQL statement. It does not touch any graph's cache, does not fire a single event, does not run attribute validation, does not apply PXDefault values, and does not participate in whatever graph instance called it beyond sharing its ambient transaction scope if one is open. It is, functionally, raw ADO.NET with Acumatica's connection and transaction handling wrapped around it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Bulk load, bypassing the pipeline entirely</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>foreach (var csvRow in importRows)
+{
+    PXDatabase.Insert&lt;INTran&gt;(
+        new PXDataFieldAssign&lt;INTran.inventoryID&gt;(csvRow.InventoryID),
+        new PXDataFieldAssign&lt;INTran.qty&gt;(csvRow.Qty),
+        new PXDataFieldAssign&lt;INTran.tranType&gt;(csvRow.TranType),
+        new PXDataFieldAssign&lt;INTran.docDate&gt;(csvRow.DocDate)
+        // every column that matters must be assigned explicitly -
+        // nothing defaults itself here
+    );
+}
+</code></pre>
 </div>
-<h2 id="what-pxdatabase-insert-vs-cache-insert-in-acumatica-actually-measures">What PXDatabase.Insert vs Cache.Insert in Acumatica actually measures</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+
+<div class="callout-warn callout">
+  <strong>You inherit every responsibility the pipeline used to carry</strong>
+  <p>Skip the event pipeline and you also skip PXDefault-driven defaults, PXDBIdentity/PXDBIdentityColumn auto-numbering behavior tied to attributes, cross-field validation, and any side effects other extensions' event handlers were relying on to keep related data in sync (GL postings, inventory summary updates, audit records). PXDatabase.Insert is correct for a genuinely standalone bulk load of a simple table with no dependent business logic. It is the wrong tool the moment the DAC's normal insert path does meaningful work beyond writing the row - and on a mature Acumatica instance, that's most DACs that have had more than one customization applied to them.</p>
 </div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="when-i-actually-reach-for-it">Where PXDatabase.Insert earns its place</h2>
+<p>I use it in three situations, roughly in order of how often they come up: bulk data migration scripts run once during a go-live cutover, where I've already accepted responsibility for replicating whatever defaulting logic matters by hand; performance-critical scheduled processing jobs writing to simple log or staging tables that have no attached business logic at all; and, occasionally, deliberately bypassing an expensive or buggy event handler I don't control (a base-platform handler, or a third-party customization) when I've confirmed by reading its code that skipping it is safe for this specific write.</p>
+
+<h2 id="the-half-measure-thats-worse">A middle ground that's often the wrong compromise</h2>
+<p>Some developers try to get "some" of the pipeline's benefit by manually calling specific attribute methods or replicating defaulting logic inline while still using PXDatabase.Insert for the write. In my experience this produces the worst of both worlds: all the maintenance burden of hand-tracking what the pipeline used to do, none of its guarantee that logic stays in sync if the DAC's attributes change later. If you need meaningful business logic applied, use the cache and pay the cost, or fully own bypassing it and document exactly why in the code - don't half-bypass it.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, insert, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
+  <div class="code-header"><span class="code-lang">C# · Explicitly documenting a deliberate bypass</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Deliberate PXDatabase bypass: this is a one-time migration script for
+// legacy transaction history with no GL, inventory, or audit side effects
+// expected - those systems were already reconciled independently before
+// this import. Do not reuse this pattern for live transaction entry.
+PXDatabase.Insert&lt;INTranHistoryArchive&gt;(assignments);
+</code></pre>
 </div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>The performance of insert in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>Production insert looks different from development insert. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring insert first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pxdatabase on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with insert when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="measuring-the-difference">The performance gap, roughly, from projects I've actually profiled</h2>
+<p>On a mid-size DAC with a handful of attached extensions, I've measured cache-driven inserts running anywhere from ten to fifty times slower than PXDatabase.Insert for the same row count, almost entirely attributable to event pipeline overhead rather than the SQL itself. That gap is exactly why bulk import and data migration tooling reaches for PXDatabase - but it's also exactly the gap representing business logic you're choosing to skip, which is why the decision has to be deliberate, not a default.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pxdatabase.insert vs cache.insert in acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cache.Insert buys you the whole framework - defaults, validation, cross-extension side effects - at real per-row cost. PXDatabase.Insert buys you raw SQL speed by skipping all of it, cache and event pipeline included. Reach for PXDatabase deliberately, for bulk loads and standalone tables you've confirmed have no dependent logic, document exactly why in the code, and never treat it as a drop-in faster version of a normal insert on a DAC that anything else in the system relies on firing its events.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-dac-extension-on-view-not-table/">DAC Extension on a View, Not a Table in Acumatica</a></li>
       <li><a href="/blog/acumatica-pxcache-vs-pxselect-choosing/">PXCache vs PXSelect in Acumatica — Choosing the Right Tool</a></li>
-      <li><a href="/blog/acumatica-pxdatafield-updating-multiple-records/">Updating Multiple Records with PXDataField in Acumatica</a></li>
-      <li><a href="/blog/acumatica-transactionscope-usage-and-pitfalls/">Acumatica TransactionScope — Usage and Pitfalls</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
+      <li><a href="/blog/acumatica-dac-fundamentals-data-access-classes/">Acumatica DAC Fundamentals — Data Access Classes Explained</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-rowdeleted-vs-rowdeleting/">Acumatica RowDeleted vs RowDeleting — When to Use Each</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

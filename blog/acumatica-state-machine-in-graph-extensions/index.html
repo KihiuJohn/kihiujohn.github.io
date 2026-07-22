@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>State Machine in Acumatica Graph Extensions | John Kihiu</title>
-<meta name="description" content="State Machine in Acumatica Graph Extensions is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta name="description" content="A client needed a custom document type to move through an approval lifecycle: Draft, Pending Review, Approved, Rejected, Closed - with specific rules about which transitions were.">
 <meta name="keywords" content="Acumatica customization, Acumatica workflow, Acumatica graph, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-state-machine-in-graph-extensions/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="State Machine in Acumatica Graph Extensions">
-<meta property="og:description" content="State Machine in Acumatica Graph Extensions is the kind of topic that separates a working Acumatica customisation from a great one.">
+<meta property="og:description" content="A client needed a custom document type to move through an approval lifecycle: Draft, Pending Review, Approved, Rejected, Closed - with specific rules about which transitions were.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-state-machine-in-graph-extensions.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-state-machine-in-graph-extensions/">
 <meta property="article:author" content="John Kihiu">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="graph">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"State Machine in Acumatica Graph Extensions","description":"State Machine in Acumatica Graph Extensions is the kind of topic that separates a working Acumatica customisation from a great one.","image":"https://kihiujohn.github.io/assets/og/acumatica-state-machine-in-graph-extensions.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-state-machine-in-graph-extensions/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"State Machine in Acumatica Graph Extensions","description": "A client needed a custom document type to move through an approval lifecycle: Draft, Pending Review, Approved, Rejected, Closed - with specific rules about which transitions were.","image":"https://kihiujohn.github.io/assets/og/acumatica-state-machine-in-graph-extensions.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-state-machine-in-graph-extensions/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"State Machine in Acumatica Graph Extensions","item":"https://kihiujohn.github.io/blog/acumatica-state-machine-in-graph-extensions/"}]}
@@ -87,118 +87,129 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">State Machine in Acumatica Graph Extensions</span></nav>
     <span class="tag">Workflow · Customization</span>
     <h1>State Machine in Acumatica Graph Extensions</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">State Machine in Acumatica Graph Extensions is the kind of topic that separates a working Acumatica customisation from a great one.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A client needed a custom document type to move through an approval lifecycle: Draft, Pending Review, Approved, Rejected, Closed - with specific rules about which transitions were.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="ordering-and-sequencing-in-machine">Ordering and sequencing in machine</h2>
-<p>Ordering and sequencing in machine is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A client needed a custom document type to move through an approval lifecycle: Draft, Pending Review, Approved, Rejected, Closed - with specific rules about which transitions were legal from which state, and specific actions enabled or disabled depending on where the document currently sat. The instinct on a newer Acumatica version is to reach straight for the modern Workflow Engine's screen-based configuration, and often that's correct. But plenty of real customizations either predate Workflow Engine adoption on that instance, need transition logic too custom for declarative configuration, or are extending a base graph where introducing a new workflow definition isn't practical. For those, hand-rolling a state machine inside a graph extension is still a completely normal, well-understood pattern - and getting the pieces right matters.</p>
+
+<h2 id="the-core-shape">A status field, a transition table, and RowPersisting as the enforcement point</h2>
+<p>The shape I use every time: a status field on the DAC (typically a short char code with a matching selector attribute), a transition table expressed as plain C# describing which states may move to which other states, and enforcement in <code>RowPersisting</code> - the same event that already owns cross-field validation, because "is this a legal transition" is exactly that kind of whole-row check.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "State", "type": "n8n-nodes-base.state"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "State"}]]}
+  <div class="code-header"><span class="code-lang">C# · Status field and a legal-transitions map</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class CustomDocStatus
+{
+    public const string Draft = "D";
+    public const string PendingReview = "P";
+    public const string Approved = "A";
+    public const string Rejected = "R";
+    public const string Closed = "C";
+
+    public class draft : PX.Data.BQL.BqlString.Constant&lt;draft&gt;
+    { public draft() : base(Draft) { } }
+    // ... one BQL constant class per status, same pattern as base Acumatica DACs
+}
+
+// Legal transitions, expressed once, checked everywhere
+private static readonly Dictionary&lt;string, string[]&gt; LegalTransitions = new()
+{
+    [CustomDocStatus.Draft]          = new[] { CustomDocStatus.PendingReview },
+    [CustomDocStatus.PendingReview]  = new[] { CustomDocStatus.Approved, CustomDocStatus.Rejected },
+    [CustomDocStatus.Approved]       = new[] { CustomDocStatus.Closed },
+    [CustomDocStatus.Rejected]       = new[] { CustomDocStatus.Draft }, // rejected can be reworked
+    [CustomDocStatus.Closed]         = Array.Empty&lt;string&gt;(),          // terminal
+};
+</code></pre>
+</div>
+
+<h2 id="tracking-the-old-value">Detecting a transition requires the field's original value, not just its current one</h2>
+<p>The part that's easy to get wrong on a first attempt: <code>RowPersisting</code> only sees the row's current, in-memory state - to know whether a transition actually happened (and what it transitioned from), you need the cache's original value for that field, which <code>cache.GetValueOriginal</code> gives you without an extra query.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C# · Enforcing legal transitions at the one gate that can't be bypassed</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowPersisting&lt;CustomDoc&gt; e)
+{
+    CustomDoc row = (CustomDoc)e.Row;
+    if (row == null || e.Operation == PXDBOperation.Delete) return;
+
+    string oldStatus = (string)e.Cache.GetValueOriginal&lt;CustomDoc.status&gt;(row);
+    string newStatus = row.Status;
+
+    if (oldStatus == newStatus) return; // no transition, nothing to check
+
+    if (oldStatus == null) return; // brand new row - any initial status is fine
+
+    if (!LegalTransitions.TryGetValue(oldStatus, out var allowed) || !allowed.Contains(newStatus))
+    {
+        e.Cache.RaiseExceptionHandling&lt;CustomDoc.status&gt;(row, newStatus,
+            new PXSetPropertyException($"Cannot move from {oldStatus} to {newStatus} directly."));
+        e.Cancel = true;
     }
 }</code></pre>
 </div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>In the work I have done on state machine in acumatica graph extensions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+
+<div class="callout-warn callout">
+  <strong>RowPersisting is the enforcement gate - checking transitions only in a button action is not enough</strong>
+  <p>It's tempting to enforce the state machine only inside the action buttons that trigger transitions ("Approve," "Reject") and assume that's the only way status ever changes. It isn't - direct cache edits from other graph extensions, import scenarios, and API-driven updates through the contract-based REST API can all set the status field without going through your button at all. RowPersisting is the one place every path to a saved row passes through, which is exactly why cross-field validation belongs there generally, and why a state machine's legality check is a specific case of that same rule.</p>
 </div>
-<h2 id="the-runbook-for-state">The runbook for state</h2>
-<p>When the work moves from design to production, the questions change. The state is not the question; the failure mode of the machine is.</p>
+
+<h2 id="driving-ui-from-state">Enabling and disabling actions based on current state belongs in RowSelected</h2>
+<p>The complementary half of a hand-rolled state machine is UI reactivity - the Approve button should only be enabled in Pending Review, Reject only from Pending Review, and so on. That's ordinary <code>RowSelected</code> work, run on every paint, cheap and idempotent exactly the way RowSelected should be:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleState(event) {
-    try {
-        const result = await processMachine(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
+  <div class="code-header"><span class="code-lang">C# · Action availability follows current state</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowSelected&lt;CustomDoc&gt; e)
+{
+    CustomDoc row = (CustomDoc)e.Row;
+    if (row == null) return;
+
+    bool pending = row.Status == CustomDocStatus.PendingReview;
+    Approve.SetEnabled(pending);
+    Reject.SetEnabled(pending);
+    SubmitForReview.SetEnabled(row.Status == CustomDocStatus.Draft);
 }</code></pre>
 </div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="what-state-machine-in-acumatica-graph-extensions-is-for">What State Machine in Acumatica Graph Extensions is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="action-methods-just-set-status">Transition actions are thin - they set status and let RowPersisting validate</h2>
+<p>The button actions themselves stay deliberately simple: set the new status, let the row's normal save path (and the RowPersisting gate above) do the actual legality enforcement, rather than duplicating the transition rules inside every button. Duplicating the check in both places is how the two definitions quietly drift apart after a few sprints of "quick" changes to one but not the other.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        state: item.json.state,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>The performance of machine in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>Production machine looks different from development machine. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "State", "type": "n8n-nodes-base.state"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "State"}]]}
-    }
+  <div class="code-header"><span class="code-lang">C# · A transition action, no duplicated rule logic</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual IEnumerable approve(PXAdapter adapter)
+{
+    CustomDoc row = Base.Document.Current;
+    if (row == null) return adapter.Get();
+
+    row.Status = CustomDocStatus.Approved;
+    Base.Document.Update(row);
+    Base.Save.Press(); // RowPersisting enforces the transition is actually legal
+    return adapter.Get();
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring machine first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add state on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with machine when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="hand-rolled-vs-workflow-engine">When to stop hand-rolling and adopt Workflow Engine instead</h2>
+<p>This pattern earns its keep for a small number of states with clear linear or near-linear transitions, especially inside an extension of an existing graph where introducing a full workflow definition is disproportionate. Once the state count grows, transitions start depending on user role or conditional business rules per transition, or the client wants to see and edit the flow visually, that's the signal to migrate to Workflow Engine rather than keep extending a hand-rolled dictionary - the declarative engine is built for exactly that complexity, and a hand-rolled version re-implements an increasing fraction of it badly as requirements grow.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on state machine in acumatica graph extensions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A hand-rolled state machine in a graph extension is a legitimate, well-worn pattern: a status field, a transitions map, enforcement in RowPersisting using the cache's original value to detect the actual transition, and RowSelected purely for reflecting current state in the UI. Keep the legality rule defined in exactly one place and let every path to a save route through it - and recognize the point where the requirements have outgrown a dictionary and genuinely call for Workflow Engine instead.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-      <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
-      <li><a href="/blog/acumatica-attachment-handler-code-side/">Acumatica Attachment Handler — Code-Side Patterns</a></li>
-      <li><a href="/blog/acumatica-cache-attach-invalidation-pitfalls/">Acumatica Cache Attach — The Invalidation Pitfalls</a></li>
-      <li><a href="/blog/acumatica-custom-actions-async-patterns/">Custom Actions in Acumatica — Async Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-state-transitions-and-conditions/">Acumatica Workflow — State Transitions and Conditions</a></li>
+      <li><a href="/blog/acumatica-workflow-engine-the-definitive-guide/">Acumatica Workflow Engine — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
+      <li><a href="/blog/acumatica-rowdeleted-vs-rowdeleting/">Acumatica RowDeleted vs RowDeleting — When to Use Each</a></li>
+      <li><a href="/blog/acumatica-dac-validation-cross-field/">Cross-Field DAC Validation in Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

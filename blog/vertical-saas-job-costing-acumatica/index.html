@@ -93,96 +93,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Pricing and packaging is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Job costing questions from construction clients almost always start the same way: "should we cost by project, by task, or by cost code?" The honest answer is that Acumatica gives you all three layers, they are not mutually exclusive, and picking the wrong one to be your primary reporting axis — usually because a template was cloned from an unrelated implementation — is the single most common reason a contractor's job cost reports do not match how the business actually thinks about its jobs.</p>
+
+<h2 id="three-layers-not-a-choice">Project, task, and cost code are a hierarchy, not alternatives</h2>
+<p>A project is the job as a whole — one contract, one client, one address. Tasks are the phases or major divisions of work within it (site work, foundation, framing, MEP rough-in). Cost codes are the granular categories of cost within a task (labor, material, equipment, subcontract) that let you compare, say, framing labor cost per square foot across every job that used the same cost code, regardless of which project or task it lived under. The mistake I see most is treating cost codes as an afterthought and doing all the real reporting at the task level — which works until someone asks "what's our average labor cost code for foundation work across the last 20 jobs," a question the task level cannot answer because task names and scopes drift between projects while a well-maintained cost code list stays stable.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class JobExt : PXCacheExtension<Costing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">HIERARCHY · HOW THE THREE LEVELS NEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Project: 26-018 Maple St. Renovation
+  Task 200: Foundation
+    Cost Code 03-300-LAB  Foundation Labor     Budget: $8,200   Actual: $8,900
+    Cost Code 03-300-MAT  Foundation Material  Budget: $11,500  Actual: $10,800
+    Cost Code 03-300-SUB  Foundation Subcontract Budget: $6,000  Actual: $6,000
+  Task 300: Framing
+    Cost Code 06-100-LAB  Framing Labor        Budget: $14,000  Actual: $13,200
+    ...</code></pre>
 </div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>In the work I have done on job costing vertical saas on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The job is not the question; the failure mode of the costing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'job'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="why-job-on-a-horizontal-platform-beats-from-scratch">Why job on a horizontal platform beats from-scratch</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="standardize-before-scaling">Standardize the cost code list before the second project, not the twentieth</h2>
+<p>A contractor's cost code list should be defined once, ideally against an industry-standard framework (many use a CSI-based structure or a close variant) and applied consistently across every project template. Letting each project manager invent cost codes as they go feels flexible in month one and makes cross-project reporting impossible by month six — I have inherited more than one instance where "Framing Labor" existed under four slightly different cost code names because four different PMs set up their own projects independently.</p>
+
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Cost classes group cost codes for roll-up reporting</strong>
+  <p>Beyond individual cost codes, Acumatica supports cost classes — a grouping layer that rolls multiple related cost codes up into a category (all labor cost codes into "Labor", regardless of phase) for executive-level reporting that does not need phase-by-phase detail. Use cost classes for the dashboard-level view and cost codes for the PM's working detail; conflating the two levels in one report usually produces something too granular for an executive and too coarse for a PM.</p>
 </div>
-<h2 id="channel-partner-programs-for-costing">Channel partner programs for costing</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM job
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-job">Marketplace listing for job</h2>
-<p>The performance of costing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-costing">SOC 2 and ISO 27001 for costing</h2>
-<p>Production costing looks different from development costing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class JobExt : PXCacheExtension<Costing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring costing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add job on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with costing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on job costing vertical saas on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Job costing in Acumatica works in layers — project, task, cost code, and cost class — and the reporting question determines which layer you query, not which layer you picked as "the" costing method. Standardize the cost code list against a consistent framework before the second project goes live; retrofitting consistency onto twenty projects' worth of ad hoc cost codes is a project of its own.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-civil-engineering-acumatica/">Civil Engineering Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction Vertical on Acumatica</a></li>
       <li><a href="/blog/vertical-saas-construction-contract-acumatica/">Construction Contract Management on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Rental Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Costing on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-residential-builder-acumatica/">Residential Builders on Acumatica</a></li>
+      <li><a href="/blog/acumatica-project-task-screen/">Acumatica Project Task Screen</a></li>
+      <li><a href="/blog/acumatica-report-project-status/">Acumatica Project Status Reporting</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

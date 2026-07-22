@@ -93,94 +93,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The workflow tools in 2026 (n8n, Zapier, Make, Acumatica Business Events) are all capable. The difference between a workflow that survives and one that doesn't is the error handling. this is the part of the error handling that matters most.</p>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>Testing workflow automations: patterns is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The Acumatica procure-to-pay flow is four documents that hand off to each other: a Purchase Order commits to buy, a Purchase Receipt records what physically arrived, an AP Bill records what the vendor charged, and a payment settles it. Three-way matching is the discipline that makes sure the PO, the receipt, and the bill agree before anything posts — and understanding where each quantity and amount lives is what lets you catch a mismatch before it becomes a payment you cannot claw back.</p>
+
+<h2 id="the-four-documents">The four documents and how they link</h2>
+<p>Each document references the one before it. The Purchase Order (screen PO301000) holds ordered quantities and agreed prices. The Purchase Receipt (PO302000) records received quantities against PO lines and, on release, updates inventory and creates the accrual to the PO/PR accrual account. The AP Bill (AP301000) is entered against the receipt (or directly against the PO), and releasing it moves the liability into Accounts Payable. The link chain — PO line → receipt line → bill line — is what three-way matching walks.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · DOCUMENT FLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Purchase Order    ordered qty, agreed price
+      │
+Purchase Receipt  received qty  → Dr Inventory / Cr PO accrual
+      │
+AP Bill           billed qty/amt → Dr PO accrual / Cr AP
+      │
+Payment           settles the AP balance</code></pre>
 </div>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>In the work I have done on acumatica purchase orders — receipt and bill, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="three-way-matching">Three-way matching, concretely</h2>
+<p>Three-way matching compares three numbers per line: quantity ordered (PO), quantity received (receipt), and quantity/amount billed (bill). The bill should not exceed what was received, and the price should match the PO within tolerance. Acumatica enforces this when matching is enabled on the vendor or the AP setup: a bill that exceeds tolerance goes <strong>on hold</strong> for review rather than posting. That hold is the whole point — it stops an overbill or a duplicate invoice at the last gate before money moves.</p>
+<div class="callout">
+  <strong>Where the accrual lives</strong>
+  <p>Releasing the receipt debits inventory (or the expense account for non-stock) and credits the PO accrual account. Releasing the bill reverses that accrual and credits AP. If your accrual account has a lingering balance, it usually means a receipt was posted with no matching bill, or a bill with no receipt — that account is the first place to reconcile.</p>
+</div>
+
+<h2 id="matching-tolerances">Configuring matching tolerances</h2>
+<p>Tolerances live in AP and PO preferences: you set how much a billed price or amount may deviate from the PO before the bill is held. Setting tolerance to zero means every rounding difference blocks a bill, which frustrates AP clerks; setting it too loose defeats the control. Pick a small percentage or absolute amount that reflects real vendor variance, and let the hold catch the genuine outliers.</p>
 <div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+  <strong>Received-not-billed is a real liability</strong>
+  <p>Goods received but not yet billed sit in the accrual account as an accrued liability you owe. At period close, the received-not-billed balance must tie to open receipts. If it drifts, someone released a receipt and then edited or deleted the expected bill — reconcile the accrual account, not just the AP subledger.</p>
 </div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the purchase is.</p>
+
+<h2 id="vendor-returns">Vendor returns and corrections</h2>
+<p>When goods go back, you do not delete the receipt — you enter a return. A Purchase Return (a receipt of type Return) reverses the inventory and accrual entries for the returned quantity, and a debit adjustment / credit memo on the AP side reduces what you owe the vendor. Keeping returns as their own documents preserves the audit trail: the original receipt still shows what arrived, and the return shows what left, so the net matches reality.</p>
+
+<h2 id="reading-it-in-code">Reacting to the flow in code</h2>
+<p>When you need custom validation — say, block releasing a receipt if the PO is on a credit hold — hook the release process rather than the UI. The receipt lives on <code>POReceipt</code>/<code>POReceiptLine</code> and the graph is <code>POReceiptEntry</code>. A <code>RowPersisting</code> or an override on the release action lets you enforce a rule across every entry path, API included.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processPurchase(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class POReceiptEntryExt : PXGraphExtension&lt;POReceiptEntry&gt;
+{
+    protected void _(Events.RowPersisting&lt;POReceipt&gt; e)
+    {
+        var doc = e.Row;
+        if (doc == null || doc.Released == true) return;
+
+        // Block release when the linked vendor is on hold.
+        var vendor = Vendor.PK.Find(Base, doc.VendorID);
+        if (vendor?.Status == BAccount.status.Hold)
+            throw new PXException(
+                "Cannot release a receipt for a vendor on hold.");
     }
 }</code></pre>
 </div>
-<h2 id="what-acumatica-purchase-orders-receipt-and-bill-is-for">What Acumatica Purchase Orders — Receipt and Bill is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The performance of purchase in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>Production purchase looks different from development purchase. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring purchase first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with purchase when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica purchase orders — receipt and bill. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Procure-to-pay in Acumatica is disciplined precisely because it is four linked documents with an accrual account in the middle. Enable three-way matching with sensible tolerances so overbills and duplicates land on hold, reconcile the received-not-billed accrual at close, and keep returns as their own documents. Do that and the AP balance you pay is always the one you actually agreed to and received.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -191,9 +157,6 @@ return items.map(item =&gt; ({
       <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -92,112 +92,77 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>Error handling and retry strategies is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most approval-map examples I've written about assume a static approver — a role, a fixed employee. Conditional assignment is the harder, more common real-world requirement: the approver depends on data in the document itself, resolved at the moment the document enters the approval state, not hardcoded at design time. This post is about the assignment-rule mechanics that make that work, distinct from the transition conditions covered elsewhere in this series.</p>
+
+<h2 id="assignment-vs-transition-conditions">Two different condition systems, easy to conflate</h2>
+<p>It's worth being precise about a distinction that trips up developers new to the Workflow engine: <strong>transition conditions</strong> (<code>.When()</code> in <code>Configure</code>) decide whether a document <em>moves</em> into a pending-approval state at all. <strong>Assignment rules</strong> on the Assignment and Approval Maps screen decide <em>who</em> gets the resulting task once it's in that state. They are configured in entirely different places, evaluated at different times, and confusing them is the single most common reason "the workflow routes to the wrong person" tickets take longer to diagnose than they should — the fix is very often on EP503010, not in a C# file at all.</p>
+
+<h2 id="assignment-rule-types">The assignment rule types available on the map</h2>
+<p>On a map step, the assignment rule dropdown gives you a handful of resolution strategies: a fixed workgroup, a fixed employee, "by role," and — the one this post is about — a condition-based rule that resolves off a field on the document. For a PO, that's commonly the requesting employee's manager (resolved via the Employee's <code>Report To</code> hierarchy); for an expense claim, the claimant's manager; for a case, the case owner's team lead.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIGURATION — EP503010</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Map Step:        Manager Approval
+Assignment Rule: By condition
+Source Field:    POOrder.EmployeeID  (requester)
+Resolution:      Report-To manager of Source Field's linked EPEmployee
+Fallback:        Workgroup "Procurement" if manager lookup fails
+                 (e.g. requester has no manager assigned — always
+                 configure a fallback, don't let this be a dead end)
+</code></pre>
 </div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>In the work I have done on acumatica workflow — conditional assignment, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
+
+<h2 id="resolving-beyond-stock-rules">When the stock rule types aren't enough</h2>
+<p>The stock condition-based rule handles direct-manager lookups well but doesn't natively handle "second-level manager if the amount is large" or "the department head from a lookup table keyed on cost center" — those need a graph extension that resolves the actual approver into a field the assignment rule can read, following the same pattern as computing flags for <code>.When()</code> conditions elsewhere in this series, just applied to the assignment side instead of the transition side:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void POOrder_RowPersisting(PXCache cache, PXRowPersistingEventArgs e)
+{
+    var order = (POOrder)e.Row;
+    if (order == null || order.OrderTotal == null) return;
+
+    // Escalate to the requester's manager's manager above a threshold
+    if (order.OrderTotal >= 50000m)
+    {
+        var requester = EPEmployee.PK.Find(Base, order.EmployeeID);
+        var manager = requester?.ReportsToID != null
+            ? EPEmployee.PK.Find(Base, requester.ReportsToID) : null;
+        order.ApprovalEmployeeID = manager?.ReportsToID ?? requester?.ReportsToID;
     }
-}</code></pre>
+    else
+    {
+        order.ApprovalEmployeeID = null; // fall back to direct-manager rule
+    }
+}
+</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="stale-org-data">The failure mode nobody tests for: stale org hierarchy data</h2>
+<p>Conditional assignment is only as good as the Employee master's <code>Report To</code> field, and that field drifts — people change managers, leave, get promoted — far more often than clients update it in Acumatica. I've debugged more "wrong person got the approval task" tickets that traced back to an outdated <code>ReportsToID</code> than to any workflow misconfiguration. Before blaming the assignment rule, check the Employees screen (EP203000) for the actual current manager on file; it's usually stale, not broken.</p>
+
 <div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+  <strong>Always configure a fallback approver</strong>
+  <p>Every condition-based assignment rule needs an explicit fallback for when the lookup resolves to nobody — a terminated employee still listed as a manager, a missing <code>ReportsToID</code>, a department with no head configured. Without a fallback workgroup or role, the document enters pending-approval limbo with literally no one assigned to act on it, and the only way anyone notices is a customer complaint about a stuck order weeks later.</p>
 </div>
-<h2 id="why-acumatica-fails-at-3-am-and-what-to-do">Why acumatica fails at 3 AM and what to do</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="ordering-and-sequencing-in-workflow">Ordering and sequencing in workflow</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — conditional assignment. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Conditional assignment lives on the Assignment and Approval Maps screen, separate from the transition conditions that gate whether a document enters approval at all — keep those two systems distinct in your own head and in your documentation. Use the stock condition-based rule for direct-manager lookups, extend into a graph-computed field for anything more elaborate, always configure a fallback, and check for stale <code>ReportsToID</code> data before assuming a routing bug is a code bug.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount Thresholds</a></li>
-      <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
-      <li><a href="/blog/acumatica-workflow-discount-approval/">Acumatica Workflow — Discount Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-document-routing/">Acumatica Workflow — Document Routing Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-parallel-approvals/">Acumatica Workflow — Parallel Approvals</a></li>
+      <li><a href="/blog/acumatica-workflow-document-routing/">Acumatica Workflow — Document Routing</a></li>
+      <li><a href="/blog/acumatica-workflow-approval-by-amount/">Acumatica Workflow — Approval by Amount</a></li>
+      <li><a href="/blog/acumatica-workflow-state-transitions-and-conditions/">Acumatica Workflow — States, Transitions, and Conditions</a></li>
+      <li><a href="/blog/acumatica-ep-employee-self-service/">Acumatica EP Employee Self-Service</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

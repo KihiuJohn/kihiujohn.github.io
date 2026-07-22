@@ -93,89 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="acumatica-implementation-walkthrough">Acumatica implementation walkthrough</h2>
-<p>Acumatica implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica has its own vocabulary, and most of it is invisible in the manuals until someone in a code review assumes you already know it. This glossary defines the terms a developer actually trips over in the first few weeks — the framework classes, the query language, the integration surfaces, and the acronyms that fill screen IDs and Git commits.</p>
+
+<h2 id="framework-core">Framework core</h2>
+<p><strong>DAC (Data Access Class).</strong> A C# class that maps to a database table (or a projection over several). Each public property is a field, decorated with attributes like <code>[PXDBString]</code>, <code>[PXUIField]</code>, and <code>[PXDefault]</code> that describe its storage, UI, and defaulting behaviour. The DAC is the model layer; you almost never write raw SQL against the table.</p>
+<p><strong>Graph (PXGraph).</strong> The business-logic controller behind a screen. It holds data views, action buttons, and event handlers. One graph typically backs one screen — <code>SOOrderEntry</code> backs the Sales Orders screen, <code>ARInvoiceEntry</code> backs the AR invoice screen. When people say "the entry graph", they mean this class.</p>
+<p><strong>Graph extension (PXGraphExtension).</strong> The supported way to add or override behaviour on a stock graph without editing Acumatica's source. Your extension declares <code>PXGraphExtension&lt;SOOrderEntry&gt;</code> and overrides event handlers or wraps actions with <code>[PXOverride]</code>. Extensions survive product upgrades; base modifications do not.</p>
+<p><strong>DAC extension (PXCacheExtension).</strong> The equivalent for data: it adds fields to a stock DAC. Custom fields on a base DAC must be prefixed <code>Usr</code>, which is how the upgrade tooling tells your columns from Acumatica's.</p>
+
+<h2 id="the-query-language">BQL and data views</h2>
+<p><strong>BQL (Business Query Language).</strong> Acumatica's strongly-typed query language, written as nested C# generics instead of a query string. It compiles to parameterised SQL and gives you compile-time checking against the DAC. Fluent BQL is the newer, more readable syntax layered on top.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaErpExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Acumatica doc)
-    {
-        // Custom erp logic for acumatica erp glossary
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C# · BQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Classic BQL: open AR invoices for a customer
+PXSelect&lt;ARInvoice,
+    Where&lt;ARInvoice.customerID, Equal&lt;Required&lt;ARInvoice.customerID&gt;&gt;,
+        And&lt;ARInvoice.status, Equal&lt;ARDocStatus.open&gt;&gt;&gt;&gt;
+    .Select(this, customerID);
+
+// Fluent BQL, same query
+SelectFrom&lt;ARInvoice&gt;
+    .Where&lt;ARInvoice.customerID.IsEqual&lt;@P.AsInt&gt;
+        .And&lt;ARInvoice.status.IsEqual&lt;ARDocStatus.open&gt;&gt;&gt;
+    .View.Select(this, customerID);</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on acumatica erp glossary — every term you need, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="performance-and-observability-for-acumatica">Performance and observability for acumatica</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the erp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p><strong>Data view (PXSelect field on a graph).</strong> A declared query the graph exposes to the UI. Grids and forms bind to views. The view name in the graph maps to a data member in the ASPX/screen definition.</p>
+<p><strong>Cache (PXCache).</strong> The in-memory buffer of DAC records a graph is working with. It tracks inserts, updates, and deletes until you persist. A key gotcha: the cache is per graph instance, so two graphs do not share uncommitted state.</p>
+
+<h2 id="events">Events</h2>
+<p>Business logic hangs off cache events. The ones you meet first: <strong>FieldDefaulting</strong> (supply a default value), <strong>FieldVerifying</strong> (validate a value as it enters the cache), <strong>FieldUpdated</strong> (react after a value changes), <strong>RowSelected</strong> (set UI state like enabled/required per row), <strong>RowInserting/RowInserted</strong>, and <strong>RowPersisting</strong> (last-chance validation before the row is written to the database). Knowing which event fires when is most of what separates a working customisation from a flaky one.</p>
+
+<h2 id="integration-surfaces">Integration surfaces</h2>
+<p><strong>Contract-based API (SOAP/REST).</strong> The supported integration layer built on <em>endpoints</em> — versioned, configurable API contracts exposed on the Web Service Endpoints screen. You work with entities (Customer, SalesOrder) rather than raw tables, and the endpoint decouples your integration from the internal schema.</p>
+<p><strong>REST / OData.</strong> The contract-based API is exposed over REST at <code>/entity/Default/{version}/</code>. Separately, Generic Inquiries can be published as <strong>OData</strong> feeds for reporting tools like Power BI and Excel.</p>
+<p><strong>GI (Generic Inquiry).</strong> A no-code query builder. You join DACs, add conditions and parameters, and publish the result as a screen, a dashboard widget, or an OData feed — all without writing a graph.</p>
+<p><strong>Business Events.</strong> A trigger-and-action engine: watch a GI or record change and fire an email, a webhook, an import scenario, or a mobile push. The usual way to integrate without polling.</p>
+<p><strong>Import/Export Scenarios.</strong> Mapping-based data movement on top of the API, driven from the UI. Good for recurring loads that do not justify custom code.</p>
+
+<h2 id="ui-and-platform">UI and platform terms</h2>
+<p><strong>Modern UI.</strong> The current web interface (as opposed to the retired classic UI). Screens are defined in ASPX plus the graph; the Modern UI renders them responsively.</p>
+<p><strong>Customization Project.</strong> The packaging unit for changes — screen edits, code, GIs, reports, and DB schema bundled into one publishable, version-controllable package via the Customization Project Editor.</p>
+<p><strong>Tenant, Company, Branch.</strong> A tenant is an isolated dataset (its own users and data); a company groups branches for financials; a branch is an operating unit under a company. One instance can host many tenants.</p>
+<p><strong>Screen ID.</strong> The eight-character code in every URL and menu item — two letters for the module, then numbers (<code>SO301000</code> = Sales Orders, <code>AR301000</code> = AR invoices). The letters tell you the module at a glance: <code>GL</code>, <code>AP</code>, <code>AR</code>, <code>CA</code>, <code>IN</code>, <code>SO</code>, <code>PO</code>, <code>CR</code>, <code>PM</code>.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Read screen IDs like a map</strong>
+  <p>When a colleague says "check SM201010", the <code>SM</code> tells you it is a System Management screen and the number range tells you it is a setup/config screen (2xxxxx) rather than a data-entry one (3xxxxx). You can navigate the whole product once you internalise the module prefixes and the number bands.</p>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of erp in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-erp-edge-cases-i-have-shipped">The erp edge cases I have shipped</h2>
-<p>Production erp looks different from development erp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaErpExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Acumatica doc)
-    {
-        // Custom erp logic for acumatica erp glossary
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring erp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with erp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica erp glossary — every term you need. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<h2 id="where-to-go-next">Where to go next</h2>
+<p>These terms are the load-bearing ones — DAC, graph, BQL, cache, events, endpoints, GI. Once they are second nature, the rest of the vocabulary (attributes, actions, PXProjection, slots) slots in around them without much friction. Keep this page open during your first customisation and the code reviews stop feeling like a foreign language.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -186,9 +153,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       <li><a href="/blog/ai-agent-vendor-onboarding/">AI Agent for Vendor Onboarding</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

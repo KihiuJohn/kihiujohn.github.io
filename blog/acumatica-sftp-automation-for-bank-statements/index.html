@@ -93,78 +93,65 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most bank-statement imports in Acumatica start as a person downloading a file from the bank portal every morning and uploading it on the <strong>Import Bank Transactions</strong> screen. That works until the person is on leave. The reliable version is a scheduled pull: the bank drops a statement file on an SFTP server, a job collects it, and Acumatica imports and matches it without anyone in the loop. The moving parts are the SFTP fetch, the file format, the import mapping, and idempotency so nothing gets loaded twice.</p>
+
+<h2 id="the-pieces">The pieces of the pipeline</h2>
+<p>Break the job into four stages, each independently retryable: <strong>fetch</strong> the file over SFTP, <strong>stage</strong> it somewhere durable, <strong>import</strong> it into Acumatica's bank-transaction staging area, and <strong>reconcile</strong> against the cash account. Keeping them separate matters because they fail for different reasons — the bank's SFTP being down is not the same problem as a malformed row, and you want to retry the fetch without re-importing what already landed.</p>
+
+<h2 id="fetching-over-sftp">Fetching over SFTP</h2>
+<p>SFTP is SSH file transfer, so authenticate with a key pair rather than a password and pin the bank's host key so you fail loudly if the endpoint changes. On the .NET side a library like SSH.NET handles the transport; the job lists the remote directory, downloads anything new, and — critically — moves or renames the file on the server (or records what it has seen) so the next run does not pick it up again.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Sftp>
+  <div class="code-header"><span class="code-lang">C# · SFTP FETCH</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>using (var client = new SftpClient(host, port, user, new PrivateKeyFile(keyPath)))
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    client.HostKeyReceived += (s, e) =&gt;
+        e.CanTrust = e.FingerPrintSHA256 == ExpectedFingerprint; // pin the host key
+    client.Connect();
+
+    foreach (var file in client.ListDirectory(remoteDir))
+    {
+        if (file.IsDirectory || !file.Name.EndsWith(".csv")) continue;
+        if (AlreadyProcessed(file.Name)) continue;          // idempotency guard
+
+        using (var local = File.Create(Path.Combine(stageDir, file.Name)))
+            client.DownloadFile(file.FullName, local);
+
+        client.RenameFile(file.FullName, $"{archiveDir}/{file.Name}"); // don't re-fetch
+        RecordProcessed(file.Name);
+    }
+    client.Disconnect();
 }</code></pre>
 </div>
-<h2 id="why-acumatica-on-a-horizontal-platform-beats-from-scratch">Why acumatica on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on acumatica sftp automation for bank statements, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Idempotency is the whole game</strong>
+  <p>Banks re-send files, and a job that crashes mid-run will restart. If you import the same statement twice you double every transaction and the reconciliation will never balance. Track processed files by name <em>and</em> a content hash, and let the database's unique constraint on the external transaction ID be your last line of defence.</p>
 </div>
-<h2 id="channel-partner-programs-for-sftp">Channel partner programs for sftp</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the sftp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'acumatica'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-acumatica">Marketplace listing for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-sftp">SOC 2 and ISO 27001 for sftp</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM acumatica
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of sftp in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-acumatica-sftp-automation-for-bank-statements-is-for">What Acumatica SFTP Automation for Bank Statements is for</h2>
-<p>Production sftp looks different from development sftp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Sftp>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+
+<h2 id="parsing-the-format">Parsing the format</h2>
+<p>Bank statement files come in a handful of shapes: delimited CSV, fixed-width, MT940, BAI2, or CAMT.053 (ISO 20022 XML). Acumatica's bank import framework can consume several of these through a <strong>Bank Feed</strong> or an import scenario with a mapping, but the format the bank actually sends decides everything downstream. Nail down which one you are getting and whether amounts use debit/credit columns or a signed value — that single ambiguity causes more reconciliation mismatches than any parsing bug.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sftp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sftp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Format</th><th>Shape</th><th>Notes</th></tr>
+  <tr><td>CSV</td><td>Delimited text</td><td>Easiest, but column order varies per bank</td></tr>
+  <tr><td>MT940</td><td>SWIFT statement</td><td>Common for corporate accounts</td></tr>
+  <tr><td>BAI2</td><td>US bank format</td><td>Type codes identify each transaction</td></tr>
+  <tr><td>CAMT.053</td><td>ISO 20022 XML</td><td>Richest data, the modern standard</td></tr>
 </table>
+
+<h2 id="importing-into-acumatica">Importing into Acumatica</h2>
+<p>The clean path is Acumatica's own bank-statement import: push the staged rows into the bank transactions staging table, then let the standard <strong>Process Bank Transactions</strong> flow match them. Prefer this over writing directly to GL — the framework already handles the matching rules, the cash account link, and the reconciliation record. If you must load programmatically, the contract-based API or an import scenario against the bank-import screen keeps you inside supported territory rather than poking tables directly.</p>
+
+<h2 id="reconciliation-and-matching">Reconciliation and matching</h2>
+<p>Once transactions are staged, Acumatica matches them against open payments and deposits by amount, date, and reference. Configure the matching rules so the common cases auto-match and only exceptions land on a human's desk. The realistic target is not 100% automated matching — it is that the exceptions are few, obvious, and surfaced quickly, so month-end reconciliation is a review rather than a re-keying exercise.</p>
+<div class="callout">
+  <strong>Log what didn't match, loudly</strong>
+  <p>The silent failure mode here is a file that imports cleanly but leaves half its lines unmatched, quietly, for three weeks. Emit a per-run summary — files fetched, rows imported, matched, unmatched — and alert when the unmatched count crosses a threshold. A reconciliation you can't see is a reconciliation you don't have.</p>
+</div>
+
+<h2 id="scheduling-and-monitoring">Scheduling and monitoring</h2>
+<p>Run the fetch on a schedule that follows the bank's posting time, not an arbitrary cron slot — pulling at 6 AM for a file the bank posts at 8 AM just guarantees an empty run and a late import. Give the job a heartbeat and alert on <em>absence</em>: a statement that never arrives is as much an incident as one that fails to parse, and it is the failure people notice last.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica sftp automation for bank statements. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Automating bank-statement import is mostly plumbing done carefully: pull the file over SFTP with a pinned host key, guard hard against re-importing, hand the rows to Acumatica's own bank-transaction flow, and make both matches and non-matches visible. The result is a reconciliation that is a morning glance instead of a daily chore — and one that keeps working when the person who used to do it by hand is away. If you are wiring one up against a specific bank format, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +162,6 @@ public class AcumaticaExt : PXCacheExtension<Sftp>
       <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

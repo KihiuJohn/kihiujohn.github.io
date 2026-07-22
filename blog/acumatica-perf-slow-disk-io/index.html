@@ -93,116 +93,59 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The architecture: how the pieces fit together is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Disk I/O problems on Acumatica present as generalized slowness across everything at once — every screen, every report, every batch job runs at half the normal speed simultaneously — which is exactly why they get misdiagnosed as "the ERP is slow" rather than traced to storage, the layer nobody thinks to check because it usually just works.</p>
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="which-disk-even">Which disk is actually the bottleneck</h2>
+<p>Acumatica-relevant I/O happens in three separate places, and only one of them is usually the real culprit: the SQL Server data files (<code>.mdf</code>/<code>.ndf</code>), the SQL Server transaction log file (<code>.ldf</code>), and the app server's local disk (mostly irrelevant unless file attachments are stored on local disk rather than blob storage, or the app pool's temp directories are under pressure). Transaction log I/O is the one that catches people off guard — it is write-heavy and latency-sensitive in a way data file reads are not, because every write transaction must be durably logged before it commits, full stop, no shortcuts.</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>In the work I have done on acumatica performance — diagnosing slow disk i/o, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the performance is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">SQL — per-file I/O stall time, the single best first check</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+    DB_NAME(vfs.database_id) AS db_name,
+    mf.physical_name,
+    vfs.io_stall_read_ms, vfs.num_of_reads,
+    vfs.io_stall_write_ms, vfs.num_of_writes,
+    (vfs.io_stall_read_ms + vfs.io_stall_write_ms) AS total_stall_ms
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) vfs
+JOIN sys.master_files mf ON mf.database_id = vfs.database_id
+    AND mf.file_id = vfs.file_id
+WHERE DB_NAME(vfs.database_id) = 'AcumaticaProd'
+ORDER BY total_stall_ms DESC;</code></pre>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The performance of performance in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-acumatica">Latency and cost tradeoffs for acumatica</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_acumatica(query: str) -> str:
-    """List acumatica matching the query."""
-    response = requests.get(
-        f"https://api.example.com/acumatica",
-        params={"q": query}
-    )
-    return response.json()
+<p>Divide stall time by read/write count to get average latency per operation. Data file reads averaging over roughly 10-20ms, or log writes averaging over 1-2ms, indicate the storage layer is the constraint — those thresholds are conservative rules of thumb for spinning or shared network storage; NVMe-backed storage should be an order of magnitude faster and any sustained latency near those numbers on flash storage points at contention, not raw hardware capability.</p>
 
-tools = [Tool(name="acumatica", func=list_acumatica, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="log-file-specific-issues">The transaction log specifically</h2>
+<ul>
+<li><strong>Log file not pre-sized, growing in small increments during peak load.</strong> Every autogrow event briefly stalls writes. Pre-size the log file generously and set growth increments in fixed MB, not a percentage, so growth events shrink over time rather than getting larger as the file grows.</li>
+<li><strong>Wrong recovery model expectations.</strong> Full recovery model (the correct choice for a production ERP needing point-in-time restore) means the log only truncates on a log backup — infrequent log backups on a busy instance let the log grow unchecked and can force autogrow storms. Match log backup frequency to write volume, not a generic "nightly" default.</li>
+<li><strong>Log and data files sharing the same physical volume as each other, or as other busy databases.</strong> Sequential log writes and random data file reads compete for the same disk queue, and I/O from an unrelated database on the same volume shows up as unexplained Acumatica latency. Separate volumes for data, log, and tempdb where the deployment topology allows it.</li>
+</ul>
+
+<div class="callout-warn callout">
+  <strong>tempdb is Acumatica's quiet dependency</strong>
+  <p>Generic Inquiries, report queries with sorting/grouping, and BQL queries with distinct or aggregate operations lean on tempdb heavily. A single tempdb data file (the SQL Server default) under real concurrency creates allocation page contention regardless of how fast the underlying disk is. Configure multiple tempdb data files — a common starting rule is one file per CPU core up to about eight, all pre-sized equally — before assuming a slow GI's disk I/O problem is about the user database at all.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="cloud-storage-specifics">If you are on cloud-provisioned storage</h2>
+<p>Provisioned IOPS storage (Azure managed disks, AWS EBS, and similar) has a hard ceiling based on the disk tier you selected, not the instance size — you can have a large, fast VM attached to an undersized disk tier and never see the VM's own limits. Check the cloud provider's disk metrics for throttling, not just SQL Server's own DMVs, because SQL Server reports the latency it experiences without necessarily surfacing that the cause is a provisioned IOPS cap being hit.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica performance — diagnosing slow disk i/o. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Confirm disk I/O is the actual bottleneck with <code>sys.dm_io_virtual_file_stats</code> before spending money on faster storage. Separate log, data, and tempdb I/O in your analysis since they have different characteristics and different fixes, pre-size files to avoid autogrow stalls, and check cloud provisioned-IOPS limits separately from what SQL Server itself reports.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-perf-connection-pooling/">Acumatica Performance — Connection Pooling</a></li>
-      <li><a href="/blog/acumatica-perf-database-sharding/">Acumatica Performance — Database Sharding</a></li>
-      <li><a href="/blog/acumatica-perf-slow-gi-diagnosis/">Acumatica Performance — Diagnosing a Slow GI</a></li>
-      <li><a href="/blog/acumatica-perf-slow-report-diagnosis/">Acumatica Performance — Diagnosing a Slow Report</a></li>
+      <li><a href="/blog/acumatica-sql-server-indexing-for-acumatica/">SQL Server Indexing for Acumatica</a></li>
+      <li><a href="/blog/acumatica-database-migration-strategy/">Acumatica Database Migration Strategy</a></li>
+      <li><a href="/blog/acumatica-perf-cpu-profiling/">Acumatica Performance — CPU Profiling</a></li>
       <li><a href="/blog/acumatica-performance-tuning-the-definitive-guide/">Acumatica Performance Tuning — The Definitive Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

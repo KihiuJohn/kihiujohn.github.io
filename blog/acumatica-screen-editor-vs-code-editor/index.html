@@ -93,112 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The workflow tools in 2026 (n8n, Zapier, Make, Acumatica Business Events) are all capable. The difference between a workflow that survives and one that doesn't is the error handling. this is the part of the error handling that matters most.</p>
-<h2 id="why-acumatica-fails-at-3-am-and-what-to-do">Why acumatica fails at 3 AM and what to do</h2>
-<p>Why acumatica fails at 3 AM and what to do is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<h2 id="ordering-and-sequencing-in-screen">Ordering and sequencing in screen</h2>
-<p>In the work I have done on acumatica screen editor vs code editor — where to author, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the screen is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processScreen(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="the-runbook-for-acumatica">The runbook for acumatica</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="what-acumatica-screen-editor-vs-code-editor-where-to-author-is-for">What Acumatica Screen Editor vs Code Editor — Where to Author is for</h2>
-<p>The performance of screen in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>Production screen looks different from development screen. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
+    <p>Acumatica gives you two genuinely different ways to modify a screen's C# behavior — the customization project's in-browser Code Editor, and a real Visual Studio project referencing the instance's assemblies — and I still meet developers who default to the browser editor for everything, including work that would go faster and safer in Visual Studio. Here's the honest comparison, including the cases where the browser editor is actually the right call.</p>
+
+<h2 id="what-each-actually-is">Two different development experiences, same underlying customization mechanism</h2>
+<p>The <strong>in-browser Code Editor</strong>, accessible from within a Customization Project record, lets you write C# directly against the live instance, compile it in place, and see results without leaving the browser. There's no separate project file, no local build — the code lives inside the customization project's own storage.</p>
+<p>A <strong>Visual Studio solution</strong> referencing the instance's assemblies is an ordinary class library project, built locally, with the compiled DLL packaged into a customization project (or bin-deployed directly during active debugging) rather than the source living inside the project's browser-editable storage.</p>
+<p>Both ultimately produce the same kind of artifact — compiled code extending a DAC or graph — deployed through the same customization project mechanism. The difference is entirely in the development experience around getting there.</p>
+
+<h2 id="comparison">Where they genuinely differ</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring screen first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with screen when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+<tr><th>Aspect</th><th>Browser Code Editor</th><th>Visual Studio</th></tr>
+<tr><td>IntelliSense / autocomplete</td><td>Minimal to none</td><td>Full, against actual instance assemblies</td></tr>
+<tr><td>Debugging (breakpoints, step-through)</td><td>Not possible</td><td>Full debugger, attach to w3wp.exe</td></tr>
+<tr><td>Source control</td><td>None natively — code lives in the project's internal storage</td><td>Git, same as any other codebase</td></tr>
+<tr><td>Unit testing</td><td>Not feasible</td><td>Standard .NET test frameworks work</td></tr>
+<tr><td>Setup cost</td><td>Zero — open the browser and type</td><td>Real — SDK, matching version assemblies, project wiring</td></tr>
+<tr><td>Refactoring tools (rename, find usages)</td><td>None</td><td>Full IDE tooling</td></tr>
+<tr><td>Good for quick one-off scripts / diagnostics</td><td>Yes, genuinely convenient</td><td>Overkill for a five-line diagnostic snippet</td></tr>
 </table>
+
+<h2 id="when-browser-editor-is-actually-right">When I still reach for the browser editor</h2>
+<p>It's not purely a legacy or beginner tool — there are real cases where it's the faster, correct choice: quick diagnostic one-offs on a client's instance (a short script to check data state, not something that will ship as a permanent customization), rapid prototyping to confirm an approach works before investing in a proper Visual Studio project for the real implementation, and emergencies where a client needs an urgent small fix and setting up a full local environment against their exact instance version would cost more time than the fix itself. The common thread: small, throwaway, or genuinely urgent — never for anything that will live in production long-term.</p>
+
+<div class="callout-warn callout">
+  <strong>Code written in the browser editor is much easier to lose than developers expect</strong>
+  <p>Code living only inside a customization project's internal storage has none of source control's protections — no history, no branches, no backup beyond whatever export/backup discipline you separately maintain. I've seen real customization work lost because a customization project got deleted or corrupted and nobody had exported the project as a package recently. Any code written in the browser editor that's going to matter beyond the next hour should be exported and committed to source control promptly, or better, moved into a proper Visual Studio project the moment it's clear it's not throwaway.</p>
+</div>
+
+<h2 id="production-work-is-visual-studio-full-stop">For anything shipping to a client, Visual Studio is not optional</h2>
+<p>For real, ongoing customization work — the kind that will be maintained, extended, and upgraded across future Acumatica versions — a Visual Studio solution under source control is not a nice-to-have, it's the baseline professional standard, for reasons beyond just convenience: code review is only possible against a diff in a real repository; a second developer picking up the work needs git history and IntelliSense to be productive quickly; and debugging a production issue without breakpoints, working entirely from log statements and guesswork, is a genuinely worse and slower experience than most developers who've only used the browser editor realize until they've done both.</p>
+
+<h2 id="hybrid-workflow">The hybrid workflow that actually works well</h2>
+<p>My real day-to-day pattern: prototype fast in the browser editor when I'm still figuring out the right approach to a problem, confirm it works, then immediately port the confirmed approach into the Visual Studio solution as the real, source-controlled implementation, and delete the throwaway browser-editor version. The browser editor is a scratchpad for exploration; the Visual Studio project is where anything that matters actually lives. Treating the two as interchangeable, rather than as different stages of the same workflow, is where I see developers get into trouble — either wasting Visual Studio setup time on a five-minute diagnostic, or shipping unreviewable, unversioned browser-editor code as a permanent client customization.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica screen editor vs code editor — where to author. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The browser Code Editor and a Visual Studio solution aren't competing tools so much as different stages of the same workflow — the browser editor for fast, disposable exploration and genuine emergencies, Visual Studio for anything that will be maintained, reviewed, debugged properly, or shipped to production. The mistake to avoid isn't using the browser editor; it's forgetting to graduate real work out of it before it becomes an unversioned, undebuggable liability sitting inside a customization project's internal storage.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-workflow-from-template-to-custom-screen/">Acumatica Workflow — From Template to Custom Screen</a></li>
-      <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
-      <li><a href="/blog/acumatica-ar-dunning-letters-configuration/">Acumatica AR — Dunning Letters Configuration</a></li>
       <li><a href="/blog/acumatica-customization-the-definitive-guide/">Acumatica Customization — The Definitive Guide</a></li>
-      <li><a href="/blog/acumatica-employee-screen-deep-dive/">Acumatica Employee Screen — A Deep Dive</a></li>
+      <li><a href="/blog/acumatica-developer-setup-from-zero/">Acumatica Developer Setup From Zero</a></li>
+      <li><a href="/blog/acumatica-modern-ui-vs-classic-ui-development/">Acumatica Modern UI vs Classic UI Development</a></li>
+      <li><a href="/blog/acumatica-pxgraph-vs-pxgraph-extension-choosing/">PXGraph vs PXGraphExtension — Choosing the Right Tool</a></li>
+      <li><a href="/blog/acumatica-graph-extension-patterns/">Acumatica Graph Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

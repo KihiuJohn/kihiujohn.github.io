@@ -93,98 +93,35 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Cost optimisation: caching and batching is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>When an AI agent sits between a business process and the people it affects — deciding which AP invoices get flagged for fraud review, which AR accounts get escalated to collections, which vendors get recommended — bias isn't a hypothetical fairness debate, it's an operational risk. A model that consistently treats one group of customers or vendors differently from another, for reasons unrelated to legitimate business criteria, creates legal exposure and erodes trust in the system quietly, often before anyone notices.</p>
+<h2 id="where-bias-actually-enters-these-systems">Where bias actually enters these systems</h2>
+<p>Bias in an LLM-based agent rarely comes from the model being deliberately prejudiced — it comes from training data reflecting historical patterns, from evaluation that only checks aggregate accuracy, and from prompts or retrieved context that correlate with protected characteristics without anyone intending them to. A collections-escalation agent trained on historical human decisions will learn whatever bias existed in those historical decisions, including biases the humans making them weren't consciously aware of. The model doesn't introduce the bias; it launders it into something that looks automated and therefore falsely neutral.</p>
+<h2 id="disparate-impact-vs-disparate-treatment">Disparate impact vs. disparate treatment</h2>
+<p>These are two distinct failure modes worth naming separately. Disparate treatment is when the system explicitly uses a protected characteristic (or an obvious proxy for one, like zip code standing in for race) as an input to a decision. Disparate impact is when a facially neutral criterion — say, "flag accounts with irregular payment timing" — produces a statistically skewed outcome across groups even though no group membership was ever an explicit input. Disparate impact is the harder one to catch, because the system can pass a naive "we don't collect protected attributes" audit while still producing unequal outcomes.</p>
+<div class="callout-warn">
+  <strong>Removing a protected field from the input does not remove the bias</strong>
+  <p>Dropping name, zip code, or other obviously sensitive fields from what the model sees is necessary but not sufficient. Free-text fields (customer notes, email content, vendor names) frequently encode the same information indirectly, and an LLM is particularly good at picking up on subtle correlations in unstructured text that a simpler rules engine would never notice. Evaluate outcomes, not just inputs.</p>
+</div>
+<h2 id="evaluating-across-subgroups-not-just-in-aggregate">Evaluating across subgroups, not just in aggregate</h2>
+<p>A model that's 95% accurate overall can still be 99% accurate for one subgroup and 80% accurate for another — and aggregate accuracy alone will never surface that gap. Before trusting an agent's output for any decision that affects people differently, break the evaluation set down by the relevant subgroups (region, business size, language, whatever is contextually meaningful) and compare error rates and outcome rates across them, not just the overall number.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · SUBGROUP EVALUATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import pandas as pd
 
-def list_bias(query: str) -> str:
-    """List bias matching the query."""
-    response = requests.get(
-        f"https://api.example.com/bias",
-        params={"q": query}
-    )
-    return response.json()
+results = pd.DataFrame(eval_results)  # columns: subgroup, predicted, actual
 
-tools = [Tool(name="bias", func=list_bias, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="the-role-of-detection-in-the-agent-loop">The role of detection in the agent loop</h2>
-<p>In the work I have done on bias detection in ai agents, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="what-bias-detection-in-ai-agents-actually-does">What Bias Detection in AI Agents actually does</h2>
-<p>When the work moves from design to production, the questions change. The bias is not the question; the failure mode of the detection is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The performance of detection in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Production detection looks different from development detection. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+for subgroup, group in results.groupby("subgroup"):
+    accuracy = (group.predicted == group.actual).mean()
+    flag_rate = (group.predicted == "flag").mean()
+    print(f"{subgroup}: accuracy={accuracy:.2%}, flag_rate={flag_rate:.2%}")
 
-def list_bias(query: str) -> str:
-    """List bias matching the query."""
-    response = requests.get(
-        f"https://api.example.com/bias",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="bias", func=list_bias, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+# A large gap in flag_rate across subgroups, with similar underlying
+# risk profiles, is the signal worth investigating — not the aggregate score.</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring detection first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add bias on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with detection when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="human-review-as-a-bias-control-not-just-a-safety-net">Human review as a bias control, not just a safety net</h2>
+<p>Keeping a human in the loop for consequential decisions is usually framed as a hallucination safeguard, but it's equally a fairness control — provided the review process itself is measured. If reviewers rubber-stamp the model's recommendation at a high rate for one subgroup and scrutinize it heavily for another, the human layer has just re-introduced the same disparity the automation was supposed to guard against. Track override rates by subgroup, not just overall.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on bias detection in ai agents. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Bias in an AI agent is a measurement problem before it's a modeling problem — you cannot fix what you haven't broken down by subgroup and looked at honestly. Build the subgroup evaluation in from the start, treat disparate impact as seriously as disparate treatment, and don't assume that removing a sensitive field from the prompt removed the bias from the outcome. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -195,9 +132,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       <li><a href="/blog/ai-agent-aws-bedrock/">AWS Bedrock + Acumatica Integration</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

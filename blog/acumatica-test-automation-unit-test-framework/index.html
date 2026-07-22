@@ -93,78 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="channel-partner-programs-for-test">Channel partner programs for test</h2>
-<p>Channel partner programs for test is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica customizations tend to go untested for a structural reason: most of the business logic lives in PXGraph and PXGraphExtension classes that expect a live PXCache backed by a database connection, and the framework wasn't built with dependency injection in mind. That doesn't mean the logic is untestable — it means the test strategy has to work with the framework's grain rather than fight it, and know where to draw the line between unit tests, integration tests against a real instance, and UI automation.</p>
+
+<h2 id="why-acumatica-code-resists-unit-testing">Why Acumatica code resists unit testing</h2>
+<p>A typical event handler — a <code>RowUpdated</code> or <code>FieldUpdated</code> on a PXGraphExtension — reads and writes through <code>Base.Caches[typeof(SOOrder)]</code>, calls <code>PXSelect</code> against live tables, and often triggers cascading events on related graphs. None of that has an obvious seam for a mock. The pragmatic split: business logic that's pure calculation (tax rounding, a custom allocation formula, a validation rule that only reads fields already on the row) can be pulled into a plain static method or a small non-PXGraph class and unit tested directly with no Acumatica dependencies at all. Logic that genuinely needs the cache — anything reading related rows, checking cache state, or calling PXCache.SetValueExt — needs either a real (if minimal) PXCache or an integration-level test against a running instance. Trying to mock PXCache itself is usually more code than the logic it's testing; it's rarely worth it beyond a handful of interaction points.</p>
+
+<h2 id="testing-pxgraphextension-logic">Testing PXGraphExtension logic in isolation</h2>
+<p>Acumatica ships a Test Automation Framework built on a Selenium-driven UI layer, but for logic-level checks most teams end up writing plain NUnit or xUnit tests that instantiate the graph against a real (usually disposable) database rather than mocking PXContext wholesale — PXCache's internal state tracking is deep enough that a hand-rolled mock drifts out of sync with real behavior quickly. The practical pattern: keep a small seeded test database (or a snapshot restored per run), instantiate the graph extension through <code>PXGraph.CreateInstance&lt;T&gt;()</code>, push a row through the cache, and assert on the resulting field values or exceptions.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Test>
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION TEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>[TestFixture]
+public class SOOrderEntryExtTests
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+    [Test]
+    public void RowUpdated_BlocksOrder_WhenCreditLimitExceeded()
+    {
+        var graph = PXGraph.CreateInstance&lt;SOOrderEntry&gt;();
+        var ext = graph.GetExtension&lt;SOOrderEntryExt&gt;();
+
+        SOOrder order = graph.Document.Insert(new SOOrder
+        {
+            CustomerID = TestData.OverLimitCustomerId,
+            OrderNbr = "TEST-0001"
+        });
+
+        order.OrderTotal = 999999m;
+        graph.Document.Update(order);
+
+        var ex = Assert.Throws&lt;PXSetPropertyException&gt;(() => graph.Document.View.Cache.Persist(PXDBOperation.Insert));
+
+        Assert.That(ex.Message, Does.Contain("credit limit"));
+    }
 }</code></pre>
 </div>
-<h2 id="marketplace-listing-for-acumatica">Marketplace listing for acumatica</h2>
-<p>In the work I have done on acumatica test automation with the unit test framework, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>This runs against a real cache and a real (test) database connection rather than a mock, which is deliberately the boring choice — PXCache's validation and event pipeline is too intertwined to fake convincingly, and a database round trip in a seeded test instance is fast enough not to matter for a few hundred tests.</p>
+
+<h2 id="contract-tests-for-rest-endpoints">Contract tests for REST endpoints</h2>
+<p>For integrations built on Acumatica's contract-based REST API, the more valuable automated check is often not a unit test at all but a contract test: hit the generated OpenAPI/Swagger endpoint for the custom endpoint version, assert the schema hasn't silently changed shape (a field renamed, a required field dropped), and run a handful of black-box create/update/query calls against a seeded tenant. This catches the failure mode that unit tests miss entirely — a customization that compiles fine but changes the shape of data an external integration depends on.</p>
+
+<h2 id="ci-pipeline-considerations">CI pipeline considerations</h2>
+<p>Acumatica doesn't run in a lightweight container the way a typical web app does, so CI for Acumatica customizations usually looks different from a standard .NET pipeline. Common approach: maintain a golden database snapshot with representative seed data, restore it at the start of each pipeline run (or reuse a warm test instance and roll back via a database snapshot/restore rather than tearing the whole instance down), publish the customization package, run the NUnit suite against that instance, then discard the state. Full instance spin-up is expensive enough that most teams run it nightly or on a merge to a release branch rather than on every commit — pure unit tests with no Acumatica dependency run on every push, database-backed tests run less frequently.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Snapshot restore beats "clean up after yourself"</strong>
+  <p>Relying on each test to undo its own database changes gets fragile fast once tests run in parallel or a test fails mid-run and leaves orphaned data. Restoring a snapshot before the suite (or before each test class) is more code up front but far more reliable than a fleet of teardown methods that all have to be correct.</p>
 </div>
-<h2 id="soc-2-and-iso-27001-for-test">SOC 2 and ISO 27001 for test</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the test is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'acumatica'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="what-acumatica-test-automation-with-the-unit-test-framework-is-for">What Acumatica Test Automation with the Unit Test Framework is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM acumatica
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The performance of test in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>Production test looks different from development test. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AcumaticaExt : PXCacheExtension<Test>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring test first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with test when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="where-ui-automation-fits">Where UI automation fits</h2>
+<p>Selenium or Playwright against actual Acumatica screens has its place, but it's the most expensive and most brittle layer, so it should cover the smallest surface: end-to-end workflows that span multiple screens and can't be validated any other way — a sales order flowing through to a shipment, an invoice, and a GL posting, verified by reading the resulting screens rather than querying the database directly. Anything that can be verified with a database assertion or an API call doesn't need a browser. A healthy ratio looks like a large base of pure-logic unit tests, a smaller layer of cache/database-backed graph tests, a thin layer of contract tests on the REST surface, and a handful of UI smoke tests for the workflows that matter most to the business.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica test automation with the unit test framework. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Acumatica testing works when you stop trying to mock the framework and instead separate what's genuinely framework-independent (test it directly, fast and cheap) from what needs PXCache and a database (test it against a real seeded instance, restored per run) from what only a full UI flow can validate (test it sparingly). Get that split right and the suite catches real regressions without turning every commit into a ten-minute wait for a full instance to boot.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -175,9 +153,6 @@ public class AcumaticaExt : PXCacheExtension<Test>
       <li><a href="/blog/acumatica-canary-deployment/">Acumatica Canary Deployment</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

@@ -92,112 +92,75 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>From cron to events: the evolution is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Amount-based approval is the single most common workflow request I get, and also the one people most reliably get wrong on the first attempt — not because the Workflow engine can't express it, but because the amount that should gate approval is rarely the field people first reach for. This post is the pattern I actually use, with the currency and rounding traps that show up once real transactions start flowing.</p>
+
+<h2 id="which-amount-field">Pick the right amount field first</h2>
+<p>Every AP/AR/SO document carries several amount-shaped fields, and they are not interchangeable for approval logic: <code>CuryDocBal</code> (outstanding balance, moves as payments apply — wrong for approval, since an already-approved invoice would re-trigger as it gets paid down), <code>CuryOrigDocAmt</code> (the original document total in document currency — usually right), and <code>DocTotal</code> or <code>OrderTotal</code> in the base/company currency (right when you need one threshold across multi-currency documents, since a KES 500,000 order and a USD 5,000 order should probably hit the same approval bar in a multi-branch, multi-currency tenant).</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public static void Configure(WorkflowContext&lt;APInvoiceEntry, APInvoice&gt; context)
+{
+    var graph = context.Graph;
+    graph.WithTransitions(transitions => transitions
+        .AddGroupFrom&lt;APInvoice.status.Balanced&gt;(g => g
+            .Add(t => t
+                .To&lt;APInvoice.status.PendingApproval&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                // base-currency total, NOT CuryDocBal
+                .When(APInvoice.docTotal.IsGreaterEqual(500000m)))
+            .Add(t => t
+                .To&lt;APInvoice.status.Open&gt;()
+                .IsTriggeredOn(a => a.Actions.Release)
+                .When(APInvoice.docTotal.IsLess(500000m)))));
+}
+</code></pre>
 </div>
-<h2 id="what-acumatica-workflow-approval-by-amount-thresholds-is-for">What Acumatica Workflow — Approval by Amount Thresholds is for</h2>
-<p>In the work I have done on acumatica workflow — approval by amount thresholds, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the workflow is.</p>
+
+<h2 id="tiered-thresholds">Tiered thresholds, not a single cutoff</h2>
+<p>"Approval above $5,000" is the requirement as first stated and almost never the requirement as actually needed — real approval matrices are tiered: a supervisor approves up to $5,000, a controller up to $25,000, the CFO above that. Model this as a chain of transitions into <em>different</em> pending-approval states, each carrying its own approval map assignment, rather than one state with a single approver list and a mental "well actually check the amount again" step for the human approving it:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAcumatica(event) {
-    try {
-        const result = await processWorkflow(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>.Add(t => t.To&lt;APInvoice.status.PendingApprovalTier1&gt;()
+           .IsTriggeredOn(a => a.Actions.Release)
+           .When(APInvoice.docTotal.IsGreaterEqual(5000m)
+                 &amp; APInvoice.docTotal.IsLess(25000m)))
+.Add(t => t.To&lt;APInvoice.status.PendingApprovalTier2&gt;()
+           .IsTriggeredOn(a => a.Actions.Release)
+           .When(APInvoice.docTotal.IsGreaterEqual(25000m)))
+</code></pre>
 </div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+<p>Each tier state then gets its own row on the Assignment/Approval Maps screen (EP503010) with a distinct approver — a workgroup, a role, or a rule keyed off the vendor's owner. Keeping the states distinct also means your reporting on "what's stuck in tier-2 approval" is a plain status filter instead of a computed field.</p>
+
+<h2 id="rounding-and-boundary-behavior">Boundary rounding: decide it explicitly</h2>
+<p>Is an invoice for exactly $5,000.00 tier 1 or tier 2? <code>IsGreaterEqual</code> versus <code>IsGreater</code> on the boundary condition is a business decision, not a technical one — write it down in the requirements doc and pick consistently, because I have seen two adjacent tier conditions both use strict <code>IsGreater</code> at the same boundary, leaving a document at exactly the threshold matching neither transition and getting stuck with no eligible outbound transition at all. That failure mode is silent: the document just sits there with a Release button that does nothing, because no transition's condition matched.</p>
+
+<div class="callout-warn callout">
+  <strong>Gaps in tiered conditions strand documents</strong>
+  <p>Whenever you build adjacent numeric tiers, verify the boundaries are complementary — one tier's upper bound should be exactly the next tier's lower bound, using consistent >= / < pairing. Test the exact boundary value, not just values comfortably inside each tier; that's where gaps hide.</p>
 </div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        acumatica: item.json.acumatica,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>The performance of workflow in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>Production workflow looks different from development workflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Acumatica", "type": "n8n-nodes-base.acumatica"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Acumatica"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring workflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with workflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="approval-map-mechanics">Wiring the approval map itself</h2>
+<p>The transition gets you into a pending-approval state; the Assignment and Approval Maps screen decides who has to act. A map row references the graph, the specific status, and an assignment rule — by employee, by role, or (the one clients actually want) by a condition on the document itself, such as "the vendor's assigned buyer" resolved through a relation to <code>EPEmployee</code>. Multiple approvers on one map row can be sequential or require-all; that's a parallel-approval concern I cover separately, but for a straight amount ladder, one approver per tier is usually the whole requirement.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica workflow — approval by amount thresholds. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Amount-based approval done well is three decisions made deliberately: which amount field (base currency total, not a balance that moves), how many tiers (distinct states, not one state with fuzzy logic), and boundary inclusivity (verified with an exact-value test, not eyeballed). Get those three right and the approval map configuration on EP503010 is almost mechanical.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-conditional-assignment/">Acumatica Workflow — Conditional Assignment</a></li>
-      <li><a href="/blog/acumatica-workflow-credit-memo-approval/">Acumatica Workflow — Credit Memo Approval</a></li>
-      <li><a href="/blog/acumatica-workflow-discount-approval/">Acumatica Workflow — Discount Approval Patterns</a></li>
-      <li><a href="/blog/acumatica-workflow-document-routing/">Acumatica Workflow — Document Routing Patterns</a></li>
+      <li><a href="/blog/acumatica-workflow-bill-approval/">Acumatica Workflow — Bill Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-purchase-order-approval/">Acumatica Workflow — Purchase Order Approval</a></li>
+      <li><a href="/blog/acumatica-workflow-parallel-approvals/">Acumatica Workflow — Parallel Approvals</a></li>
+      <li><a href="/blog/acumatica-workflow-engine-the-definitive-guide/">Acumatica Workflow Engine — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-ap-module-extension-patterns/">Acumatica AP Module Extension Patterns</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

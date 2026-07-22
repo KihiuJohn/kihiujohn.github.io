@@ -93,107 +93,70 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAuditExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Audit(Acumatica doc)
-    {
-        // Custom audit logic for acumatica audit trail
-        if (doc?.Audit == null) return;
-        Base.Audit(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on acumatica audit trail configuration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-audit-edge-cases-i-have-shipped">The audit edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the audit is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>An auditor asked a client of mine, mid-engagement, to prove exactly who changed a specific vendor's bank account details and when, with before-and-after values, not just a log entry saying "record updated." That is the moment audit trail configuration stops being a compliance checkbox and becomes something you actually have to get right, and Acumatica's field-level audit history can answer that question well, provided it was turned on for the right DACs before the change happened, not after.</p>
+
+<h2 id="two-different-audit-mechanisms">Two mechanisms that both get called "audit trail," and they answer different questions</h2>
+<p>Acumatica actually has two largely separate audit capabilities that people conflate. The Audit History screen (SM202020, backed by field-level change tracking configured per DAC) records before-and-after values for specific fields on specific tables, answering "what changed on this record, and what was the old value." Separately, the platform's Trace and Login Audit facilities record who logged in, what screens they accessed, and what SQL executed, answering "who was in the system and what did they touch," a much broader but shallower record. A client asking for "an audit trail" usually means the first one, field-level history with before-and-after values, but I always confirm which question they actually need answered before configuring anything, because the two features live in completely different places and neither substitutes for the other.</p>
+
+<h2 id="enabling-field-level-audit">Turning on field-level audit is per-DAC and per-field, not global</h2>
+<p>Audit History is enabled DAC by DAC through the Audit History screen, and within an audited DAC, individual fields can be included or excluded. This granularity is deliberate, auditing every field on a high-volume transactional table like <code>SOLine</code> would generate enormous history volume for fields nobody will ever ask about, so the practical exercise is identifying exactly which fields on which DACs carry real audit risk, financial amounts, approval statuses, bank details, credit limits, rather than defaulting to "audit everything" and paying for it in both storage and query performance later.</p>
+
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Decide what needs auditing before go-live, retroactive audit has no history to show</strong>
+  <p>Audit History only captures changes made after auditing was enabled for that field. If an auditor asks for the change history on a field that was never configured for audit tracking, there is no way to reconstruct it after the fact, no hidden log to enable retroactively. Any client engagement with real compliance requirements, SOC 2, financial audit, regulatory reporting, needs an explicit audit-scope conversation during requirements gathering, not after the first audit request arrives.</p>
 </div>
-<h2 id="how-to-debug-audit-in-production">How to debug audit in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="custom-fields-need-explicit-inclusion">Custom fields added via DAC extension are not audited automatically</h2>
+<p>A field you add through <code>PXCacheExtension&lt;T&gt;</code> does not automatically inherit audit tracking just because the base DAC has some fields audited. Custom fields need to be explicitly added to the Audit History configuration for that DAC, the same way any base field would be. This is a common gap on customized instances, a client adds a custom "Approval Override Reason" field to a screen specifically because of a compliance requirement, and nobody remembers to also register that new field for audit tracking, so the very field added for compliance reasons ends up outside the audit trail.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// The field itself needs nothing special in code to be auditable,
+// audit tracking is a configuration layer over the cache, not a
+// DAC attribute. But it only takes effect once the field is
+// explicitly added to that DAC's Audit History configuration.
+[PXDBString(250, IsUnicode = true)]
+[PXUIField(DisplayName = "Approval Override Reason")]
+public string UsrApprovalOverrideReason { get; set; }
+public abstract class usrApprovalOverrideReason : PX.Data.BQL.BqlString.Field&lt;usrApprovalOverrideReason&gt; { }
+</code></pre>
 </div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>The performance of audit in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-acumatica-audit-trail-configuration-matters-in-production">Why Acumatica Audit Trail Configuration matters in production</h2>
-<p>Production audit looks different from development audit. The difference is rarely the algorithm; the difference is the failure handling.</p>
+
+<h2 id="reading-the-history">Querying audit history programmatically, not just through the UI screen</h2>
+<p>For integrations or custom reports that need to surface change history rather than send a user to the Audit History screen, the underlying audit tables are queryable through BQL like any other DAC, which is useful for building a compliance-facing report that shows exactly the fields an auditor cares about without making them navigate the generic audit UI:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaAuditExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Audit(Acumatica doc)
-    {
-        // Custom audit logic for acumatica audit trail
-        if (doc?.Audit == null) return;
-        Base.Audit(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Querying audit history for a specific record and field range,
+// for a custom compliance report rather than the generic screen.
+var history = PXSelect&lt;PXAudit,
+    Where&lt;PXAudit.tableName, Equal&lt;Required&lt;PXAudit.tableName&gt;&gt;,
+    And&lt;PXAudit.recordID, Equal&lt;Required&lt;PXAudit.recordID&gt;&gt;&gt;&gt;&gt;
+    .Select(Base, "APVendor", vendorNoteID);
+</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring audit first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with audit when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>The exact audit table and field names vary by platform version, worth confirming against the SDK reference for the instance version you're targeting, but the pattern, treating audit history as queryable data rather than a UI-only feature, is what lets you build compliance reporting that matches exactly what an auditor is going to ask for instead of hoping the generic screen's export is good enough.</p>
+
+<h2 id="performance-and-retention">Audit history has a real storage and performance cost worth planning for</h2>
+<p>Every audited field change writes an additional audit record, on top of the transaction's normal persistence cost, and on a high-volume table with several audited fields, that adds up over years of operation. Clients rarely think about retention policy for audit data until the table is large enough to slow down the Audit History screen itself. Plan an explicit retention or archiving strategy for audit tables on high-volume DACs from the start, the same way you would for any other fast-growing table, rather than treating audit history as a feature you enable once and never revisit.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica audit trail configuration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Field-level audit trail in Acumatica is genuinely capable, before-and-after values, per-field granularity, queryable through BQL, but it only covers what was explicitly configured before the change happened, and custom fields added through DAC extensions need to be registered for audit tracking deliberately, they don't inherit it. Have the audit-scope conversation during requirements gathering rather than after the first compliance request, and plan retention for audit tables on high-volume DACs before they become a performance problem in their own right.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-gdpr-data-subject-requests/">Acumatica GDPR — Data Subject Requests</a></li>
       <li><a href="/blog/acumatica-gi-audit-trail/">Acumatica GI Audit Trail — Who Ran What When</a></li>
-      <li><a href="/blog/acumatica-pii-discovery-scanning/">Acumatica PII Discovery and Scanning</a></li>
-      <li><a href="/blog/sbom-software-bill-of-materials/">SBOM for Production Software</a></li>
-      <li><a href="/blog/vertical-saas-hipaa-compliance-acumatica/">HIPAA Compliance for Healthcare Vertical on Acumatica</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security — Best Practices</a></li>
+      <li><a href="/blog/acumatica-rowlevelsecurity-with-graph-extensions/">Row-Level Security with Acumatica Graph Extensions</a></li>
+      <li><a href="/blog/acumatica-events-row-selected-row-inserted-explained/">Acumatica Events Explained — RowSelected, RowInserted, and Friends</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

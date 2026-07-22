@@ -93,100 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On a SaaS P&L, this is rarely the headline. The headline is revenue and churn. this is the metric that tells you whether the headline is going up or down. This article is how to measure it correctly and how to act on it.</p>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>How it interacts with other metrics is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Civil engineering firms sit in an odd spot when they come to me for an Acumatica implementation: they are project-based like a construction company, but the work is design and inspection, not field labor and subcontracts. I want to be direct about this up front, because it saves a scoping conversation later — a civil engineering firm's core need is almost always the Projects module done well, not Construction Edition's field-construction features.</p>
+
+<h2 id="what-actually-matters">What civil engineering firms actually need from the platform</h2>
+<p>Multi-phase project budgets (design, permitting, construction administration each as separate tasks or projects), billable time capture by engineer with different bill rates by role, and billing rules that support both time-and-materials and fixed-fee-by-phase are the core requirements, and all of that is standard Acumatica Projects — budgets, tasks, time and expense entry, and configurable billing rules that support progress and milestone billing in addition to straight T&M.</p>
+
+<h2 id="where-construction-edition-does-fit">Where Construction Edition genuinely fits, for the minority of firms</h2>
+<p>If the firm also does construction administration or inspection services on projects where a GC is doing the building — reviewing RFIs, tracking submittals from a design-oversight seat rather than a builder seat — Construction Edition's RFI and submittal logs can be useful even without the commitment and AIA billing pieces, because that workflow tooling is not exclusive to contractors. I have set this up for one firm doing CA/CO (construction administration/construction observation) work, and the RFI log was the one Construction Edition feature that mattered; the AIA billing and subcontract commitment tracking were irrelevant and left unconfigured.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">CONFIG · TYPICAL PHASE-BASED BUDGET STRUCTURE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Project: 24-118 Riverside Culvert Replacement
+  Task 100  Preliminary Design         Bill method: Fixed Fee
+  Task 200  Permitting &amp; Agency Review Bill method: T&amp;M, not-to-exceed cap
+  Task 300  Final Design &amp; Bid Docs    Bill method: Fixed Fee, milestone
+  Task 400  Construction Administration Bill method: T&amp;M</code></pre>
 </div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>In the work I have done on civil engineering vertical on acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+
+<div class="callout-warn callout">
+  <strong>Not-to-exceed caps need a real control, not a policy</strong>
+  <p>"Bill T&amp;M but don't exceed $40,000 without client sign-off" is a common civil engineering contract term, and Acumatica does not enforce a cap by default — it is a validation you add on the time entry or billing screen, checking cumulative billed amount against the task's budgeted revenue ceiling before allowing further billing. Without it, the system will happily generate an invoice that blows through the client's cap, and the firm finds out when the client calls.</p>
 </div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>When the work moves from design to production, the questions change. The civil is not the question; the failure mode of the engineering is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="why-civil-is-the-first-thing-to-look-at">Why civil is the first thing to look at</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="how-engineering-distorts-the-picture">How engineering distorts the picture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, engineering, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>The performance of engineering in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="the-cohort-retention-curve-for-civil">The cohort retention curve for civil</h2>
-<p>Production engineering looks different from development engineering. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring engineering first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add civil on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with engineering when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on civil engineering vertical on acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Resist the temptation to sell (or buy) Construction Edition for a civil engineering firm on reputation alone. Scope against the actual work: phase-based budgets and flexible billing rules cover the design side completely on standard Projects, and Construction Edition's field-workflow tools only earn their place if the firm does hands-on construction administration.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/vertical-saas-commercial-construction-acumatica/">Commercial Construction Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-contract-acumatica/">Construction Contract Management on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-equipment-acumatica/">Construction Equipment Rental Vertical on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-construction-on-acumatica/">Building a Construction Vertical SaaS on Acumatica</a></li>
-      <li><a href="/blog/vertical-saas-engineering-firm-acumatica/">Engineering Firm Management Vertical on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-engineering-firm-acumatica/">Engineering Firms on Acumatica</a></li>
+      <li><a href="/blog/vertical-saas-architecture-firm-acumatica/">Architecture Firms on Acumatica</a></li>
+      <li><a href="/blog/acumatica-project-billing-rules-progress-milestone/">Acumatica Project Billing Rules — Progress and Milestone</a></li>
+      <li><a href="/blog/acumatica-projects-time-and-expense-capture/">Acumatica Projects Time and Expense Capture</a></li>
+      <li><a href="/blog/acumatica-project-screen-deep-dive/">Acumatica Project Screen Deep Dive</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

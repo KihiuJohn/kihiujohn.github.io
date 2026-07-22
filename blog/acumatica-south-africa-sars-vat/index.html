@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica South Africa SARS VAT — A Complete Guide | John Kihiu</title>
-<meta name="description" content="Acumatica South Africa SARS VAT — A Complete Guide is one of those projects that every Acumatica implementer in Africa eventually takes on, and one that no two countries do the.">
+<meta name="description" content="Configuring Acumatica for South African VAT at the 15% standard rate — tax zones and categories, zero-rated and exempt handling, and mapping the ledger to the SARS VAT201 return.">
 <meta name="keywords" content="Acumatica tax, Acumatica finance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-south-africa-sars-vat/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica South Africa SARS VAT — A Complete Guide">
-<meta property="og:description" content="Acumatica South Africa SARS VAT — A Complete Guide is one of those projects that every Acumatica implementer in Africa eventually takes on, and one that no two countries do the.">
+<meta property="og:description" content="Configuring Acumatica for South African VAT at the 15% standard rate — tax zones and categories, zero-rated and exempt handling, and mapping the ledger to the SARS VAT201 return.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-south-africa-sars-vat.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-south-africa-sars-vat/">
 <meta property="article:author" content="John Kihiu">
@@ -20,7 +20,7 @@
 <meta property="article:tag" content="finance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica South Africa SARS VAT — A Complete Guide","description":"Acumatica South Africa SARS VAT — A Complete Guide is one of those projects that every Acumatica implementer in Africa eventually takes on, and one that no two countries do the.","image":"https://kihiujohn.github.io/assets/og/acumatica-south-africa-sars-vat.svg","datePublished":"2026-06-09","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-south-africa-sars-vat/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica South Africa SARS VAT — A Complete Guide","description":"Configuring Acumatica for South African VAT at the 15% standard rate — tax zones and categories, zero-rated and exempt handling, and mapping the ledger to the SARS VAT201 return.","image":"https://kihiujohn.github.io/assets/og/acumatica-south-africa-sars-vat.svg","datePublished":"2026-06-09","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-south-africa-sars-vat/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica South Africa SARS VAT — A Complete Guide","item":"https://kihiujohn.github.io/blog/acumatica-south-africa-sars-vat/"}]}
@@ -86,88 +86,62 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica South Africa SARS VAT — A Complete Guide</span></nav>
     <span class="tag">Tax / Fiscal · Tax</span>
     <h1>Acumatica South Africa SARS VAT — A Complete Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica South Africa SARS VAT — A Complete Guide is one of those projects that every Acumatica implementer in Africa eventually takes on, and one that no two countries do the.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Configuring Acumatica for South African VAT at the 15% standard rate — tax zones and categories, zero-rated and exempt handling, and mapping the ledger to the SARS VAT201 return.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-09">Jun 9, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Tax fiscalisation in East and Southern Africa is a per-jurisdiction problem. this is the pattern that handles the specific regulatory requirements without making the codebase unmaintainable. This article is the field-tested implementation, with the device registration, the offline buffering, and the audit trail.</p>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>Reconciliation and audit trail is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>South African VAT is, on paper, one of the simpler regimes to configure: a single standard rate (15%), a set of zero-rated and exempt supplies, and a periodic return — the <strong>VAT201</strong> — filed to SARS through eFiling. The work in Acumatica is not exotic device integration; it is getting the tax zones, tax categories, and tax IDs set up so that every transaction lands in the right box of the VAT201, and so that the VAT report reconciles to the general ledger at the end of the period.</p>
+
+<h2 id="the-shape-of-sa-vat">The shape of South African VAT</h2>
+<p>Three treatments cover almost everything. <strong>Standard-rated</strong> supplies carry 15% output VAT on sales and allow input VAT deduction on purchases. <strong>Zero-rated</strong> supplies (exports, certain basic foodstuffs, fuel) are taxable at 0% — they still appear on the return, and the vendor can claim input VAT. <strong>Exempt</strong> supplies (financial services, residential rent) carry no VAT and do not allow input deduction. The distinction between zero-rated and exempt is the one people get wrong, and it changes what you can claim, so model them as separate tax categories rather than lumping both under "no VAT".</p>
+
+<h2 id="tax-configuration">Configuring taxes in Acumatica</h2>
+<p>Acumatica's tax model has three layers that combine to produce the rate on a document: the <strong>Tax</strong> (the rate and its GL accounts), the <strong>Tax Category</strong> (attached to items and accounts, saying "this thing is standard-rated"), and the <strong>Tax Zone</strong> (attached to customers and vendors, saying "this party is in South Africa"). A line picks up tax when its category and the party's zone intersect. Set up one tax each for the output and input side at 15%, plus zero-rated and exempt taxes, and wire each to the correct VAT control accounts.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · TAX SETUP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Tax ZA-VAT15-OUT   15%   Output VAT (sales)      -> VAT payable (liability)
+Tax ZA-VAT15-IN    15%   Input VAT (purchases)   -> VAT receivable (asset)
+Tax ZA-ZERO         0%   Zero-rated supplies     -> reported, no VAT
+Tax ZA-EXEMPT      n/a   Exempt supplies         -> no VAT, no input claim
+
+Tax Category  STD   -> ZA-VAT15-OUT / ZA-VAT15-IN
+Tax Category  ZERO  -> ZA-ZERO
+Tax Category  EXMPT -> ZA-EXEMPT
+
+Tax Zone  ZA  -> customers &amp; vendors registered for SA VAT</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on acumatica south africa sars vat — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout">
+  <strong>Separate output and input control accounts</strong>
+  <p>Keep VAT payable (output) and VAT receivable (input) in distinct GL accounts. The VAT201 nets them, but during a period you want to see each side independently — it makes the return reconcile cleanly and makes an over- or under-claim obvious before you file, not after SARS queries it.</p>
+</div>
+
+<h2 id="tax-invoice-requirements">Tax invoice requirements</h2>
+<p>SARS has specific requirements for a valid tax invoice: the words "Tax Invoice", the supplier's and (above a threshold) the recipient's VAT registration number, a serial number, the date, and the VAT shown separately or the statement that the price includes VAT. Acumatica handles most of this through the invoice form, but the VAT registration numbers and the "Tax Invoice" wording usually need to be added to the printed form template. Get this right early — an invoice that is not a valid tax invoice cannot be used by your customer to claim input VAT, and that generates support calls fast.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>The VAT number is not optional above the threshold</strong>
+  <p>For invoices above the SARS full-tax-invoice threshold, the recipient's VAT number is a legal requirement. If your customer master doesn't capture it, the printed invoice is defective. Add VAT registration as a required field on the customer for the ZA tax zone rather than trusting people to fill it in per invoice.</p>
 </div>
-<h2 id="why-acumatica-requires-a-vault">Why acumatica requires a vault</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the south is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="certificate-lifecycle-for-south">Certificate lifecycle for south</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="clock-sync-and-acumatica">Clock sync and acumatica</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="the-audit-trail-for-south">The audit trail for south</h2>
-<p>The performance of south in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="cross-border-considerations-for-acumatica">Cross-border considerations for acumatica</h2>
-<p>Production south looks different from development south. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
+
+<h2 id="mapping-to-vat201">Mapping to the VAT201</h2>
+<p>The VAT201 return has numbered fields: output tax on standard-rated supplies, zero-rated supplies, input tax, capital-goods input, and so on. The practical goal of your setup is that Acumatica's VAT report (or a tax report configured to the VAT201 boxes) can be produced by reading the tax control accounts and the tax detail. Configure the tax report codes so each tax maps to its VAT201 field; then filing is a matter of transcribing report totals into eFiling, and the numbers already tie back to the ledger.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring south first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with south when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>VAT201 area</th><th>Source in Acumatica</th></tr>
+  <tr><td>Standard-rated output (Block 1)</td><td>Sales tagged STD category, output tax total</td></tr>
+  <tr><td>Zero-rated supplies</td><td>Sales tagged ZERO category</td></tr>
+  <tr><td>Input tax (Block 14/15)</td><td>Purchases with input VAT, capital vs other</td></tr>
+  <tr><td>Net VAT payable/refundable</td><td>Output control less input control</td></tr>
 </table>
+
+<h2 id="periods-and-reconciliation">Periods and reconciliation</h2>
+<p>Most vendors file the VAT201 every two months on a category cycle SARS assigns; larger turnovers file monthly. Align your tax period configuration to that cycle so a period's report is exactly one return. At close, reconcile the VAT report to the control-account balances: if the report says you owe an amount and the GL control accounts say something else, you have a transaction with the wrong tax category or a manual journal that bypassed the tax logic. Find it before filing — SARS reconciles the same numbers.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+<p>The recurring ones: treating exempt supplies as zero-rated (and wrongly claiming input VAT), posting manual GL journals straight to the VAT control account so they never appear on the tax report, and forgetting that imports carry VAT at customs that must be claimed as input tax on a different document trail. Each shows up as a mismatch between the tax report and the ledger — which is exactly why the period-end reconciliation is non-negotiable.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica south africa sars vat — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>SARS VAT in Acumatica is a configuration exercise, not an integration one: define the standard, zero-rated, and exempt taxes with clean control accounts, attach categories and zones so transactions self-classify, make the printed invoice a valid tax invoice, and map the taxes to the VAT201 boxes. Do that and each period's return falls out of a report that already agrees with the general ledger. If you are setting this up for a specific entity, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -178,9 +152,6 @@ var response = api.RegisterDevice(device);</code></pre>
       <li><a href="/blog/acumatica-zambia-turnover-tax/">Acumatica Zambia Turnover Tax — A Complete Guide</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>

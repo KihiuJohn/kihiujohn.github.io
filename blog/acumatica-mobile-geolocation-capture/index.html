@@ -93,107 +93,104 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A field services client asked for something that sounded simple: "tag every service call with GPS coordinates when the technician marks it complete, so we can prove the technician was actually on site." Geolocation capture on Acumatica Mobile is genuinely straightforward to wire up mechanically. The part that takes real design thinking is everything around it — accuracy expectations, what happens without signal, and the fact that "prove someone was on site" is a claim with legal weight that a sloppy implementation can't actually support.</p>
+
+<h2 id="the-capability-container">Wiring a location field into a mobile screen</h2>
+<p>Geolocation on Acumatica Mobile is exposed through a device capability container in the MSDL patch, backed by two decimal DAC fields (latitude and longitude) plus, in most implementations I build, a timestamp and an accuracy-radius field alongside them:</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMobileExt : PXGraphExtension<AcumaticaEntry>
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public sealed class FSAppointmentExt : PXCacheExtension&lt;FSAppointment&gt;
 {
-    [PXOverride]
-    public virtual void Mobile(Acumatica doc)
+    public static bool IsActive() =&gt; true;
+
+    [PXDBDecimal(6)]
+    [PXUIField(DisplayName = "Capture Latitude")]
+    public decimal? UsrCaptureLat { get; set; }
+    public abstract class usrCaptureLat : PX.Data.BQL.BqlDecimal.Field&lt;usrCaptureLat&gt; { }
+
+    [PXDBDecimal(6)]
+    [PXUIField(DisplayName = "Capture Longitude")]
+    public decimal? UsrCaptureLng { get; set; }
+    public abstract class usrCaptureLng : PX.Data.BQL.BqlDecimal.Field&lt;usrCaptureLng&gt; { }
+
+    [PXDBDecimal(1)]
+    [PXUIField(DisplayName = "Accuracy (m)")]
+    public decimal? UsrCaptureAccuracy { get; set; }
+    public abstract class usrCaptureAccuracy : PX.Data.BQL.BqlDecimal.Field&lt;usrCaptureAccuracy&gt; { }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">XML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;mobile&gt;
+  &lt;screen key="FS300100"&gt;
+    &lt;container name="Header"&gt;
+      &lt;field name="UsrCaptureLat" geolocation="true" role="latitude" /&gt;
+      &lt;field name="UsrCaptureLng" geolocation="true" role="longitude" /&gt;
+    &lt;/container&gt;
+  &lt;/screen&gt;
+&lt;/mobile&gt;
+</code></pre>
+</div>
+
+<p>The mobile app requests the device's location through its native OS permission prompt (which the user must have granted for the app), and populates the mapped fields on capture. Decimal(6) precision on latitude/longitude is deliberate — six decimal places resolves to roughly 10cm, which is more precision than consumer GPS actually delivers but avoids being the bottleneck; storing fewer decimal places measurably degrades usable accuracy.</p>
+
+<h2 id="accuracy-is-not-optional-metadata">Capture accuracy alongside the coordinates, not just the coordinates</h2>
+<p>The single biggest mistake in geolocation implementations I've reviewed: storing latitude and longitude without also storing the device-reported accuracy radius. Consumer GPS accuracy varies wildly — 5 meters in open sky, 50+ meters between tall buildings or indoors, sometimes far worse on older devices or with location services degraded to save battery. A coordinate pair with no accuracy figure attached is a claim you can't actually stand behind if a client ever disputes "was the technician on site." Capturing the accuracy value the OS reports alongside the coordinates, and surfacing it downstream (a GI flagging captures above a threshold as "low confidence"), is what makes the feature legally and operationally useful rather than just a pin on a map nobody trusts.</p>
+
+<div class="callout-warn callout">
+  <strong>Geolocation capture without connectivity does not mean no capture</strong>
+  <p>GPS itself works without a network connection — a device with no signal can still resolve coordinates from satellites, though it takes longer without assisted-GPS data from a cell network. Don't gate geolocation capture behind "online" checks in your mobile screen logic; the coordinates should capture and queue locally like any other offline field, syncing to the server once connectivity returns. Conflating "no network" with "no GPS" is a common design mistake that strips the feature of its value in exactly the low-connectivity field scenarios it's usually built for.</p>
+</div>
+
+<h2 id="server-side-validation">Validate distance server-side, not just capture it</h2>
+<p>If the business requirement is genuinely "prove the technician was near the customer site," raw coordinate storage alone doesn't satisfy it — you need a server-side comparison against the customer's registered address coordinates, computed on <code>RowPersisting</code> when the appointment is marked complete:</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">C#</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>protected virtual void _(Events.RowPersisting&lt;FSAppointment&gt; e)
+{
+    var row = (FSAppointment)e.Row;
+    var ext = row?.GetExtension&lt;FSAppointmentExt&gt;();
+    if (row == null || row.Status != "C" || ext?.UsrCaptureLat == null) return;
+
+    var siteCoords = GetSiteCoordinates(row.LocationID); // your own lookup
+    var distanceMeters = HaversineDistance(
+        (double)ext.UsrCaptureLat.Value, (double)ext.UsrCaptureLng.Value,
+        siteCoords.Lat, siteCoords.Lng);
+
+    if (distanceMeters &gt; 500) // configurable per business
     {
-        // Custom mobile logic for acumatica mobile geolocation
-        if (doc?.Mobile == null) return;
-        Base.Mobile(doc);
+        ext.UsrLocationFlag = "OUT_OF_RANGE"; // flag, don't silently block —
+        // a legitimate reason (customer met tech at gate, poor GPS fix)
+        // is common enough that hard-blocking the save creates support tickets
     }
 }</code></pre>
 </div>
-<h2 id="the-mobile-edge-cases-i-have-shipped">The mobile edge cases I have shipped</h2>
-<p>In the work I have done on acumatica mobile geolocation capture — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-acumatica-changes">Migration path when acumatica changes</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the mobile is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for acumatica
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-mobile-in-production">How to debug mobile in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-acumatica-that-works">The version of acumatica that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-acumatica-mobile-geolocation-capture-a-complete-guide-matters-in-production">Why Acumatica Mobile Geolocation Capture — A Complete Guide matters in production</h2>
-<p>The performance of mobile in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production mobile looks different from development mobile. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AcumaticaMobileExt : PXGraphExtension<AcumaticaEntry>
-{
-    [PXOverride]
-    public virtual void Mobile(Acumatica doc)
-    {
-        // Custom mobile logic for acumatica mobile geolocation
-        if (doc?.Mobile == null) return;
-        Base.Mobile(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mobile first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mobile when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<p>I flag rather than hard-block in almost every implementation, because GPS drift and legitimate off-site meetings are common enough that a hard block turns into a stream of support tickets from technicians who did nothing wrong. Flag for review, let a supervisor clear exceptions, and reserve hard blocking for cases with a genuinely zero-tolerance business reason.</p>
+
+<h2 id="privacy">Battery and privacy considerations that come up in every rollout</h2>
+<p>Continuous background location tracking is a different feature entirely from point-in-time capture, with materially different privacy, battery, and (in some jurisdictions) legal-consent implications for tracking employees. Every geolocation feature I scope explicitly confirms with the client whether they want point-in-time capture (attached to a specific action — appointment start, appointment complete) or continuous tracking, because clients sometimes ask for the former using language that describes the latter, and the two are not remotely the same undertaking.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica mobile geolocation capture — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Geolocation capture on Acumatica Mobile is a short MSDL patch and two or three decimal fields mechanically — the design work is in capturing accuracy alongside coordinates so the data means something, treating GPS as available offline even without network connectivity, and validating distance server-side with a flag-not-block posture unless the business genuinely needs a hard rule. Scope point-in-time capture versus continuous tracking explicitly; they are different features with different implications, even though clients often describe them with the same sentence.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/acumatica-field-service-dispatch-board/">Acumatica Field Service — Dispatch Board</a></li>
-      <li><a href="/blog/acumatica-mobile-app-customization/">Acumatica Mobile App Customization</a></li>
-      <li><a href="/blog/acumatica-mobile-barcode-scanning/">Acumatica Mobile Barcode Scanning — A Complete Guide</a></li>
-      <li><a href="/blog/acumatica-mobile-framework-swagger-and-the-mf/">Acumatica Mobile Framework — Swagger and the MF</a></li>
-      <li><a href="/blog/acumatica-mobile-offline-mode/">Acumatica Mobile Offline Mode — A Complete Guide</a></li>
+      <li><a href="/blog/acumatica-mobile-barcode-scanning/">Acumatica Mobile Barcode Scanning</a></li>
+      <li><a href="/blog/acumatica-mobile-photo-attachment/">Acumatica Mobile Photo Attachment Capture</a></li>
+      <li><a href="/blog/acumatica-mobile-framework-swagger-and-the-mf/">Acumatica Mobile Framework — Swagger and the MSDL</a></li>
+      <li><a href="/blog/acumatica-mobile-offline-mode/">Acumatica Mobile Offline Mode — What Actually Works</a></li>
+      <li><a href="/blog/acumatica-field-level-attribs-decimal-precision/">Acumatica Field Attributes — Decimal Precision and the Ones That Bite</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>

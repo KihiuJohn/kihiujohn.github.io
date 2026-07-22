@@ -94,96 +94,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="what-building-a-healthcare-vertical-saas-on-acumatica-a-complete-guide-is-for">What Building a Healthcare Vertical SaaS on Acumatica — A Complete Guide is for</h2>
-<p>What Building a Healthcare Vertical SaaS on Acumatica — A Complete Guide is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Healthcare on Acumatica" gets pitched a lot more broadly than it should be. It is worth being precise about what that phrase can honestly mean, because the honest scope is narrower than a sales deck and more useful than the broad version once you know it.</p>
+
+<h2 id="what-acumatica-is-in-healthcare">What Acumatica is: the back office, not the point of care</h2>
+<p>Acumatica has no clinical module. It does not chart patients, does not schedule appointments against a clinician's calendar, does not manage treatment plans, and is not a certified EHR under any federal certification program. What it is, credibly, is a general-purpose ERP that a healthcare organization's finance, supply chain, and operations teams can run on — general ledger, AP/AR, fixed assets, multi-entity consolidation, and inventory management for organizations that also stock physical goods (medical supplies, pharmaceuticals, durable equipment).</p>
+
+<h2 id="who-actually-buys-this">Who this actually fits</h2>
+<ul>
+<li><strong>Multi-facility healthcare groups</strong> needing consolidated financials across clinics, labs, or facilities under one management company — the same multi-entity story as the dental and veterinary pieces.</li>
+<li><strong>Medical supply distributors and device manufacturers</strong> selling into healthcare, where the inventory/lot/serial engine is the real product-market fit — see the medical device and pharma distribution pieces in this series.</li>
+<li><strong>Healthcare-adjacent operations</strong> — home care agency back offices, medical billing services, lab operators — that need real accounting and cannot outgrow spreadsheets, but whose clinical or patient-facing workflow lives elsewhere.</li>
+</ul>
+
+<h2 id="the-integration-boundary">The integration boundary that keeps this honest</h2>
+<p>Every credible healthcare-on-Acumatica implementation I have seen or built draws the same line: protected health information and clinical workflow stay in the system built and (where the deployment requires it) formally assessed for that purpose — an EHR, a lab information system, a home care scheduling platform. Acumatica receives financial and operational summaries across that boundary via its REST API, not raw clinical detail.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class BuildingExt : PXCacheExtension<Healthcare>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ARCHITECTURE · WHAT CROSSES THE BOUNDARY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Clinical system (EHR / LIS / scheduling)     Acumatica
+------------------------------------------   -------------------------------
+Patient chart, diagnosis, treatment     -->   (never synced)
+Appointment / visit record              -->   (never synced)
+Billed charge amount + service date     -->   AR invoice / summary journal
+Insurance payer remittance total        -->   Cash application batch
+Supply/drug consumption (by SKU, qty)   -->   Inventory issue transaction
+</code></pre>
 </div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>In the work I have done on building a healthcare vertical saas on acumatica — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>When the work moves from design to production, the questions change. The building is not the question; the failure mode of the healthcare is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'building'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM building
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The performance of healthcare in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production healthcare looks different from development healthcare. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class BuildingExt : PXCacheExtension<Healthcare>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring healthcare first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add building on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with healthcare when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="security-posture">What Acumatica's security posture actually gives you</h2>
+<p>Acumatica has real, verifiable security controls that matter here even though they are general-purpose rather than healthcare-certified: role-based access control down to the screen and field level, a configurable audit trail that logs who changed what and when, and field-level encryption (AES-256) for designated sensitive fields. Those are legitimate building blocks for a compliant deployment — but they are infrastructure, not a compliance certification in themselves. Whether a given deployment satisfies HIPAA's technical safeguards depends on how it is configured, hosted, and governed, and on a signed business associate agreement with the hosting party if PHI is in scope at all. I cover that distinction in more detail in the companion HIPAA piece in this series.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on building a healthcare vertical saas on acumatica — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>"Healthcare on Acumatica" is a real and defensible pitch when it means back-office financial and supply-chain operations for healthcare organizations, especially ones with physical inventory. It stops being defensible the moment it implies clinical, patient-record, or EHR functionality — that boundary should be explicit in every scoping conversation, not discovered during go-live.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
-      <li><a href="/blog/horizontal-vs-vertical-saas/">Horizontal vs Vertical SaaS — A Field Guide</a></li>
-      <li><a href="/blog/vertical-saas-acquisition/">Vertical SaaS Acquisition — A Field Guide</a></li>
-      <li><a href="/blog/vertical-saas-acumatica-isv-program/">Acumatica ISV Program — A Complete Guide</a></li>
-      <li><a href="/blog/vertical-saas-build-vs-buy/">Vertical SaaS Build vs Buy</a></li>
-      <li><a href="/blog/vertical-saas-certification-process/">Acumatica Certification Process for ISV Solutions</a></li>
+      <li><a href="/blog/acumatica-rest-api-the-definitive-guide/">Acumatica REST API — The Definitive Guide</a></li>
+      <li><a href="/blog/acumatica-field-level-encryption/">Acumatica Field-Level Encryption</a></li>
+      <li><a href="/blog/acumatica-audit-trail-configuration/">Acumatica Audit Trail Configuration</a></li>
+      <li><a href="/blog/acumatica-row-level-security-best-practices/">Acumatica Row-Level Security Best Practices</a></li>
+      <li><a href="/blog/vertical-saas-hipaa-compliance-acumatica/">HIPAA Compliance Considerations on Acumatica</a></li>
       </ul>
     </div>
-    <h2>Wrapping up</h2>
-    <p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
       <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
-        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
+        <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer &middot; Laravel Engineer</div>
         <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin:0">Independent software engineer in Nairobi specialising in Acumatica customisations, Laravel backends, and tax fiscalisation integrations across East and Southern Africa.</p>
       </div>
     </div>
