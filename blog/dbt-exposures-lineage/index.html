@@ -93,81 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Data pipelines in production are mostly about how to handle the slow failure modes. this is the pattern that handles the cases that don't show up in the demo data. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="backfills-and-rollbacks-for-dbt">Backfills and rollbacks for dbt</h2>
-<p>Backfills and rollbacks for dbt is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>dbt's dependency graph naturally covers everything inside dbt — models depending on other models. Exposures extend that graph one hop further, into the things outside dbt that actually consume the data: a Looker dashboard, a Tableau workbook, an ML feature pipeline, an internal API. Without exposures, "what breaks if I change this column" stops at the last model; with them, it reaches all the way to the dashboard a VP checks every morning.</p>
+<h2 id="declaring-an-exposure">Declaring an exposure</h2>
+<p>An exposure is declared in YAML, usually its own <code>exposures.yml</code>, and references the models it depends on with <code>ref()</code> inside its <code>depends_on</code> — dbt treats it as another node in the DAG, just one that cannot be built, only depended on.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · MODELS/EXPOSURES.YML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>exposures:
+  - name: executive_revenue_dashboard
+    type: dashboard
+    maturity: high
+    url: https://looker.company.com/dashboards/42
+    description: >
+      Daily revenue and churn dashboard reviewed in the Monday
+      leadership sync. Owned by the Finance data team.
+    depends_on:
+      - ref('fct_orders')
+      - ref('fct_subscriptions')
+    owner:
+      name: Finance Data Team
+      email: finance-data@company.com</code></pre>
 </div>
-<h2 id="what-dbt-exposures-and-lineage-is-for">What dbt Exposures and Lineage is for</h2>
-<p>In the work I have done on dbt exposures and lineage, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="why-this-changes-how-you-work">Why this changes how you make a change</h2>
+<p>Before touching <code>fct_orders</code>, running <code>dbt ls --select fct_orders+</code> shows every downstream model — but not the dashboard built on top of it. With the exposure declared, that same command surfaces <code>executive_revenue_dashboard</code> in the results, and the generated lineage graph in <code>dbt docs</code> draws a node for it. The practical effect: before merging a schema change, you can see exactly which dashboards and owners to notify, instead of finding out when someone in the Monday meeting asks why the number is wrong.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Exposures document intent, they do not enforce it</strong>
+  <p>dbt does not verify that the dashboard actually still queries those columns — an exposure is a manually maintained declaration, not a live integration. If nobody updates <code>exposures.yml</code> when a dashboard is retired or rebuilt on different tables, the lineage graph quietly goes stale. Treat exposure maintenance as part of the same PR that changes the dashboard, not a separate housekeeping task.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>When the work moves from design to production, the questions change. The dbt is not the question; the failure mode of the exposures is.</p>
+<h2 id="running-lineage-aware-selection">Running lineage-aware selection with exposures in the graph</h2>
+<p>The `+` graph operator works the same way toward exposures as it does toward models, which is the main practical payoff:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.dbt > 0).groupBy("exposures").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · SELECTING BY IMPACT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># everything downstream of fct_orders, including exposures
+dbt ls --select fct_orders+
+
+# only exposures affected by a given model
+dbt ls --select fct_orders+ --resource-type exposure
+
+# build only what an exposure needs, useful before a demo
+dbt build --select +exposure:executive_revenue_dashboard</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_dbt') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>The performance of exposures in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Production exposures looks different from development exposures. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="where-exposures-fit-with-external-lineage-tools">Where exposures fit next to a dedicated lineage tool</h2>
+<p>Exposures are cheap and require no extra infrastructure, but they only cover what someone manually declared, and only in the direction dbt already understands (models to consumers). A dedicated lineage platform consuming OpenLineage events can trace lineage automatically from ingestion tools through dbt through BI tools without manual YAML upkeep — worth it once you have enough dashboards that keeping `exposures.yml` current by hand becomes unreliable.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring exposures first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add dbt on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with exposures when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Exposure type</th><th>Typical use</th></tr>
+  <tr><td><code>dashboard</code></td><td>Looker, Tableau, Mode reports</td></tr>
+  <tr><td><code>ml</code></td><td>Feature store or model training pipeline</td></tr>
+  <tr><td><code>application</code></td><td>Internal API or service reading warehouse tables</td></tr>
+  <tr><td><code>notebook</code></td><td>Recurring analyst notebook, not ad hoc queries</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on dbt exposures and lineage. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Add an exposure for anything a real person depends on regularly — a leadership dashboard, a billing pipeline, an ML feature set — so that changing an upstream model surfaces the actual blast radius before you merge, not after someone notices a broken chart. Keep the YAML current as dashboards change, and layer a dedicated lineage tool on top once manual upkeep stops scaling.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

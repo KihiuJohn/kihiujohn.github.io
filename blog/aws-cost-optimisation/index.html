@@ -93,89 +93,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="aws-implementation-walkthrough">Aws implementation walkthrough</h2>
-<p>Aws implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>AWS cost optimisation is rarely about finding one dramatic saving — it is a handful of unglamorous, recurring practices: rightsizing compute, matching purchase commitments to actual usage, and cleaning up the storage and data-transfer waste that accumulates silently. Most accounts that haven't had a deliberate cost review can cut 20-30% without touching application architecture, just from the categories below.</p>
+<h2 id="rightsizing-compute-with-actual-utilisation-data">Rightsizing compute with actual utilisation data</h2>
+<p>The most common waste is EC2 and RDS instances provisioned for a peak load that rarely happens, running at 10-20% average CPU utilisation year-round. AWS Compute Optimizer analyses CloudWatch metrics and recommends a smaller instance type or family change based on actual usage, not guesswork — running it across an account with no prior rightsizing effort routinely surfaces double-digit percentage savings. Pair rightsizing with a review of instance generation: a newer generation (e.g. moving from M5 to M7i) is often both cheaper per unit of compute and faster.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AwsCostExt : PXGraphExtension<AwsEntry>
-{
-    [PXOverride]
-    public virtual void Cost(Aws doc)
-    {
-        // Custom cost logic for aws cost optimisation
-        if (doc?.Cost == null) return;
-        Base.Cost(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · COST EXPLORER CLI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Find EC2 instances with low average CPU over the last 14 days
+aws ce get-rightsizing-recommendation \
+  --service "AmazonEC2" \
+  --configuration '{"RecommendationTarget":"SAME_INSTANCE_FAMILY","BenefitsConsidered":true}' \
+  --query 'RightsizingRecommendations[].{Instance:CurrentInstance.ResourceId,Rec:ModifyRecommendationDetail.TargetInstances[0].ResourceDetails}'</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on aws cost optimisation — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="reserved-instances-savings-plans-and-spot">Reserved Instances, Savings Plans, and Spot</h2>
+<p>On-demand pricing is the most expensive way to run steady-state workloads. Compute Savings Plans give a discount (typically 20-40% versus on-demand) in exchange for a 1- or 3-year commitment to a dollar amount of compute spend, and are more flexible than Reserved Instances since they apply across instance families and even to Fargate/Lambda. For workloads that tolerate interruption — batch jobs, CI runners, stateless worker fleets — Spot Instances add another 60-90% discount on top, provided the workload is checkpointed or naturally retryable.</p>
+<div class="callout">
+  <strong>Don't commit to Savings Plans on unstable baselines</strong>
+  <p>Look at 3-6 months of stable usage before committing to a 1- or 3-year Savings Plan. Committing during a temporary usage spike locks in a payment obligation for capacity you may not keep using, which turns a savings mechanism into a fixed cost you're stuck with.</p>
+</div>
+<h2 id="s3-storage-tiering-and-lifecycle-rules">S3 storage tiering and lifecycle rules</h2>
+<p>S3 storage costs creep because objects default to Standard storage forever unless a lifecycle rule moves them. S3 Intelligent-Tiering automatically shifts objects between access tiers based on actual access patterns and has no retrieval fee, making it the safe default for buckets with unpredictable access. For buckets with predictable aging (logs, backups), explicit lifecycle rules transitioning to Glacier or Glacier Deep Archive after a set number of days are cheaper still, since you're not paying the small monitoring fee Intelligent-Tiering charges per object.</p>
+<h2 id="data-transfer-and-nat-gateway-costs">Data transfer and NAT Gateway costs</h2>
+<p>Cross-AZ and cross-region data transfer, plus NAT Gateway hourly and per-GB charges, are the cost category most teams underestimate because it doesn't show up as a line item tied to an obviously named resource. A NAT Gateway processing significant egress traffic can cost more per month than the EC2 instances behind it. VPC endpoints for S3 and DynamoDB (which route traffic privately without touching the NAT Gateway) are a near-zero-effort fix that eliminates NAT charges for traffic to those services specifically.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Tag everything, or cost allocation stays guesswork</strong>
+  <p>Without consistent resource tagging (team, environment, project), Cost Explorer and Cost and Usage Reports can show total spend but not who owns it. Enforce tagging via AWS Config rules or Service Control Policies before trying to optimise — you cannot fix what you cannot attribute to an owner.</p>
 </div>
-<h2 id="performance-and-observability-for-aws">Performance and observability for aws</h2>
-<p>When the work moves from design to production, the questions change. The aws is not the question; the failure mode of the cost is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for aws
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of cost in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-cost-edge-cases-i-have-shipped">The cost edge cases I have shipped</h2>
-<p>Production cost looks different from development cost. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AwsCostExt : PXGraphExtension<AwsEntry>
-{
-    [PXOverride]
-    public virtual void Cost(Aws doc)
-    {
-        // Custom cost logic for aws cost optimisation
-        if (doc?.Cost == null) return;
-        Base.Cost(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="unused-and-orphaned-resources">Unused and orphaned resources</h2>
+<p>Unattached EBS volumes, idle Elastic IPs, old EBS snapshots past their retention need, and load balancers with zero registered targets are pure waste that accumulates from normal operational churn — someone terminates an instance and forgets the volume, or decommissions a service and leaves the ALB running. AWS Trusted Advisor's cost optimisation checks (available on Business/Enterprise support) surface most of these automatically; on lower support tiers, a scheduled script against the relevant APIs does the same job.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cost first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add aws on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cost when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Category</th><th>Typical saving</th></tr>
+  <tr><td>Rightsizing (Compute Optimizer)</td><td>10-30% of compute spend</td></tr>
+  <tr><td>Savings Plans on stable baseline</td><td>20-40% versus on-demand</td></tr>
+  <tr><td>Spot for interruptible workloads</td><td>60-90% versus on-demand</td></tr>
+  <tr><td>S3 Intelligent-Tiering / lifecycle rules</td><td>Varies, often 20%+ of storage spend</td></tr>
+  <tr><td>VPC endpoints (skip NAT for AWS traffic)</td><td>Eliminates NAT charges for that traffic</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on aws cost optimisation — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cost optimisation on AWS is a recurring practice, not a one-time project — usage patterns shift, new services get spun up, and old resources linger. Start with rightsizing and tagging since both compound the value of everything after them, add Savings Plans once usage is stable enough to commit against, and put a scheduled check in place for orphaned resources so the cleanup doesn't have to happen manually every quarter.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

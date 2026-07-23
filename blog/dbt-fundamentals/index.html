@@ -93,81 +93,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real data teams, this is rarely the question. The question is the failure mode: what happens when the upstream schema changes, when the downstream consumer breaks, when the data quality test fails. This article is the patterns.</p>
-<h2 id="cost-optimisation-for-dbt">Cost optimisation for dbt</h2>
-<p>Cost optimisation for dbt is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>dbt (data build tool) does one job: it takes SQL <code>SELECT</code> statements you write and turns them into tables or views in your warehouse, in dependency order, with tests and documentation attached. It does not extract or load data — that is a job for Fivetran, Airbyte, or a custom pipeline — dbt owns the "T" in ELT.</p>
+<h2 id="a-model-is-just-a-select-statement">A model is just a SELECT statement</h2>
+<p>Every dbt model is a <code>.sql</code> file containing one <code>SELECT</code> statement, no <code>CREATE TABLE</code> boilerplate. dbt wraps it in the DDL needed for whatever materialization you configure. The dependency graph is built entirely from <code>ref()</code> and <code>source()</code> calls inside the SQL — there is no separate config file listing dependencies, which is the detail that makes dbt projects easy to refactor.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · MODELS/STG_ORDERS.SQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- models/staging/stg_orders.sql
+{{ config(materialized='view') }}
+
+select
+    order_id,
+    customer_id,
+    cast(order_date as date) as order_date,
+    amount_cents / 100.0 as amount
+from {{ source('raw', 'orders') }}
+where order_id is not null</code></pre>
 </div>
-<h2 id="the-testing-pyramid-for-fundamentals">The testing pyramid for fundamentals</h2>
-<p>In the work I have done on dbt fundamentals — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-dbt">Backfills and rollbacks for dbt</h2>
-<p>When the work moves from design to production, the questions change. The dbt is not the question; the failure mode of the fundamentals is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.dbt > 0).groupBy("fundamentals").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="what-dbt-fundamentals-a-field-guide-is-for">What dbt Fundamentals — A Field Guide is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p><code>source('raw', 'orders')</code> points at a raw table declared in <code>schema.yml</code>, and <code>ref('stg_orders')</code> in any downstream model points back at this one. Run <code>dbt run</code> and dbt compiles the Jinja, resolves the dependency order via a topological sort of the <code>ref()</code>/<code>source()</code> graph, and executes each model against the warehouse.</p>
+<h2 id="materializations-choosing-how-a-model-gets-built">Materializations — choosing how a model gets built</h2>
+<p>A <code>view</code> materialization creates a SQL view — cheap to build, always fresh, but re-executes the underlying query on every read. A <code>table</code> materialization runs the query once and stores the result — fast to query, stale until the next <code>dbt run</code>. <code>incremental</code> only processes new or changed rows on subsequent runs, essential once a table is too large to rebuild fully each time. <code>ephemeral</code> models are not built as objects in the warehouse at all — they get inlined as a CTE into whatever references them, useful for a small reusable snippet you do not want cluttering the schema.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Default to view, upgrade when it hurts</strong>
+  <p>Start every staging model as a view. Only promote to <code>table</code> or <code>incremental</code> once query latency or warehouse compute cost actually justifies the added complexity of managing state. Premature materialization is the most common way dbt projects end up with stale data nobody trusts.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="schema-yml-tests-and-documentation">schema.yml — tests and documentation live next to the model</h2>
+<p>Alongside each model's SQL file, a <code>schema.yml</code> declares sources, documents columns, and attaches generic tests without writing SQL by hand.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_dbt') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · MODELS/SCHEMA.YML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>sources:
+  - name: raw
+    tables:
+      - name: orders
+
+models:
+  - name: stg_orders
+    description: "One row per order, cents converted to dollars."
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>The performance of fundamentals in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>Production fundamentals looks different from development fundamentals. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="the-project-layout-that-scales">The project layout that scales</h2>
+<p>Most dbt projects converge on three layers: <code>staging</code> models that clean and rename raw source columns one-to-one, <code>intermediate</code> models that join and reshape staging models, and <code>marts</code> models that produce the final, business-facing tables analysts and BI tools query. Staging models should never be queried directly by a dashboard — that direct dependency is what makes later refactors painful, because you can no longer change a staging model without checking every dashboard in the company.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring fundamentals first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add dbt on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with fundamentals when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concept</th><th>What it does</th></tr>
+  <tr><td><code>ref()</code></td><td>References another dbt model, builds the dependency graph</td></tr>
+  <tr><td><code>source()</code></td><td>References a raw table outside dbt's control</td></tr>
+  <tr><td><code>{{ config(...) }}</code></td><td>Sets materialization and other per-model settings</td></tr>
+  <tr><td><code>schema.yml</code></td><td>Declares sources, tests, and documentation</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on dbt fundamentals — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Everything else in dbt — macros, snapshots, exposures, incremental strategies — builds on this same core: SQL models linked by <code>ref()</code>, tested and documented in <code>schema.yml</code>, compiled and run in dependency order. Get the staging/intermediate/marts layering right early, and the rest of the tooling stays easy to reason about as the project grows.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

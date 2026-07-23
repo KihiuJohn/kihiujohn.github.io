@@ -93,82 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have worked with enough SaaS founders to know the metrics that matter. this is one of them, but only if you measure it correctly. The common misinterpretations are the ones that get the team off-track. This article is the correct measurements and the common traps.</p>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>Why the metric matters for your business is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+    <p>A customer health score is only useful if it predicts something. Too many teams build a score that feels rigorous — a weighted formula, a dashboard with a red/yellow/green badge — and then discover it doesn't correlate with who actually renews or churns. This is a practical guide to picking the right inputs, combining them without fooling yourself, and wiring the score into what your CS team actually does each week.</p>
+
+<h2 id="what-signals-actually-belong-in-the-score">What signals actually belong in the score</h2>
+<p>A health score is a composite, and the composite is only as good as its inputs. Five categories of signal consistently carry real predictive weight:</p>
+<p><strong>Usage frequency</strong> — logins or active sessions per week, trending up or down over the last 30/60/90 days. A raw login count is weak on its own; the trend matters more than the absolute number. <strong>Feature adoption depth</strong> — not just "did they log in" but how much of the product's core value they've actually activated. A customer using one shallow feature is a different risk profile than one using five interconnected ones, even at identical login frequency. <strong>Support signal</strong> — both volume and sentiment. A spike in tickets isn't automatically bad (it can mean expansion or genuine engagement); a string of frustrated, escalating tickets is a much stronger churn signal than volume alone. <strong>Relationship signal</strong> — NPS/CSAT responses, and whether an executive sponsor or champion is still engaged, still opening your emails, still showing up to QBRs. Champion turnover is one of the highest-leverage churn predictors and is routinely left out of health scores that focus only on product telemetry. <strong>Commercial health</strong> — invoice status, payment delays, contract renewal proximity. A customer who is quietly renegotiating scope or slow-paying is telling you something a usage graph won't.</p>
+
+<h2 id="weighting-and-combining-signals">Weighting and combining signals into one number</h2>
+<p>The instinct is to average everything into a single 0–100 score. That's a reasonable starting shape, but the weighting has to be earned, not assumed. The honest way to set weights is retrospective: pull your last 12–24 months of churned and renewed accounts, and check which signals actually differed between the two groups before the outcome happened. Signals that don't separate churners from renewers shouldn't carry much weight no matter how intuitive they feel.</p>
+<div class="callout">
+  <strong>Start with fewer inputs, not more</strong>
+  <p>A score built from 15 blended signals is hard to debug when it's wrong. Most teams get better predictive power from 4-6 well-chosen signals with validated weights than from a kitchen-sink formula nobody can explain when a CSM asks "why is this account red?"</p>
 </div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>In the work I have done on customer health scores — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Keep the components visible alongside the composite. A CSM looking at "Health: 62" learns nothing actionable. A CSM looking at "Health: 62 — usage flat, support sentiment declining, champion hasn't logged in 21 days" knows exactly what to do next.</p>
+
+<h2 id="common-pitfalls">Common pitfalls that quietly break the score</h2>
+<p>The single most common failure is a <strong>binary usage signal</strong> — "logged in this week: yes/no" — standing in for the whole score. It's cheap to compute and almost meaningless; an account can log in daily while using none of the features tied to renewal. The second failure is a <strong>stale score</strong>: calculated weekly or monthly via batch job, so by the time a CSM sees the drop, the moment to intervene has passed. The third, and most damaging long-term, is a score that simply <strong>doesn't predict churn</strong> — nobody ever validates it against actual outcomes, so it becomes theater that leadership trusts and the data doesn't support.</p>
 <div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+  <strong>Watch for gamed scores</strong>
+  <p>If CSMs are compensated or evaluated on the health scores of their book of business, expect the score to get gamed — inflated manually, or the underlying weights quietly adjusted to make accounts look greener. Keep score calculation and score review separated from the incentive structure that depends on it, or audit for drift regularly.</p>
 </div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>When the work moves from design to production, the questions change. The customer is not the question; the failure mode of the health is.</p>
+
+<h2 id="turning-scores-into-action">Turning scores into action, not just visibility</h2>
+<p>A health score that sits on a dashboard and doesn't trigger anything is overhead. The score earns its keep when specific thresholds and score deltas trigger specific playbooks: a 15-point drop in 30 days triggers an automatic CSM outreach task; a champion going dark for three weeks triggers a re-engagement sequence; three consecutive red-flag tickets trigger an escalation to the account's CSM and their manager. The playbook, not the number, is the actual product of the health score system.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · TRIGGER RULES</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "trigger": "health_score_drop",
+  "condition": { "delta_30d": -15, "min_score": 40 },
+  "action": "create_task",
+  "assignee": "account_csm",
+  "task": "Health drop review — check usage trend, last support ticket, last champion login",
+  "sla_hours": 48
+}</code></pre>
 </div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, health, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>The performance of health in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="why-customer-is-the-first-thing-to-look-at">Why customer is the first thing to look at</h2>
-<p>Production health looks different from development health. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
+<p>Segment the thresholds by account tier. A 10-point dip on a $200k enterprise account deserves an immediate CSM call; the same dip on a small self-serve account might just trigger an automated check-in email. Applying one threshold uniformly across every tier either buries your CS team in noise on the low end or misses the accounts that actually matter on the high end.</p>
+
+<h2 id="validating-and-maintaining-the-score">Validating and maintaining the score over time</h2>
+<p>Treat the score like a model, because it is one. Revisit the weights quarterly against actual renewal and churn outcomes. Track false positives (accounts flagged red that renewed fine) and false negatives (accounts that churned while showing green) separately — false negatives are the more dangerous failure because they erode the team's trust in the score entirely. If a product change alters what "healthy usage" looks like, the score's usage-adoption weighting needs to move with it.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring health first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add customer on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with health when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal</th><th>What it catches</th><th>Common mistake</th></tr>
+  <tr><td>Usage frequency (trend)</td><td>Disengagement before cancellation</td><td>Using raw login count instead of trend</td></tr>
+  <tr><td>Feature adoption depth</td><td>Shallow, replaceable usage</td><td>Treating any login as "active"</td></tr>
+  <tr><td>Support sentiment</td><td>Frustration building toward churn</td><td>Counting volume without sentiment</td></tr>
+  <tr><td>Champion engagement</td><td>Relationship risk, not just product risk</td><td>Omitting it entirely — pure telemetry score</td></tr>
+  <tr><td>Payment/invoice health</td><td>Commercial disengagement</td><td>Ignoring finance data outside the CS tool</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on customer health scores — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>A health score is a decision-support tool, not a report card. Build it from signals you've actually validated against churned accounts, keep the component breakdown visible so it's actionable, and wire real thresholds to real playbooks — otherwise it's a number CSMs learn to ignore.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

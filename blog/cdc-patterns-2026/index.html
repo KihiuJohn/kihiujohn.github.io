@@ -93,81 +93,39 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real data teams, this is rarely the question. The question is the failure mode: what happens when the upstream schema changes, when the downstream consumer breaks, when the data quality test fails. This article is the patterns.</p>
-<h2 id="why-change-in-the-warehouse-beats-in-the-lake">Why change in the warehouse beats in the lake</h2>
-<p>Why change in the warehouse beats in the lake is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Change data capture has settled into a few dominant patterns rather than continuing to reinvent itself: log-based capture over polling, an event stream (usually Kafka) as the transport layer between source and destination, and schema-aware handling of the inevitable upstream schema change. What's changed recently isn't the core mechanism — log-based CDC via tools like Debezium has been solid for years — it's where CDC gets used: increasingly as the backbone for keeping analytical warehouses fresh, not just for replicating between operational databases.</p>
+<h2 id="log-based-capture-vs-polling">Log-based capture vs. polling</h2>
+<p>The older CDC pattern polls a source table on a timer, comparing rows against a previous snapshot or filtering on an <code>updated_at</code> column to find changes. This misses deletes (unless soft-deleted), misses intermediate states between polls, and adds read load to the source database proportional to poll frequency. Log-based CDC instead reads the database's own transaction log — the same log used for replication and crash recovery — capturing every insert, update, and delete as it happens, in order, without querying the source tables at all. This is why Debezium and similar tools are built around each database's native change stream (MySQL binlog, PostgreSQL logical replication slots, SQL Server CDC) rather than a generic polling query.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM change
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · DEBEZIUM CHANGE EVENT SHAPE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "before": { "id": 1042, "status": "pending", "total": 89.99 },
+  "after":  { "id": 1042, "status": "shipped", "total": 89.99 },
+  "source": {
+    "table": "orders",
+    "ts_ms": 1753180800000,
+    "lsn": 24831902
+  },
+  "op": "u",
+  "ts_ms": 1753180800142
+}</code></pre>
 </div>
-<h2 id="schema-evolution-for-data">Schema evolution for data</h2>
-<p>In the work I have done on change data capture patterns 2026, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+<h2 id="schema-evolution-is-the-recurring-failure-mode">Schema evolution is the recurring failure mode</h2>
+<p>The most common production incident with CDC pipelines isn't a dropped event — it's an upstream schema change breaking downstream consumers that assumed a fixed shape. Adding a nullable column is usually safe; renaming a column, changing a type, or dropping a column breaks anything downstream expecting the old shape. The pattern that survives this is treating the change stream as a versioned, schema-registered contract — using a schema registry (Confluent's, or an equivalent) so producers and consumers agree on compatible schema evolution rules, and consumers fail loudly on an incompatible change rather than silently ingesting corrupted data.</p>
+<div class="callout-warn">
+  <strong>Test schema changes against consumers before shipping them</strong>
+  <p>A schema registry with backward-compatibility enforcement catches breaking changes at publish time instead of at 3am when a downstream job starts throwing deserialization errors. Configure it to reject incompatible schema changes rather than treating compatibility as a manual review step someone might skip.</p>
 </div>
-<h2 id="cost-optimisation-for-change">Cost optimisation for change</h2>
-<p>When the work moves from design to production, the questions change. The change is not the question; the failure mode of the data is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.change > 0).groupBy("data").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-data">The testing pyramid for data</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="exactly-once-vs-at-least-once-delivery">Exactly-once vs. at-least-once delivery</h2>
+<p>Most CDC pipelines guarantee at-least-once delivery, not exactly-once — a consumer can see the same change event twice after a rebalance or restart. This means downstream consumers need to be idempotent: applying the same update twice should produce the same result, typically by using the primary key plus the log sequence number or offset to deduplicate, or by using upserts (<code>MERGE</code>/<code>INSERT ... ON CONFLICT</code>) instead of blind inserts. Building a consumer that assumes exactly-once delivery is the second most common source of data-quality incidents after schema drift.</p>
+<h2 id="cdc-as-the-warehouse-freshness-layer">CDC as the warehouse freshness layer</h2>
+<p>The pattern gaining ground is using CDC to stream operational database changes directly into a warehouse's staging layer — replacing nightly batch extracts with near-real-time upserts — then letting existing batch transformation tools (dbt models running on a schedule) build downstream marts from that continuously-fresh staging data. This gets most of the value of real-time data (staging tables that are minutes, not a day, behind) without requiring every downstream transformation to become a streaming job.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Not every table needs CDC</strong>
+  <p>CDC infrastructure has real operational cost — connectors to monitor, schema registries to maintain, consumer lag to watch. Reserve it for tables where freshness genuinely matters for a downstream decision. A slowly-changing reference table updated twice a year doesn't need a change stream; a nightly batch extract is simpler and just as correct.</p>
 </div>
-<h2 id="backfills-and-rollbacks-for-change">Backfills and rollbacks for change</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_change') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="what-change-data-capture-patterns-2026-is-for">What Change Data Capture Patterns 2026 is for</h2>
-<p>The performance of data in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM change
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add change on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on change data capture patterns 2026. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The CDC patterns that hold up in production are log-based capture (not polling), schema-registry-enforced compatibility on the change stream, and idempotent consumers designed for at-least-once delivery. Reach for CDC when a downstream system genuinely needs near-real-time freshness, and skip it — a scheduled batch extract is fine — when it doesn't.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

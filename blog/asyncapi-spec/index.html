@@ -93,83 +93,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The API landscape in 2026 is more capable than it was in 2020. REST, GraphQL, gRPC, webhooks. this is one of the parts of the modern API. This article is the part.</p>
-<h2 id="idempotency-in-spec">Idempotency in spec</h2>
-<p>Idempotency in spec is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>AsyncAPI is to event-driven APIs what OpenAPI is to REST: a machine-readable specification format for describing message channels, payloads, and bindings so that producers, consumers, and tooling can agree on a contract without reading each other's source code. It matters because message-driven systems — Kafka topics, MQTT streams, WebSocket channels, AMQP queues — have historically had no standard way to document "what messages flow where, in what shape," leaving that knowledge scattered across producer code, consumer code, and tribal knowledge.</p>
+<h2 id="the-shape-of-an-asyncapi-document">The shape of an AsyncAPI document</h2>
+<p>An AsyncAPI document declares <code>channels</code> (the topics or queues messages flow through), the <code>operations</code> on each channel (send/receive), and <code>messages</code> with their payload schemas — typically JSON Schema, though Avro and Protobuf are also supported. A <code>servers</code> section describes the broker (Kafka cluster, MQTT broker, etc.) and its connection protocol. This is deliberately parallel to OpenAPI's structure so teams already familiar with API specs have a shorter ramp.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/asyncapis/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await asyncapiService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · ASYNCAPI DOCUMENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>asyncapi: 3.0.0
+info:
+  title: Order Events API
+  version: 1.0.0
+servers:
+  production:
+    host: kafka.internal:9092
+    protocol: kafka
+channels:
+  orderCreated:
+    address: orders.created
+    messages:
+      OrderCreated:
+        payload:
+          type: object
+          required: [orderId, customerId, total]
+          properties:
+            orderId: { type: string }
+            customerId: { type: string }
+            total: { type: number }
+operations:
+  publishOrderCreated:
+    action: send
+    channel:
+      $ref: '#/channels/orderCreated'</code></pre>
 </div>
-<h2 id="contract-testing-for-asyncapi">Contract testing for asyncapi</h2>
-<p>In the work I have done on asyncapi spec — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="protocol-bindings">Protocol bindings</h2>
+<p>Different brokers have protocol-specific concerns an abstract channel definition can't capture — a Kafka topic has partition keys and consumer groups, an MQTT channel has QoS levels and retain flags, an AMQP queue has exchange types and routing keys. AsyncAPI handles this with <code>bindings</code>, a protocol-specific extension block attached to a server, channel, or message that carries these details without polluting the protocol-agnostic core of the spec.</p>
+<h2 id="code-generation-and-tooling">Code generation and tooling</h2>
+<p>The main practical payoff is generation: the AsyncAPI Generator can produce client/consumer stubs, HTML documentation, and even boilerplate for specific broker SDKs directly from the spec, similar to how OpenAPI generators produce REST clients. Studio, AsyncAPI's browser-based editor, gives real-time validation and a visual channel diagram while authoring the spec, which catches structural mistakes before they reach a producer or consumer implementation.</p>
+<div class="callout">
+  <strong>Treat the spec as the contract, not the documentation</strong>
+  <p>The highest-value use of AsyncAPI is contract-first development: write the spec before the producer or consumer code, generate schemas/stubs from it, and validate messages against it in CI. Treating it as documentation written after the fact loses most of the tooling benefit and drifts out of sync with the real implementation quickly.</p>
+</div>
+<h2 id="versioning-and-schema-evolution">Versioning and schema evolution</h2>
+<p>Event-driven systems are harder to version than request/response APIs because a producer and its consumers deploy independently and a message published today may be consumed days later by a service that hasn't caught up yet. Favour additive, backward-compatible schema changes (new optional fields) over breaking ones, and when a breaking change is unavoidable, version the channel itself (<code>orders.created.v2</code>) rather than silently changing the payload shape underneath existing consumers.</p>
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>A schema registry is not optional at scale</strong>
+  <p>Once more than a couple of services produce or consume the same event type, pair AsyncAPI's design-time contract with a runtime schema registry (Confluent Schema Registry, AWS Glue Schema Registry, or similar) that actually enforces compatibility at publish time — the spec document alone doesn't stop a producer from emitting a message that violates it.</p>
 </div>
-<h2 id="observability-tracing-spec">Observability: tracing spec</h2>
-<p>When the work moves from design to production, the questions change. The asyncapi is not the question; the failure mode of the spec is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /asyncapis/{id}:
-    get:
-      operationId: getAsyncapi
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="sdk-generation-for-asyncapi">SDK generation for asyncapi</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="what-asyncapi-spec-a-field-guide-gives-you">What AsyncAPI Spec — A Field Guide gives you</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type AsyncapiResponse = {
-    id: string;
-    spec: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>The performance of spec in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>Production spec looks different from development spec. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/asyncapis/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await asyncapiService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+<h2 id="asyncapi-vs-openapi-vs-cloudevents">AsyncAPI vs. OpenAPI vs. CloudEvents</h2>
+<p>These three solve adjacent but distinct problems: OpenAPI describes synchronous HTTP request/response APIs, AsyncAPI describes the channels and message shapes of an event-driven system broker-agnostically, and CloudEvents standardises the envelope format of an individual event (its metadata — id, source, type, time) independent of the transport. It's common to use CloudEvents as the message envelope format referenced inside an AsyncAPI channel definition, rather than treating them as competing standards.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring spec first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add asyncapi on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with spec when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Spec</th><th>Describes</th></tr>
+  <tr><td>OpenAPI</td><td>Synchronous HTTP endpoints and payloads</td></tr>
+  <tr><td>AsyncAPI</td><td>Channels, operations, and messages for event-driven systems</td></tr>
+  <tr><td>CloudEvents</td><td>Standard envelope/metadata format for a single event</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on asyncapi spec — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>AsyncAPI earns its place once more than one or two services produce and consume events without a shared contract — it turns implicit tribal knowledge about topic shapes into a validated, generatable spec. Pair it with a runtime schema registry so the contract is enforced, not just documented, and treat channel versioning the same seriousness you'd give a public REST API's breaking changes.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

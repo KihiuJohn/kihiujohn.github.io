@@ -93,89 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="performance-and-observability-for-cloud">Performance and observability for cloud</h2>
-<p>Performance and observability for cloud is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Cost allocation is the FinOps practice of attributing shared cloud spend back to the team, product, or business unit that actually incurred it. Without it, the monthly bill is a single number nobody can act on; with it, an engineering lead can see exactly what their service costs and whether that cost is trending the right direction relative to what it delivers.</p>
+<h2 id="tags-are-the-foundation-and-they-will-be-incomplete">Tags are the foundation, and they will be incomplete</h2>
+<p>Every allocation strategy starts with resource tags — <code>cost-center</code>, <code>team</code>, <code>environment</code>, <code>product</code> — applied consistently across AWS, Azure, or GCP resources. The uncomfortable reality is that tag coverage is never 100%: someone spins up a resource by hand, a Terraform module misses a tag, an old resource predates the tagging policy. AWS Cost Categories, Azure Cost Management, and GCP's labels-and-BigQuery-export pipeline all provide a way to define an "Untagged" or "Other" bucket explicitly rather than letting it silently distort every team's numbers — track that bucket as its own line item and drive it toward zero.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CloudCostExt : PXGraphExtension<CloudEntry>
-{
-    [PXOverride]
-    public virtual void Cost(Cloud doc)
+  <div class="code-header"><span class="code-lang">JSON · AWS COST CATEGORY RULE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "Name": "team-checkout",
+  "RuleVersion": "CostCategoryExpression.v1",
+  "Rules": [
     {
-        // Custom cost logic for cloud cost allocation
-        if (doc?.Cost == null) return;
-        Base.Cost(doc);
+      "Value": "team-checkout",
+      "Rule": {
+        "Tags": {
+          "Key": "team",
+          "Values": ["checkout", "checkout-platform"],
+          "MatchOptions": ["EQUALS"]
+        }
+      }
     }
+  ]
 }</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on cloud cost allocation — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+<h2 id="shared-costs-need-an-explicit-allocation-rule">Shared costs need an explicit allocation rule</h2>
+<p>Tags cleanly attribute dedicated resources, but a meaningful share of most bills is inherently shared: a Kubernetes cluster running pods from six teams, a shared RDS instance, an NAT gateway serving every private subnet, or a Kubernetes control plane. Three common allocation methods exist for this shared spend — even split (simplest, least accurate), proportional to usage (CPU-seconds, GB-hours, request count — more accurate but needs usage telemetry per tenant), and proportional to a business metric (revenue, headcount) for costs with no clean technical driver at all. Kubecost and OpenCost are purpose-built for the Kubernetes case, allocating cluster cost down to namespace and even pod based on actual requested/used CPU and memory.</p>
+<div class="callout-warn">
+  <strong>Chargeback and showback are not the same decision</strong>
+  <p>Showback — reporting each team's allocated cost without moving money — builds awareness with low organizational friction. Chargeback — actually debiting the cost against a team's budget — changes behavior faster but requires allocation accuracy the team is willing to be held accountable for. Most organizations should run showback for months before chargeback; jumping straight to chargeback on shaky allocation data breeds distrust in the numbers themselves.</p>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The cloud is not the question; the failure mode of the cost is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for cloud
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-unallocatable-costs">Some costs genuinely aren't allocatable per-team</h2>
+<p>Enterprise support plans, reserved instance or savings plan commitments purchased at the org level, and central platform-team infrastructure (the shared VPC, the central logging pipeline) don't map cleanly to a single consuming team. Treat these as a defined "platform tax" line, allocated by a simple, stable formula (often headcount or a flat percentage) rather than forcing a technically precise but practically meaningless attribution.</p>
+<h2 id="tools-that-do-the-heavy-lifting">The native tools versus a dedicated FinOps platform</h2>
+<p>AWS Cost Explorer with Cost Categories, Azure Cost Management + Billing, and GCP's Cost Table export to BigQuery all support tag-based and rule-based allocation natively and are free to use — the cost is your own engineering time building the categorization rules and dashboards on top. Dedicated platforms (CloudHealth, Cloudability, Vantage) add cross-cloud normalization, anomaly detection, and prebuilt allocation workflows, which matter more once you're spending across more than one cloud provider or the allocation rules get complex enough that a spreadsheet-adjacent workflow stops scaling.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Allocate at the granularity you'll actually act on</strong>
+  <p>Allocating cost down to the individual microservice sounds precise but often isn't worth the tagging discipline it demands. Team-level or product-level allocation is usually the sweet spot — granular enough to drive a real conversation about spend, coarse enough that tag maintenance doesn't become its own project.</p>
 </div>
-<h2 id="the-cost-edge-cases-i-have-shipped">The cost edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-cloud-changes">Migration path when cloud changes</h2>
-<p>The performance of cost in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-cost-in-production">How to debug cost in production</h2>
-<p>Production cost looks different from development cost. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CloudCostExt : PXGraphExtension<CloudEntry>
-{
-    [PXOverride]
-    public virtual void Cost(Cloud doc)
-    {
-        // Custom cost logic for cloud cost allocation
-        if (doc?.Cost == null) return;
-        Base.Cost(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cost first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cloud on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cost when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cloud cost allocation — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<h2 id="making-the-numbers-actionable">Making the numbers actionable, not just visible</h2>
+<p>A cost allocation report that lands in an inbox once a month changes nothing. The organizations that get value from this route the numbers to the people who can act — a Slack digest to each team lead showing their trend versus last month, a budget threshold that pages the team owning it, or a cost-per-unit metric (cost per request, cost per active user) tracked alongside the product's other health metrics so a spend increase gets the same scrutiny as a latency regression.</p>
+<p>Start with tags on everything new, accept that the untagged bucket won't hit zero immediately, pick one explicit rule for shared costs even if it's imperfect, and route the resulting numbers to whoever can actually change the spend. Precision matters less than the habit of looking.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,93 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The CI/CD pipeline integration is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>CircleCI and GitHub Actions solve the same problem — run your build, test, and deploy steps on every push — but they come from different starting points. GitHub Actions is bundled into GitHub and priced by runner-minutes; CircleCI is a standalone platform that predates Actions by years and still leads on some execution features. The right choice depends less on abstract feature comparisons and more on where your code already lives and how much pipeline complexity you actually have.</p>
+<h2 id="configuration-and-mental-model">Configuration and mental model</h2>
+<p>GitHub Actions defines workflows as YAML files under <code>.github/workflows/</code>, triggered by repo events (push, pull_request, schedule, workflow_dispatch), composed of jobs made of steps, where steps can be shell commands or reusable "actions" pulled from the Marketplace. CircleCI uses a single <code>.circleci/config.yml</code> built around jobs and reusable "orbs" (its equivalent of Actions), organized into workflows that control job ordering and fan-out. The concepts map closely — job, step, artifact, cache, matrix build — so a team fluent in one adapts to the other in a day or two.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Circleci
-on: [push]
+  <div class="code-header"><span class="code-lang">YAML · GITHUB ACTIONS WORKFLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test</code></pre>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>In the work I have done on circleci vs github actions — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+<h2 id="where-circleci-still-leads">Where CircleCI still leads</h2>
+<p>CircleCI's job orchestration is more mature for complex pipelines: native support for fan-out/fan-in workflows, more granular caching primitives, and — historically its strongest feature — better resource-class control, including dedicated macOS and Windows executors and self-hosted runners with finer resource tuning. Its test splitting (automatically dividing a test suite across parallel containers based on prior timing data) is more polished than Actions' equivalent, which usually requires a third-party action to get similar behavior. Docker layer caching is also more reliable on CircleCI's remote Docker environment than on Actions' hosted runners.</p>
+<h2 id="where-github-actions-wins">Where GitHub Actions wins</h2>
+<p>If your code is on GitHub, Actions has zero integration overhead — no external account, no webhook setup, no separate billing relationship, and status checks appear directly on the PR. The Marketplace is enormous, so common tasks (deploy to Vercel, publish to npm, build a container and push to a registry) are usually a two-line `uses:` step instead of custom scripting. Actions is also free for public repos and has a generous free tier for private repos on GitHub's own runners, which is why it dominates open source. Matrix builds (testing across multiple OS/language-version combinations) are simple and declarative.</p>
+<div class="callout-warn">
+  <strong>Both suffer from the same secrets-sprawl problem</strong>
+  <p>Whichever you choose, treat pipeline secrets as production credentials, not convenience variables. Scope secrets to the environment or context that needs them, rotate anything that touches a deploy key, and avoid printing secrets to logs even for debugging — both platforms will mask known secret values in log output, but only for values registered as secrets, not values concatenated into other strings.</p>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>When the work moves from design to production, the questions change. The circleci is not the question; the failure mode of the github is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "circleci_github" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="pricing-shape">Pricing shape</h2>
+<p>GitHub Actions bills by the minute on hosted runners, with Linux minutes cheapest and macOS/Windows minutes billed at a multiplier (macOS runners cost several times more per minute than Linux). CircleCI's free tier is credit-based per month, and paid plans are also usage-based but with more configurability over machine size and container count per job. For a small team already on GitHub, Actions' free private-repo minutes often cover CI entirely; for a team running large parallel test suites or needing heavier macOS/iOS builds, CircleCI's resource classes can end up cheaper per build even with a subscription on top.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Self-hosted runners narrow the gap</strong>
+  <p>Both platforms support self-hosted runners/executors, which removes most of the pricing difference for teams with their own compute — at the cost of taking on the operational burden of patching, scaling, and securing the runner fleet yourself.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: circleci
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: circleci
-  template:
-    metadata:
-      labels:
-        app: circleci</code></pre>
-</div>
-<h2 id="why-circleci-is-the-on-call-s-best-friend">Why circleci is the on-call's best friend</h2>
-<p>The performance of github in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="gitops-for-github">GitOps for github</h2>
-<p>Production github looks different from development github. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Circleci
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring github first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add circleci on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with github when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on circleci vs github actions — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<h2 id="migrating-between-them">Migrating between them</h2>
+<p>Because the underlying model (triggers, jobs, steps, caching, artifacts) is so similar, migrating a moderately complex pipeline between the two is usually a rewrite of the config file, not a redesign of the pipeline. The parts that take real effort are orb-specific or action-specific integrations with no direct equivalent — a CircleCI orb wrapping a niche deploy target, for instance — and self-hosted runner configuration, which is platform-specific enough to need re-testing either direction.</p>
+<p>Pick GitHub Actions by default if the repo lives on GitHub and the pipeline is straightforward — the integration cost savings usually outweigh CircleCI's execution-feature edge. Reach for CircleCI when you need its finer-grained resource classes, more mature parallel test splitting, or you're not on GitHub at all. Neither is wrong; the wrong choice is picking one and then fighting its defaults instead of using them.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

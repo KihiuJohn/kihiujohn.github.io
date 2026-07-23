@@ -93,81 +93,36 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="what-data-catalog-patterns-a-field-guide-is-for">What Data Catalog Patterns — A Field Guide is for</h2>
-<p>What Data Catalog Patterns — A Field Guide is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+    <p>A data catalog answers three questions someone on a growing data team asks daily: what tables exist, what do they mean, and can I trust them. Below a certain size, those questions get answered in Slack threads and tribal knowledge. Past that size, the same questions get asked and re-answered constantly, and the person who knows the answer becomes a bottleneck. A catalog is the attempt to make that knowledge queryable instead of remembered.</p>
+<h2 id="what-a-catalog-actually-does">What a catalog actually does</h2>
+<p>At the core, a data catalog indexes metadata — table and column names, types, row counts, owners, descriptions — and makes it searchable. On top of that base, most catalogs add a business glossary (mapping technical column names to the terms the business actually uses, so "cust_lifetime_val" is discoverable by someone searching "LTV"), lineage (which tables and jobs produced a given table, and what consumes it downstream), and usage signals like query frequency or last-accessed time that help people judge whether a table is still alive.</p>
+<p>The common thread across tools in this space — DataHub, Amundsen, Alation, Collibra, and cloud-native options like AWS Glue Data Catalog — is the same core loop: crawl or ingest metadata from your warehouses and pipelines, index it, and give people a search interface plus a place to add human context (descriptions, tags, ownership) that the source systems don't carry on their own. They differ in how open source vs. commercial they are, how deep their lineage and governance features go, and how much setup they demand, but the underlying job is the same.</p>
+<h2 id="why-catalogs-matter-as-you-scale">Why catalogs matter as platforms scale</h2>
+<p>At a handful of tables, nobody needs a catalog — you just ask the person who built the pipeline. That doesn't scale. Once you have dozens of engineers, hundreds of tables, and pipelines feeding each other across teams, "ask the person who knows" breaks down in two ways: the person leaves or forgets, and the same question gets asked by five different people who each independently arrive at a guess. Multiple guesses about what a column means is how you get a dashboard and a finance report disagreeing about the same number, discovered in a meeting instead of a code review.</p>
+<p>The deeper issue a catalog addresses is trust. Data consumers — analysts, other engineers, ML practitioners — need to know not just what a table contains but whether it's safe to build on: is it still actively maintained, is it the canonical source or a deprecated copy, has anyone flagged quality issues with it. Without a catalog, that trust signal lives nowhere and gets re-derived from scratch by every new consumer.</p>
+<h2 id="lineage-table-level-vs-column-level">Lineage: table-level vs. column-level</h2>
+<p>Lineage tracking comes in two granularities that solve different problems. Table-level lineage answers "what feeds this table, and what does it feed" — useful for impact analysis when you're about to change a schema or deprecate a source. Column-level lineage goes further and tracks a specific field through every transformation, so you can answer "does this specific column in the gold table trace back to that raw source field, and through which transformations."</p>
+<div class="callout">
+  <strong>Column-level lineage is expensive to get right</strong>
+  <p>Table-level lineage can often be inferred from query logs or job dependency graphs with reasonable accuracy. Column-level lineage generally requires parsing SQL or transformation code to trace individual field references, which is a much harder problem and where most catalog tools are noticeably less mature. Don't assume column-level lineage will be complete or trustworthy without a track record of checking it against reality.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>In the work I have done on data catalog patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="ownership-and-stewardship">Ownership and stewardship models</h2>
+<p>Metadata without an owner rots. A table description that made sense two schema changes ago is worse than no description, because it's actively misleading. The organizational piece that makes a catalog stay accurate is assigning ownership — usually at the table or domain level — to a specific team or individual who's expected to keep descriptions and tags current as the underlying data changes.</p>
+<p>Two ownership models show up in practice: centralized stewardship, where a data platform or governance team owns cataloging as a job, and federated (or "data mesh"-style) stewardship, where each domain team owns the metadata for the tables they produce. Federated models scale better with organization size but only work if updating the catalog is built into each team's normal workflow — schema change PRs, deployment checklists — rather than being a separate chore layered on top.</p>
+<h2 id="how-adoption-fails">How catalog adoption fails</h2>
+<p>The most common failure mode is a one-time population followed by abandonment: someone runs the crawler, gets an initial index of every table, declares victory, and nobody touches it again. Six months later half the tables listed no longer exist, the descriptions are wrong, and the catalog is trusted less than searching Slack — so people stop opening it, which removes the only feedback loop that would have caught the drift.</p>
+<p>The fix is less about picking a better tool and more about making catalog updates part of a workflow people already do, rather than an extra step they have to remember. A few patterns that hold up:</p>
+<ul>
+<li>Auto-sync metadata from the warehouse or orchestrator on a schedule, so schema and freshness data never goes stale even if humans do nothing.</li>
+<li>Require a table description and owner as part of the PR or migration that creates a new production table, not as a follow-up task.</li>
+<li>Surface the catalog inside tools people already use — a link from the BI tool, a lookup in the SQL editor — instead of a separate destination they have to remember to visit.</li>
+</ul>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>A catalog nobody opens is dead weight</strong>
+  <p>If the catalog isn't part of anyone's daily workflow, the crawler still runs and the metadata still exists, but nobody notices when it's wrong. That's worse than not having a catalog, because the illusion of documentation discourages the manual verification people would otherwise do.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The data is not the question; the failure mode of the catalog is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.data > 0).groupBy("catalog").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_data') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>The performance of catalog in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production catalog looks different from development catalog. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring catalog first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add data on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with catalog when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on data catalog patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<h2 id="picking-a-starting-point">Picking a starting point</h2>
+<p>For a small team, the pragmatic starting point is often whatever ships closest to your existing stack — AWS Glue Data Catalog if you're already on Glue and Athena, or a lightweight open-source deploy like Amundsen or DataHub if you want something self-hosted and are willing to run it. Commercial platforms like Alation or Collibra earn their cost at larger organizations that need formal governance workflows — approval chains, compliance reporting, access request tracking — on top of discovery. Whichever you pick, budget for the ongoing process of keeping it fed, not just the initial rollout; that's the part that determines whether it's still useful a year later.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

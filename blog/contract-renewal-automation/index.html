@@ -93,78 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real vertical SaaS projects, this is rarely the question. The question is the multi-tenant data isolation, the feature flags, the channel partner program. This article is the implementation.</p>
-<h2 id="why-contract-on-a-horizontal-platform-beats-from-scratch">Why contract on a horizontal platform beats from-scratch</h2>
-<p>Why contract on a horizontal platform beats from-scratch is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Contract renewal is where SaaS revenue quietly leaks. A renewal that depends on someone remembering to email the customer, or a finance team member noticing an expiry date in a spreadsheet, will eventually get missed — and a missed renewal either churns a customer who intended to stay, or auto-renews a customer who intended to leave and now disputes the charge. Automating the renewal workflow isn't about replacing the sales conversation; it's about making sure the conversation happens on time, every time, with the right context attached.</p>
+<h2 id="the-shape-of-a-renewal-workflow">The shape of a renewal workflow</h2>
+<p>A renewal automation, at minimum, needs three things: a reliable source of truth for contract end dates, a set of triggers fired at fixed lead times before expiry (90/60/30/7 days is a common cadence), and a place those triggers land — a CRM task, a Slack alert to the account owner, an automated email to the customer, or some combination depending on account tier. The failure mode to design against isn't the trigger not firing; it's the trigger firing into a queue nobody watches. Route high-value renewals to a human task with an owner and a due date, not just an email that can get lost.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ContractExt : PXCacheExtension<Renewal>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · RENEWAL LEAD-TIME QUERY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT
+    c.contract_id,
+    c.customer_id,
+    c.end_date,
+    c.arr,
+    c.owner_id,
+    DATEDIFF(day, GETUTCDATE(), c.end_date) AS days_to_expiry
+FROM contracts c
+WHERE c.status = 'active'
+  AND c.auto_renew = 0
+  AND DATEDIFF(day, GETUTCDATE(), c.end_date) IN (90, 60, 30, 7)
+ORDER BY c.end_date;</code></pre>
 </div>
-<h2 id="channel-partner-programs-for-renewal">Channel partner programs for renewal</h2>
-<p>In the work I have done on contract renewal automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+<h2 id="auto-renew-vs-manual-renew-is-a-contract-decision-not-a-code-decision">Auto-renew vs manual-renew is a contract decision, not a code decision</h2>
+<p>Whether a contract auto-renews unless cancelled, or requires active reconfirmation, is set in the contract terms — but the automation needs to branch on it explicitly rather than assuming one policy for everyone. Auto-renewing contracts still need a pre-renewal notice in most jurisdictions and under most consumer-protection or B2B fair-dealing norms; silently charging a card on an auto-renewal without adequate notice is a chargeback and trust problem even where it's technically legal.</p>
+<div class="callout-warn callout">
+  <strong>Don't let the automation outrun the billing system</strong>
+  <p>A renewal workflow that updates contract status without a corresponding, correctly-timed change in the billing system produces the worst kind of bug: a customer billed for a service they cancelled, or a customer using a service they never renewed. Contract state and billing state need to be updated together, ideally in the same transaction or with a reconciliation job that catches drift within hours, not weeks.</p>
 </div>
-<h2 id="marketplace-listing-for-contract">Marketplace listing for contract</h2>
-<p>When the work moves from design to production, the questions change. The contract is not the question; the failure mode of the renewal is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'contract'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="soc-2-and-iso-27001-for-renewal">SOC 2 and ISO 27001 for renewal</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="usage-signals-change-the-renewal-conversation">Usage signals change the renewal conversation</h2>
+<p>The highest-leverage addition to a renewal workflow isn't more reminders — it's attaching usage data to the renewal task before it reaches a human. A renewal for an account with declining login frequency or low feature adoption needs a different conversation than a renewal for an account that's hit every seat limit. Pulling a simple usage-trend summary into the renewal task (last 30 days active users vs. prior 30 days, key feature adoption %) turns a generic "renewal due" ping into something a customer success rep can actually act on.</p>
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Segment lead times by account value, not by policy convenience</strong>
+  <p>A $500,000 ARR account deserves a 120-day lead time and a QBR before renewal; a self-serve $50/month account can be handled with a 14-day automated email. Using the same cadence for both either annoys your smallest accounts with unnecessary process or under-serves your largest ones — segment the workflow by ARR tier from the start.</p>
 </div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM contract
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="what-contract-renewal-automation-is-for">What Contract Renewal Automation is for</h2>
-<p>The performance of renewal in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>Production renewal looks different from development renewal. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ContractExt : PXCacheExtension<Renewal>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+<h2 id="what-to-actually-automate-vs-what-to-route-to-a-human">What to actually automate vs. what to route to a human</h2>
+<p>Fully automate the parts with no judgment call: sending the notice email, creating the CRM task, updating contract status on the renewal date, generating the renewal invoice. Route to a human anything involving a decision: whether to offer a discount to retain an at-risk account, whether a usage drop signals churn risk worth a proactive call, whether contract terms need renegotiating. Trying to automate the judgment calls usually produces either an over-generous discount bot or a renewal email that ignores an obviously unhappy customer — both worse than a human noticing.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring renewal first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add contract on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with renewal when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal</th><th>Automated action</th><th>Human action</th></tr>
+  <tr><td>90 days to expiry, healthy usage</td><td>CRM task created, low priority</td><td>Standard check-in during normal cadence</td></tr>
+  <tr><td>30 days to expiry, declining usage</td><td>Task escalated, usage summary attached</td><td>Proactive call before renewal notice goes out</td></tr>
+  <tr><td>7 days to expiry, no response</td><td>Automated reminder to customer + owner</td><td>Direct outreach, escalation to manager if high ARR</td></tr>
+  <tr><td>Auto-renew contract, notice period required</td><td>Notice sent per contractual lead time</td><td>None, unless customer responds</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on contract renewal automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The point of renewal automation is not to remove humans from renewals — it's to guarantee the reminder fires on time and arrives with enough context that the human conversation, when it happens, is useful instead of generic. Get the lead-time triggers and billing-state sync solid first; usage-signal enrichment and ARR-based segmentation are the next layer once the basics never miss a date.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

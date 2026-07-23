@@ -93,93 +93,46 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="incident-response-for-crossplane">Incident response for crossplane</h2>
-<p>Incident response for crossplane is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Crossplane extends the Kubernetes API to manage infrastructure outside the cluster — an RDS instance, an S3 bucket, a VPC — using the same declarative, reconciliation-loop model Kubernetes already uses for pods and deployments. Instead of a separate Terraform pipeline that runs on a schedule or on merge, infrastructure becomes a Kubernetes resource that a controller continuously reconciles toward the desired state, the same way a Deployment controller keeps pod replicas at the requested count.</p>
+<h2 id="providers-and-managed-resources">Providers and managed resources</h2>
+<p>A Crossplane provider (provider-aws, provider-gcp, provider-azure, and many community providers for other services) installs CRDs and controllers for that cloud's resources. Once installed, you can create a <code>Bucket</code> or a <code>RDSInstance</code> as a Kubernetes object, and the provider's controller talks to the cloud API to make reality match the spec — including reconciling drift if someone changes the resource outside Crossplane, which is a meaningful difference from Terraform's plan-and-apply model that only checks drift when you explicitly run it.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Crossplane
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="what-crossplane-for-kubernetes-a-field-guide-gives-you">What Crossplane for Kubernetes — A Field Guide gives you</h2>
-<p>In the work I have done on crossplane for kubernetes — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The crossplane is not the question; the failure mode of the kubernetes is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "crossplane_kubernetes" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">YAML · MANAGED RESOURCE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
 metadata:
-  name: crossplane
+  name: app-uploads
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: crossplane
-  template:
-    metadata:
-      labels:
-        app: crossplane</code></pre>
+  forProvider:
+    region: eu-west-1
+    tags:
+      environment: production
+  providerConfigRef:
+    name: aws-provider-config</code></pre>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of kubernetes in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<h2 id="compositions-the-platform-team-abstraction-layer">Compositions: the platform-team abstraction layer</h2>
+<p>Raw managed resources are still cloud-specific and detailed — not something you want application teams writing directly. A <code>Composition</code> lets a platform team define a higher-level abstraction (a <code>PostgresDatabase</code> claim, say) that expands into the actual set of managed resources — an RDS instance, a security group, a subnet group, a secret — behind a much simpler interface. Application teams request the abstraction; the platform team owns and evolves what it expands into, which is the core value proposition: self-service infrastructure requests that stay within guardrails the platform team controls.</p>
+<div class="callout-warn callout">
+  <strong>Compositions are a real API contract, not just templating</strong>
+  <p>Once application teams are creating claims against a Composition, changing the Composition's shape is a breaking-change decision, same as changing any API. Version Compositions deliberately and think about migration for existing claims before changing the fields a claim can set — this is easy to treat casually early on and expensive to fix once dozens of claims depend on the old shape.</p>
+</div>
+<h2 id="crossplane-vs-terraform-not-a-strict-replacement">Crossplane vs Terraform: not a strict replacement</h2>
+<p>Terraform's model is plan-review-apply, usually gated through CI/CD with a human approval step — good for changes where you want an explicit diff reviewed before anything happens. Crossplane's model is continuous reconciliation — good for infrastructure that should self-heal and for exposing infrastructure provisioning as a Kubernetes-native, GitOps-friendly API to teams already living in kubectl and Git. They're not mutually exclusive in a given organization; many teams use Terraform for foundational, rarely-changed infrastructure (the VPC, the cluster itself) and Crossplane for the higher-churn, per-application resources that benefit from self-service and continuous drift correction.</p>
+<h2 id="gitops-fits-naturally">GitOps fits naturally</h2>
+<p>Because Crossplane resources are ordinary Kubernetes objects, they work with Argo CD or Flux the same way any other manifest does — commit a claim to Git, the GitOps controller applies it, Crossplane reconciles the underlying cloud resources. This is a genuine operational win over a separate Terraform pipeline: one review-and-audit trail (Git history) for both application deployments and the infrastructure they depend on, rather than two disconnected systems with their own approval flows.</p>
 <div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production kubernetes looks different from development kubernetes. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Crossplane
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <strong>Start with Compositions for your most-requested resource type</strong>
+  <p>Don't try to model your entire cloud footprint in Crossplane on day one. Pick the resource type application teams request most often — a database, a queue, an object storage bucket — build one solid Composition for it, and prove the self-service workflow before expanding. A half-finished Crossplane rollout covering three resource types badly is worse than one resource type covered well.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring kubernetes first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add crossplane on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with kubernetes when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concern</th><th>Terraform</th><th>Crossplane</th></tr>
+  <tr><td>Change review</td><td>Explicit plan/apply, easy to gate</td><td>Continuous reconciliation, gated via Git review of the claim</td></tr>
+  <tr><td>Drift handling</td><td>Detected on next plan run</td><td>Continuously reconciled by the controller</td></tr>
+  <tr><td>Self-service for app teams</td><td>Needs a separate wrapper/portal</td><td>Native via Compositions and claims</td></tr>
+  <tr><td>Ecosystem maturity</td><td>Very mature, broad provider coverage</td><td>Growing, strong on major clouds, thinner elsewhere</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on crossplane for kubernetes — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Crossplane is worth adopting when the goal is genuine self-service infrastructure inside a Kubernetes-native, GitOps workflow — not as a wholesale Terraform replacement. Start narrow with one Composition for your highest-demand resource type, treat that Composition's shape as a versioned API, and expand once the workflow has proven itself with real application teams using it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,89 +93,39 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="bun-implementation-walkthrough">Bun implementation walkthrough</h2>
-<p>Bun implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Bun has moved from "interesting Node alternative" to something teams actually run in production: a fast JavaScript/TypeScript runtime with a built-in bundler, test runner, and package manager, all shipped as one binary. The pitch is fewer tools glued together — no separate ts-node, jest, webpack, and npm each with their own config files. The trade-off is a younger ecosystem where a handful of native Node modules still don't work cleanly, so the production question is less "is Bun fast" (it is) and more "does your dependency tree survive the switch."</p>
+<h2 id="what-changes-at-runtime">What changes at runtime</h2>
+<p>Bun implements a large chunk of the Node.js API surface directly — <code>fs</code>, <code>path</code>, <code>http</code>, most of the CommonJS/ESM interop — so a typical Express or Fastify app often runs unmodified with <code>bun run</code> instead of <code>node</code>. Where things diverge is native addons (anything relying on N-API bindings compiled against Node's ABI), some edge cases in the <code>http</code> module's exact error semantics, and a few npm packages that shell out to <code>node</code> explicitly inside their build scripts. The honest approach is running your existing test suite under Bun before switching anything in production, not assuming compatibility.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BunRuntimeExt : PXGraphExtension<BunEntry>
-{
-    [PXOverride]
-    public virtual void Runtime(Bun doc)
-    {
-        // Custom runtime logic for bun runtime production
-        if (doc?.Runtime == null) return;
-        Base.Runtime(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">DOCKERFILE · PRODUCTION IMAGE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>FROM oven/bun:1 AS base
+WORKDIR /app
+
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile --production
+
+COPY . .
+RUN bun build ./src/index.ts --outdir ./dist --target bun
+
+EXPOSE 3000
+CMD ["bun", "run", "dist/index.js"]</code></pre>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on bun runtime in production — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+<h2 id="the-built-in-tooling-payoff">The built-in tooling payoff</h2>
+<p>The part that actually changes day-to-day developer experience is having <code>bun install</code>, <code>bun test</code>, and <code>bun build</code> as one toolchain instead of npm/yarn plus Jest plus esbuild or webpack each with separate config. Install times are consistently faster than npm because Bun uses a global cache and a binary lockfile, and <code>bun test</code> runs Jest-compatible test files without a separate test runner dependency. For a monorepo with a lot of small packages, that consolidation removes a meaningful chunk of CI time spent on tool startup rather than actual work.</p>
+<h2 id="what-to-verify-before-migrating">What to verify before migrating</h2>
+<p>Before moving a production service, check three things specifically: native dependencies (anything with a <code>binding.gyp</code> or prebuilt <code>.node</code> file), process-level APIs your app relies on (worker threads, cluster mode — Bun's support here has matured but isn't identical to Node's), and any tooling in CI that assumes a Node binary exists on <code>PATH</code>. Bun ships a Node compatibility layer, but "compatible" is a spectrum, not a boolean.</p>
+<div class="callout-warn">
+  <strong>Lockfile format is not interchangeable</strong>
+  <p>Bun's binary lockfile (<code>bun.lockb</code>) is not the same format as <code>package-lock.json</code> or <code>yarn.lock</code>. If part of your team still runs npm locally while CI uses Bun, you'll get drift between what each installs. Pick one package manager for the whole pipeline during migration, not a mix.</p>
 </div>
-<h2 id="performance-and-observability-for-bun">Performance and observability for bun</h2>
-<p>When the work moves from design to production, the questions change. The bun is not the question; the failure mode of the runtime is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for bun
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="running-alongside-node-instead-of-replacing-it">Running alongside Node instead of replacing it</h2>
+<p>A common, lower-risk pattern is adopting Bun first for tooling — as the package manager and test runner — while production still runs on Node, then migrating the runtime itself once you've built confidence. This decouples the biggest win (fast installs, fast tests, one less config file) from the riskiest change (swapping what actually serves production traffic), and lets you back out of the runtime switch without touching how the team develops day to day.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Watch memory behaviour under load, not just startup speed</strong>
+  <p>Cold-start and startup benchmarks favour Bun clearly, but the number that matters for a long-running service is steady-state memory and latency under sustained load. Run your actual load test against both runtimes before treating a startup benchmark as the deciding factor.</p>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of runtime in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-runtime-edge-cases-i-have-shipped">The runtime edge cases I have shipped</h2>
-<p>Production runtime looks different from development runtime. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BunRuntimeExt : PXGraphExtension<BunEntry>
-{
-    [PXOverride]
-    public virtual void Runtime(Bun doc)
-    {
-        // Custom runtime logic for bun runtime production
-        if (doc?.Runtime == null) return;
-        Base.Runtime(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring runtime first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add bun on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with runtime when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on bun runtime in production — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Bun in production is a reasonable bet for services with a clean dependency tree and no exotic native modules — the tooling consolidation alone often justifies it. For anything leaning on Node-specific native addons or process internals, migrate the tooling first, verify compatibility under real load, and only switch the runtime once the test suite has actually run green under Bun for a while.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,89 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="the-version-of-cube-that-works">The version of cube that works</h2>
-<p>The version of cube that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Cube is a semantic layer: a place to define metrics, dimensions, and joins once, in one modelling layer, so every dashboard, BI tool, and ad-hoc query downstream computes "revenue" or "active users" the same way instead of each consumer reimplementing the SQL slightly differently. The value shows up the first time two dashboards built by two different teams stop disagreeing about a number that should be the same.</p>
+<h2 id="the-core-idea-cube-schema">The core idea: cube schema</h2>
+<p>A Cube schema defines a "cube" per fact table (or logical entity) with measures (aggregations — sums, counts, averages) and dimensions (things you group or filter by). Once defined, Cube generates SQL from a higher-level query — you ask for a measure grouped by a dimension over a time range, and Cube compiles that into the actual SQL against your warehouse, handling the join logic so consumers never write raw SQL against the underlying tables directly.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CubePatternsExt : PXGraphExtension<CubeEntry>
-{
-    [PXOverride]
-    public virtual void Patterns(Cube doc)
-    {
-        // Custom patterns logic for cube patterns
-        if (doc?.Patterns == null) return;
-        Base.Patterns(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · CUBE SCHEMA DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>cube('Orders', {
+  sql: `SELECT * FROM public.orders`,
+
+  measures: {
+    count: { type: 'count' },
+    totalRevenue: { sql: 'amount', type: 'sum' },
+  },
+
+  dimensions: {
+    status: { sql: 'status', type: 'string' },
+    createdAt: { sql: 'created_at', type: 'time' },
+  },
+
+  joins: {
+    Customers: {
+      relationship: 'belongsTo',
+      sql: `${CUBE}.customer_id = ${Customers}.id`,
+    },
+  },
+});</code></pre>
 </div>
-<h2 id="why-cube-js-patterns-a-field-guide-matters-in-production">Why Cube.js Patterns — A Field Guide matters in production</h2>
-<p>In the work I have done on cube.js patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+<h2 id="pre-aggregations-are-the-performance-lever">Pre-aggregations are the performance lever</h2>
+<p>Querying a raw fact table with millions of rows for every dashboard load is slow and expensive on the warehouse. Cube's pre-aggregation feature lets you define a rollup — a smaller, pre-computed summary table, refreshed on a schedule — that Cube automatically routes matching queries to instead of hitting the raw table. A dashboard asking for daily revenue by region can be served from a pre-aggregated daily-by-region rollup in milliseconds instead of scanning the full orders table on every page load. Getting pre-aggregations right (which measures, which dimensions, what refresh cadence) is usually the single biggest lever on both query latency and warehouse cost.</p>
+<div class="callout-warn callout">
+  <strong>Pre-aggregations trade freshness for speed — make that trade-off explicit</strong>
+  <p>A pre-aggregation refreshed hourly means dashboards built on it are up to an hour stale. That's fine for most business dashboards and wrong for an operational view that needs near-real-time numbers. Set refresh cadence per pre-aggregation based on what each specific metric actually needs, not one global default.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The cube is not the question; the failure mode of the patterns is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for cube
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="cube-implementation-walkthrough">Cube implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="one-model-many-consumers">One model, many consumers</h2>
+<p>Cube exposes the modelled semantic layer over multiple APIs — a SQL API that BI tools (Tableau, Looker Studio, Power BI) can connect to as if Cube were just another Postgres-compatible database, a REST/GraphQL API for custom dashboards, and native integrations for embedding charts directly in an application. The pattern this enables: business logic like "what counts as an active customer" or "how do we calculate churn" gets defined once in the Cube schema, and every consumer — the exec dashboard, the customer-facing usage widget, the ad-hoc analyst query — inherits the same definition instead of each team encoding it independently and drifting apart over time.</p>
+<h2 id="access-control-at-the-semantic-layer">Access control at the semantic layer</h2>
+<p>Because every query routes through Cube, row-level and column-level security can be enforced centrally rather than duplicated in every dashboard tool's own permission system. A multi-tenant SaaS product can inject the current tenant ID into the security context and have Cube automatically scope every query to that tenant, which removes an entire class of "someone forgot to add the WHERE clause in this one dashboard" data leak.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-cube">Performance and observability for cube</h2>
-<p>The performance of patterns in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production patterns looks different from development patterns. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CubePatternsExt : PXGraphExtension<CubeEntry>
-{
-    [PXOverride]
-    public virtual void Patterns(Cube doc)
-    {
-        // Custom patterns logic for cube patterns
-        if (doc?.Patterns == null) return;
-        Base.Patterns(doc);
-    }
-}</code></pre>
+  <strong>Start by migrating your most-duplicated metric, not your whole warehouse</strong>
+  <p>The fastest way to prove Cube's value is to find the one metric that's currently defined slightly differently in three different dashboards — revenue, active users, whatever it is — model it once in Cube, and point all three consumers at that single definition. That concrete "the numbers finally match" moment is a stronger case for broader adoption than modelling the entire schema upfront.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring patterns first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cube on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with patterns when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>Without a semantic layer</th><th>With Cube</th></tr>
+  <tr><td>Metric definitions</td><td>Duplicated per dashboard, drift over time</td><td>Defined once, consumed everywhere</td></tr>
+  <tr><td>Query performance</td><td>Every dashboard hits raw tables</td><td>Pre-aggregations serve common queries fast</td></tr>
+  <tr><td>Access control</td><td>Enforced per-tool, inconsistently</td><td>Enforced centrally in the security context</td></tr>
+  <tr><td>New BI tool onboarding</td><td>Re-derive all metric logic from scratch</td><td>Connect to Cube's SQL API, inherit existing models</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cube.js patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Cube earns its place when the same metric is being recomputed slightly differently across multiple dashboards and tools — that's the specific pain it's designed to remove. Model one high-value, currently-duplicated metric first, get pre-aggregations tuned for its actual freshness needs, and expand the schema from there rather than trying to migrate an entire warehouse's worth of metrics into it up front.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

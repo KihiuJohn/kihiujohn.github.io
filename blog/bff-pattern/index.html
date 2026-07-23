@@ -93,89 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="migration-path-when-bff-changes">Migration path when bff changes</h2>
-<p>Migration path when bff changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BffPatternExt : PXGraphExtension<BffEntry>
-{
-    [PXOverride]
-    public virtual void Pattern(Bff doc)
-    {
-        // Custom pattern logic for bff pattern backend
-        if (doc?.Pattern == null) return;
-        Base.Pattern(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="how-to-debug-pattern-in-production">How to debug pattern in production</h2>
-<p>In the work I have done on bff pattern — backend for frontend, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-bff-that-works">The version of bff that works</h2>
-<p>When the work moves from design to production, the questions change. The bff is not the question; the failure mode of the pattern is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for bff
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-bff-pattern-backend-for-frontend-matters-in-production">Why BFF Pattern — Backend for Frontend matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Backend for Frontend (BFF) is a simple idea that solves a real problem: a single general-purpose API rarely serves a web client, a mobile client, and a third-party integration equally well. Instead of forcing every consumer through one generic gateway, you build a thin backend per frontend — each shaped around what that specific client actually needs. The pattern earns its keep the moment a mobile team starts asking for a "lite" version of an endpoint that a web team also depends on.</p>
+<h2 id="the-problem-bff-solves">The problem BFF solves</h2>
+<p>A shared API tends to accumulate optional fields, conditional includes, and query parameters that toggle behaviour for one client without breaking another. Over time, the endpoint becomes a compromise nobody is happy with: too heavy for mobile, too narrow for the admin dashboard, too generic for a partner integration. A BFF sidesteps this by giving each frontend its own backend layer that composes calls to downstream services — often the same services the shared API would have called — and shapes the response exactly to what that UI renders.</p>
+<h2 id="where-it-sits-in-the-architecture">Where it sits in the architecture</h2>
+<p>The BFF sits between the client and your domain services or microservices. It is not a replacement for those services — it is an aggregation and translation layer. A typical request from a mobile app hits the mobile BFF, which fans out to an orders service, a pricing service, and a user-profile service, then assembles one response tuned for the mobile screen. The web BFF might call the same three services but return a richer payload because the web client renders more on one page. Neither BFF owns business logic; that stays in the domain services. The BFF owns orchestration, response shaping, and client-specific concerns like session handling or field trimming.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>One BFF per experience, not per client type</strong>
+  <p>The rule of thumb is one BFF per distinct user experience, not one per device. If your iOS and Android apps render the same screens with the same data needs, they can share a mobile BFF. Splitting further than the UI actually diverges just multiplies the surface area you have to maintain.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="a-minimal-bff-endpoint">A minimal BFF endpoint</h2>
+<p>The implementation is usually unremarkable — a thin HTTP layer that calls a few downstream services in parallel and merges the results. Here is the shape of a mobile order-summary BFF endpoint written against a couple of internal services:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">TYPESCRIPT · BFF ENDPOINT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// mobile-bff/routes/orderSummary.ts
+app.get('/mobile/orders/:id/summary', async (req, res) => {
+  const { id } = req.params;
+
+  const [order, tracking, customer] = await Promise.all([
+    ordersService.getOrder(id),
+    shippingService.getTracking(id),
+    customersService.getProfile(req.auth.customerId),
+  ]);
+
+  // Mobile only needs a slim projection - no line-item tax
+  // breakdowns, no internal SKUs, no admin metadata.
+  res.json({
+    orderId: order.id,
+    status: order.status,
+    total: order.total,
+    eta: tracking?.estimatedDelivery ?? null,
+    customerName: customer.firstName,
+  });
+});</code></pre>
 </div>
-<h2 id="bff-implementation-walkthrough">Bff implementation walkthrough</h2>
-<p>The performance of pattern in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
+<h2 id="tradeoffs-and-when-to-skip-it">Trade-offs and when to skip it</h2>
+<p>BFFs add an extra hop and an extra service to deploy, monitor, and keep alive. For a product with one client and one team, a BFF is pure overhead — you would be building an aggregation layer with nothing to aggregate against. The pattern pays off once you have genuinely divergent clients maintained by different teams on different release cadences, because it lets each team version and ship their BFF independently of the others. It also becomes attractive when the alternative is a shared API team turning every client request into a negotiation over a shared contract.</p>
+<div class="callout-warn">
+  <strong>Watch for logic creep</strong>
+  <p>The most common failure mode is business logic quietly migrating into the BFF because it is convenient — a discount calculation here, a status derivation there. Once two BFFs implement the same rule slightly differently, you have a consistency bug that is hard to trace. Keep domain logic in the domain services; the BFF composes and shapes, it does not decide.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production pattern looks different from development pattern. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BffPatternExt : PXGraphExtension<BffEntry>
-{
-    [PXOverride]
-    public virtual void Pattern(Bff doc)
-    {
-        // Custom pattern logic for bff pattern backend
-        if (doc?.Pattern == null) return;
-        Base.Pattern(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pattern first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add bff on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pattern when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="bff-vs-api-gateway">BFF vs. API gateway</h2>
+<p>These two are often confused. An API gateway is a single, shared entry point that handles cross-cutting concerns — auth, rate limiting, routing — for all clients uniformly. A BFF is deliberately client-specific and can contain aggregation logic tailored to one experience. In practice they coexist: the gateway sits in front of everything for auth and routing, and individual BFFs sit behind it, each serving one type of client. Teams sometimes start with a gateway, notice it accumulating client-specific branches, and split those branches out into proper BFFs once the divergence becomes unmanageable.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on bff pattern — backend for frontend. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>BFF is not a framework or a product — it is an organisational pattern for when one API can no longer serve every client without compromise. Build one per distinct frontend experience, keep business logic in the services it calls, and resist the urge to reach for it before you actually have more than one client pulling the shared API in different directions.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

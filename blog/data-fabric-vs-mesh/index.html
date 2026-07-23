@@ -93,81 +93,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="the-testing-pyramid-for-fabric">The testing pyramid for fabric</h2>
-<p>The testing pyramid for fabric is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="backfills-and-rollbacks-for-data">Backfills and rollbacks for data</h2>
-<p>In the work I have done on data fabric vs data mesh, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="what-data-fabric-vs-data-mesh-is-for">What Data Fabric vs Data Mesh is for</h2>
-<p>When the work moves from design to production, the questions change. The data is not the question; the failure mode of the fabric is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.data > 0).groupBy("fabric").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Data fabric and data mesh get used almost interchangeably in vendor marketing, which is unfortunate because they answer different questions. Data mesh, as defined by Zhamak Dehghani, is an organizational and architectural paradigm about <em>who owns data</em> — decentralizing ownership to the domain teams that produce it. Data fabric is a technology-architecture pattern about <em>how systems find and connect to data</em> — a metadata-driven layer that unifies access across distributed sources, regardless of who owns them. They solve adjacent problems and are not mutually exclusive.</p>
+
+<h2 id="data-mesh-organizational-decentralization">Data mesh: organizational decentralization</h2>
+<p>Data mesh rests on four principles: domain-oriented ownership (the team that produces order data owns the order data product, not a central data team), data-as-a-product (each domain's data is treated with the same rigor as a customer-facing product — documented, versioned, SLA'd), a self-serve data infrastructure platform (so domain teams don't each need to build their own pipelines from scratch), and federated computational governance (global standards like schema conventions and access policy, enforced in a distributed way rather than by a central gatekeeper).</p>
+<p>The core claim is organizational: a central data team becomes a bottleneck as an organization scales, because they don't have the domain context to model order data as well as the team that built the ordering system. Mesh pushes ownership back to domain teams and treats the central platform team as an enabler, not a gatekeeper.</p>
+
+<h2 id="data-fabric-technical-unification">Data fabric: technical unification</h2>
+<p>Data fabric doesn't prescribe who owns what. It's a technology pattern: a metadata layer — often using automation or ML to infer relationships, lineage, and data quality signals — that sits across your distributed data estate (data warehouses, lakes, operational databases, SaaS sources) and presents a more unified way to discover and access that data, regardless of where it physically lives or who manages the underlying system. A data fabric can be, and often is, centrally managed by a platform or data engineering team. It's about reducing the integration effort of connecting disparate systems, not about redistributing ownership.</p>
+
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>The one-line distinction</strong>
+  <p>Data mesh asks "who should own this data and how do we federate governance across owners?" Data fabric asks "how do we technically connect and expose data that lives in many different systems?" A fabric can serve either a centralized or a mesh-style decentralized organization.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_data') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+
+<h2 id="where-they-overlap">Where they overlap</h2>
+<p>In practice, a data mesh implementation often uses fabric-like technology to make self-serve infrastructure possible — a metadata catalog and unified query/access layer is exactly what lets domain teams publish and discover data products without every team building bespoke integration code. So a real deployment can be "a data mesh organizational model, implemented partly using data-fabric-style tooling." The confusion comes from vendors selling metadata/catalog/integration platforms who market their product as delivering "data mesh" when what they're actually selling is fabric technology — a technical layer, not an organizational restructuring, which no software product can do on its own.</p>
+
+<div class="callout-warn callout">
+  <strong>Watch for the vendor conflation</strong>
+  <p>If a vendor's pitch is "buy our platform and you'll have a data mesh," be skeptical. Mesh is fundamentally about changing team structure, ownership, and accountability — a platform can support that shift but can't substitute for it. That's a governance and org-design project as much as a technology one.</p>
 </div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The performance of fabric in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>Production fabric looks different from development fabric. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+
+<h2 id="which-problem-do-you-actually-have">Which problem do you actually have</h2>
+<p>If your pain is "no team wants to own this data, quality is inconsistent, and a central data team is a bottleneck for every new pipeline," that's an ownership problem — data mesh principles are the relevant lens, even if you adopt them partially (start with one or two domains, not an org-wide relaunch).</p>
+<p>If your pain is "we have data scattered across a warehouse, several SaaS tools, and an on-prem database, and nobody can find or trust what exists," that's an integration and discovery problem — data fabric technology (a catalog, unified metadata layer, automated lineage tracking) addresses it directly without requiring you to restructure any teams.</p>
+<p>Many organizations need both over time: fabric-style tooling to make data discoverable and accessible, and mesh-style ownership changes to fix the accountability and quality problems that tooling alone can't solve.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring fabric first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add data on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with fabric when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th></th><th>Data Mesh</th><th>Data Fabric</th></tr>
+  <tr><td>Primary concern</td><td>Organizational ownership</td><td>Technical unification</td></tr>
+  <tr><td>Unit of change</td><td>Domain teams and accountability</td><td>Metadata layer and connectors</td></tr>
+  <tr><td>Can be centrally managed</td><td>No — decentralization is the point</td><td>Yes, commonly is</td></tr>
+  <tr><td>Solved by buying software</td><td>No — requires org change</td><td>Largely yes</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on data fabric vs data mesh. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat data mesh and data fabric as answers to different questions rather than competing architectures. If the actual problem is who's accountable for data quality and modeling, look at mesh principles and be honest that it's an organizational project. If the problem is that data is scattered and hard to find or connect to, fabric-style tooling addresses that directly — and you don't need to relabel a catalog project as a mesh initiative to get value from it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

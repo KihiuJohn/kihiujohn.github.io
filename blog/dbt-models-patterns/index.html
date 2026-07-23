@@ -93,81 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="cost-optimisation-for-dbt">Cost optimisation for dbt</h2>
-<p>Cost optimisation for dbt is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every dbt project eventually converges on the same three-layer structure, not because dbt enforces it, but because every project that skips it ends up hard to refactor. Staging models normalize raw sources; intermediate models do the joining and reshaping; marts are the final tables analysts actually query.</p>
+<h2 id="staging-one-to-one-with-sources">Staging: one model per source table, no joins</h2>
+<p>A staging model does renaming, type casting, and light cleanup — never joins across sources. It exists so every downstream model references clean, consistently named columns instead of each writing its own <code>CAST(raw_amt AS DECIMAL)</code> over and over. Materialize staging as views; they are cheap and always reflect the source directly.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · MODELS/STAGING/STG_ORDERS.SQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{{ config(materialized='view') }}
+
+select
+    id as order_id,
+    customer_id,
+    cast(created_at as timestamp) as ordered_at,
+    amount_cents / 100.0 as amount,
+    lower(status) as status
+from {{ source('shopify', 'orders') }}</code></pre>
 </div>
-<h2 id="the-testing-pyramid-for-models">The testing pyramid for models</h2>
-<p>In the work I have done on dbt models patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-dbt">Backfills and rollbacks for dbt</h2>
-<p>When the work moves from design to production, the questions change. The dbt is not the question; the failure mode of the models is.</p>
+<h2 id="intermediate-the-messy-middle">Intermediate: where the joins and business logic live</h2>
+<p>Intermediate models combine multiple staging models and apply business logic that is not yet ready to be a final, user-facing table — deduplication, complex case statements, multi-table joins. They live in their own <code>intermediate/</code> folder and are usually materialized as views or ephemeral, since nothing outside dbt should query them directly.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.dbt > 0).groupBy("models").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · MODELS/INTERMEDIATE/INT_ORDERS_JOINED.SQL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>select
+    o.order_id,
+    o.amount,
+    o.ordered_at,
+    c.customer_id,
+    c.signup_date,
+    datediff('day', c.signup_date, o.ordered_at) as days_since_signup
+from {{ ref('stg_orders') }} o
+left join {{ ref('stg_customers') }} c
+    on o.customer_id = c.customer_id</code></pre>
 </div>
-<h2 id="what-dbt-models-patterns-a-field-guide-is-for">What dbt Models Patterns — A Field Guide is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="marts-the-tables-people-actually-query">Marts: what analysts and dashboards actually query</h2>
+<p>Marts are the final, documented, tested tables — <code>fct_orders</code>, <code>dim_customers</code> — that BI tools and analysts query directly. This is the layer worth materializing as <code>table</code> or <code>incremental</code>, since it is queried repeatedly and needs to be fast. Fact tables (events, transactions) and dimension tables (entities with attributes) are the standard Kimball naming split, and keeping to it makes a new team member's first week of navigating the project much shorter.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Never let a dashboard query staging or intermediate directly</strong>
+  <p>The entire point of the layering is that staging and intermediate models can be refactored freely because nothing outside dbt depends on them. The moment a BI tool queries <code>stg_orders</code> directly, that model is now part of your public interface and every rename becomes a breaking change you have to coordinate.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_dbt') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>The performance of models in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>Production models looks different from development models. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM dbt
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="naming-and-folder-conventions-that-hold-up">Naming and folder conventions that hold up at scale</h2>
+<p>Prefix by layer (`stg_`, `int_`, `fct_`, `dim_`) so a filename alone tells you where a model sits in the pipeline. One staging model per source table, named after the source, not the destination. Mirror the folder structure by business domain within marts (`marts/finance/`, `marts/marketing/`) once the project grows past a couple dozen models — a flat `models/` folder past that point becomes its own maintenance problem.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring models first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add dbt on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with models when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>Materialization</th><th>Queried by</th></tr>
+  <tr><td>staging</td><td>view</td><td>Only other dbt models</td></tr>
+  <tr><td>intermediate</td><td>view / ephemeral</td><td>Only other dbt models</td></tr>
+  <tr><td>marts</td><td>table / incremental</td><td>BI tools, analysts, exposures</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on dbt models patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The staging/intermediate/marts split is not bureaucracy — it is what keeps a rename in a raw source from becoming a company-wide incident. Enforce the boundary that only marts get queried outside dbt, and the rest of the layering falls out naturally as the project grows.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

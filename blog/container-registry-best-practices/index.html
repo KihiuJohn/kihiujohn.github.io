@@ -93,98 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A container registry is infrastructure, not just image storage, and it gets treated as an afterthought more often than any other piece of the deploy pipeline. Tag hygiene, access control, and retention policy all decay quietly until a rollback fails because the image you need was garbage-collected, or a compromised CI token pushes to a registry with no scanning and no audit trail. None of the fixes are exotic; they just need to be decided on purpose instead of by default.</p>
+<h2 id="stop-using-mutable-tags-for-deploys">Stop using mutable tags for deploys</h2>
+<p><code>latest</code> is the most common source of "it worked yesterday" incidents. It is a mutable pointer — pushing a new image under the same tag silently replaces what <code>latest</code> resolves to, which means a rollback to "the previous latest" is not actually possible once a new push has happened. Deploy by immutable reference: either a semantic version tag that's never reused, or better, the image digest (<code>registry/app@sha256:...</code>), which is content-addressed and can never point to different content. CI should resolve and record the digest at build time and pass that digest through to the deploy step, not the tag.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">YAML · GITHUB ACTIONS — TAG AND PUSH BY DIGEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>- name: Build and push
+  id: push
+  uses: docker/build-push-action@v6
+  with:
+    push: true
+    tags: registry.example.com/app:${{ github.sha }}
 
-def list_container(query: str) -> str:
-    """List container matching the query."""
-    response = requests.get(
-        f"https://api.example.com/container",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="container", func=list_container, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+- name: Record digest for deploy
+  run: echo "IMAGE_DIGEST=${{ steps.push.outputs.digest }}" >> "$GITHUB_ENV"</code></pre>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on container registry best practices, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="access-control-and-least-privilege-push-rights">Access control and least-privilege push rights</h2>
+<p>Anyone or anything that can push to a production registry can, intentionally or via a compromised credential, ship malicious code straight to your clusters. Scope push access to CI service accounts only, never to individual developer credentials, and scope those service accounts to the specific repository paths they need — a service that builds one app shouldn't have push rights to every namespace in the registry. Pull access can usually be broader, but even that should be scoped per-environment if the registry holds anything sensitive.</p>
+<div class="callout-warn callout">
+  <strong>A registry credential with broad push access is a supply-chain single point of failure</strong>
+  <p>If that credential leaks — in a log, a misconfigured CI variable, a compromised dependency — the blast radius is every image behind it. Rotate registry credentials on a schedule, use short-lived tokens (OIDC federation to the registry, where supported) instead of long-lived static keys, and alert on pushes from unexpected sources.</p>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The container is not the question; the failure mode of the registry is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="vulnerability-scanning-at-push-time">Vulnerability scanning at push time</h2>
+<p>Most managed registries (ECR, GAR, ACR, Docker Hub, GitHub Container Registry, Harbor self-hosted) support scanning images on push using Trivy, Grype, or a vendor-native scanner. Wire the scan result into the pipeline as a gate for at least critical and high severity findings on the base OS layer — not necessarily blocking every build on every finding, since some are unfixable or false positives, but blocking silently shipping a known-critical CVE with an available fix.</p>
+<h2 id="retention-and-garbage-collection">Retention and garbage collection</h2>
+<p>Registries fill up, and the instinct to "just keep everything" runs into both storage cost and, more importantly, into the case where you actually need an old image for a rollback and it's gone because someone ran an aggressive cleanup script without understanding the retention needs. A sane default: keep every tagged release image indefinitely (they're small relative to the value of being able to roll back), and garbage-collect untagged/dangling layers and CI-branch images (like `pr-1234`) after a short window — a week or two is usually enough.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Untagged does not mean unused</strong>
+  <p>An image can be untagged in the registry's tag list but still be the exact digest a running deployment references. Registry garbage collection should check against what's actually deployed, or at minimum you need a long enough retention window that a stuck rollback doesn't hit a wall.</p>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-container">Latency and cost tradeoffs for container</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-registry">Prompt patterns that work for registry</h2>
-<p>The performance of registry in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-container-in-production">How to evaluate container in production</h2>
-<p>Production registry looks different from development registry. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_container(query: str) -> str:
-    """List container matching the query."""
-    response = requests.get(
-        f"https://api.example.com/container",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="container", func=list_container, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="signing-and-provenance">Signing and provenance</h2>
+<p>Image signing (Sigstore/Cosign is the common open-source path) lets a cluster admission controller verify that an image was built by your CI pipeline and hasn't been tampered with or swapped for something pushed by an unauthorized party. This is worth adopting once you have the basics above solid — access control, immutable references, and scanning — since signing without those in place mostly signs a pipeline that could already be compromised at an earlier step.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring registry first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add container on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with registry when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Practice</th><th>Prevents</th></tr>
+  <tr><td>Deploy by digest, not mutable tag</td><td>Silent image swaps, broken rollbacks</td></tr>
+  <tr><td>Scoped, short-lived push credentials</td><td>Supply-chain compromise via leaked credentials</td></tr>
+  <tr><td>Scan-at-push with a severity gate</td><td>Known-critical CVEs reaching production</td></tr>
+  <tr><td>Retention policy that checks deployed digests</td><td>Garbage-collecting an image you still need</td></tr>
+  <tr><td>Image signing (Cosign/Sigstore)</td><td>Unauthorized or tampered images passing admission</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on container registry best practices. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Registry hygiene is unglamorous work that mostly pays off during an incident: the rollback that actually works because you deployed by digest, the compromised token that couldn't reach production because it was scoped to one repo, the CVE that got caught before it shipped. Fix the mutable-tag problem first — it's the cheapest change with the most direct effect on whether a rollback is actually possible when you need one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

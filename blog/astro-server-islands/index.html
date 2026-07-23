@@ -92,89 +92,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="performance-and-observability-for-astro">Performance and observability for astro</h2>
-<p>Performance and observability for astro is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Server islands extend Astro's islands architecture to solve a different problem than client islands: content that must be rendered on the server, per-request, but shouldn't block the rest of an otherwise-static page from serving instantly. A server island renders on-demand while the surrounding page is served from cache or a static build — the personalised or slow-to-compute part streams in afterward rather than forcing the whole page onto the dynamic, per-request rendering path.</p>
+<h2 id="the-problem-server-islands-solve">The problem server islands solve</h2>
+<p>Without server islands, a page with one personalised element — a "signed in as X" header, or a recommendation widget that needs a database lookup — forces the entire page into server-rendered (SSR) mode, losing the CDN-cacheable, instantly-served static output for everything else on the page. Server islands let you keep the page static and cacheable while carving out just that one component to render per-request on the server, deferred and streamed in after the initial HTML ships.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AstroServerExt : PXGraphExtension<AstroEntry>
-{
-    [PXOverride]
-    public virtual void Server(Astro doc)
-    {
-        // Custom server logic for astro server islands
-        if (doc?.Server == null) return;
-        Base.Server(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">ASTRO · SERVER ISLAND USAGE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>---
+import Avatar from '../components/Avatar.astro';
+---
+<html>
+  <body>
+    <!-- static, served from cache -->
+    <nav>Site nav</nav>
+
+    <!-- renders on-demand per request, streamed in -->
+    <Avatar server:defer />
+
+    <footer>Static footer</footer>
+  </body>
+</html></code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on astro server islands — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="how-the-request-actually-flows">How the request actually flows</h2>
+<p>The initial response ships the static shell immediately with a placeholder where the server island will appear, then the browser makes a follow-up request for that island's rendered output and swaps it in — similar in spirit to a Suspense boundary in React Server Components, but implemented at the Astro component level rather than the framework's rendering tree. The visitor sees the page instantly; the personalised fragment appears a beat later once its request resolves.</p>
+<h2 id="server-islands-vs-client-islands">Server islands vs. client islands</h2>
+<p>The two solve different problems and are easy to conflate. A client island (<code>client:load</code>, <code>client:visible</code>, etc.) ships JavaScript to the browser so a component can be interactive after the page loads — it still renders the same HTML for every visitor unless client-side logic changes it. A server island (<code>server:defer</code>) renders different HTML per request on the server, with no client-side JavaScript required for the island itself, though the fetched content can of course include its own client islands if it needs interactivity too.</p>
+<div class="callout">
+  <strong>Server islands need a request-capable deployment target</strong>
+  <p>Server islands require an Astro adapter that supports on-demand rendering (Node, Vercel, Netlify, Cloudflare, etc.) — a pure static-output build has nothing to render the deferred fragment against per request, so this feature only applies once you're running Astro in SSR/hybrid mode, not a fully static export.</p>
+</div>
+<h2 id="fallback-content-and-loading-states">Fallback content and loading states</h2>
+<p>Because the server island's content arrives after the initial page render, you control what shows in the interim with a named <code>slot="fallback"</code> — a skeleton loader, a cached last-known value, or simply nothing if the layout tolerates the gap. Keep the fallback visually stable so the swap doesn't cause a layout shift once the real content streams in; a fixed-height placeholder matching the eventual content's dimensions avoids a Cumulative Layout Shift penalty.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The astro is not the question; the failure mode of the server is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for astro
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-server-edge-cases-i-have-shipped">The server edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-astro-changes">Migration path when astro changes</h2>
-<p>The performance of server in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-server-in-production">How to debug server in production</h2>
-<p>Production server looks different from development server. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AstroServerExt : PXGraphExtension<AstroEntry>
-{
-    [PXOverride]
-    public virtual void Server(Astro doc)
-    {
-        // Custom server logic for astro server islands
-        if (doc?.Server == null) return;
-        Base.Server(doc);
-    }
-}</code></pre>
+  <strong>Don't defer content that's needed for SEO</strong>
+  <p>Deferred server island content is not present in the initial HTML response, so search engine crawlers that don't execute the follow-up request may not see it. Keep anything load-bearing for SEO — primary content, headings, canonical metadata — in the static shell, and reserve server islands for genuinely personalised or non-indexable fragments.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring server first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add astro on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with server when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Feature</th><th>Client island</th><th>Server island</th></tr>
+  <tr><td>Renders where</td><td>Browser, after hydration</td><td>Server, per request</td></tr>
+  <tr><td>Ships JS to browser</td><td>Yes</td><td>No (for the island itself)</td></tr>
+  <tr><td>Personalised per visitor</td><td>Only via client-side logic</td><td>Natively, per request</td></tr>
+  <tr><td>Needs SSR adapter</td><td>No</td><td>Yes</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on astro server islands — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Server islands are the right tool when one fragment of an otherwise static page genuinely needs per-request, server-side data — a personalised greeting, a live inventory count, a signed-in user's avatar — without paying the cost of moving the whole page to SSR. Keep anything SEO-critical out of the deferred fragment, design a stable fallback to avoid layout shift, and remember this only works once the project is deployed with an adapter that supports on-demand rendering.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

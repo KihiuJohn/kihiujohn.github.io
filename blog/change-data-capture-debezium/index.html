@@ -93,89 +93,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-data-edge-cases-i-have-shipped">The data edge cases I have shipped</h2>
-<p>The data edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Debezium is the de facto open-source standard for log-based CDC, distributed as a set of Kafka Connect source connectors — one per supported database (MySQL, PostgreSQL, SQL Server, MongoDB, Oracle, and others) — that read each database's native change stream and publish structured change events to Kafka topics. It's not a standalone service you run by itself; it runs inside Kafka Connect, which handles the connector lifecycle, offset tracking, and scaling.</p>
+<h2 id="how-the-connector-reads-changes">How the connector reads changes</h2>
+<p>For PostgreSQL, Debezium uses logical replication slots and the write-ahead log (WAL) to stream every committed change in order. For MySQL, it reads the binary log (binlog) the same way a MySQL replica would. In both cases, the mechanism is the database's own built-in replication protocol — Debezium is acting as a replica that, instead of applying changes to another database, serializes them as events and publishes them to Kafka. This is why enabling CDC on a source database has real prerequisites: PostgreSQL needs <code>wal_level = logical</code> and a replication slot; MySQL needs binlog enabled in row format.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ChangeDataExt : PXGraphExtension<ChangeEntry>
-{
-    [PXOverride]
-    public virtual void Data(Change doc)
-    {
-        // Custom data logic for change data capture
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
+  <div class="code-header"><span class="code-lang">JSON · DEBEZIUM POSTGRES CONNECTOR CONFIG</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "name": "orders-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "prod-db.internal",
+    "database.port": "5432",
+    "database.user": "debezium_replicator",
+    "database.dbname": "orders_db",
+    "topic.prefix": "orders",
+    "table.include.list": "public.orders,public.order_items",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_orders_slot",
+    "publication.autocreate.mode": "filtered"
+  }
 }</code></pre>
 </div>
-<h2 id="migration-path-when-change-changes">Migration path when change changes</h2>
-<p>In the work I have done on change data capture with debezium, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="how-to-debug-data-in-production">How to debug data in production</h2>
-<p>When the work moves from design to production, the questions change. The change is not the question; the failure mode of the data is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for change
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-version-of-change-that-works">The version of change that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-initial-snapshot">The initial snapshot</h2>
+<p>A change stream only captures changes going forward — it has no history of rows that existed before the connector started. Debezium solves this with a snapshot phase: on first startup, it takes a consistent snapshot of the existing table data (using the database's own consistent-read mechanisms so it doesn't miss or duplicate rows relative to the point where streaming begins), publishes that as a set of "read" events, then transitions seamlessly into streaming live changes from the log. Understanding this two-phase behavior matters operationally — a large initial snapshot on a multi-billion-row table can take hours and adds read load to the source database, so it's usually scheduled for low-traffic windows.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Snapshot mode is configurable per use case</strong>
+  <p>Debezium supports snapshot modes beyond the default — <code>never</code> skips the snapshot entirely and starts from the current log position (useful when you only care about changes from now on), and <code>initial_only</code> takes the snapshot and stops without streaming. Pick the mode that matches whether downstream consumers need full history or just changes going forward.</p>
 </div>
-<h2 id="why-change-data-capture-with-debezium-matters-in-production">Why Change Data Capture with Debezium matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+<h2 id="single-message-transforms-and-topic-routing">Single Message Transforms and topic routing</h2>
+<p>Kafka Connect's Single Message Transform (SMT) framework lets you reshape Debezium's verbose change-event envelope — which includes the full before/after row state plus source metadata — before it lands in Kafka. The <code>ExtractNewRecordState</code> SMT is the most commonly applied one: it flattens the envelope down to just the "after" state (or a tombstone for deletes), which is what most downstream consumers actually want rather than the full CDC envelope.</p>
+<div class="callout-warn">
+  <strong>Replication slots that aren't consumed will fill your disk</strong>
+  <p>A PostgreSQL replication slot holds WAL segments on disk until Debezium consumes them. If the Debezium connector goes down and nobody notices, the WAL keeps accumulating on the source database and can eventually fill the disk, taking the production database down with it. Monitor replication slot lag as a first-class production metric, not an afterthought.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of data in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="change-implementation-walkthrough">Change implementation walkthrough</h2>
-<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ChangeDataExt : PXGraphExtension<ChangeEntry>
-{
-    [PXOverride]
-    public virtual void Data(Change doc)
-    {
-        // Custom data logic for change data capture
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add change on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="delete-events-and-tombstones">Delete events and tombstones</h2>
+<p>A row delete produces a change event with a null "after" state, followed (by default) by a Kafka tombstone record — a message with the same key and a null value — which signals to Kafka's log compaction that all prior records for that key can eventually be removed. Consumers that build a materialized view from the change stream need to handle both: the delete event to know a row was removed, and awareness that the tombstone exists for compaction, not as a second business event to process.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on change data capture with debezium. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Debezium's core value is turning each database's native replication log into structured, ordered Kafka events without querying the source tables directly. Enable logical replication or binlog capture ahead of time, plan for the initial snapshot's load on the source database, flatten the event envelope with an SMT for downstream consumers, and monitor replication slot lag as a production-critical metric — an unconsumed slot is a disk-filling incident waiting to happen.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

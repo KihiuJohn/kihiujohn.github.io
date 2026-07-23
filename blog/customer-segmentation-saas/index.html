@@ -93,82 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS companies that survive the first three years are the ones that measure the right metrics. this is one of the metrics that separates the survivors from the deadpools. This article is the field-tested patterns, with the benchmarks and the common misinterpretations.</p>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>How to calculate it correctly is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+    <p>Most SaaS companies segment customers by ARR band and stop there. It's the easiest axis to compute and the weakest one to act on — a $50k account that's barely using the product and a $50k account that's expanding fast look identical on a revenue-sorted list, but they need completely different treatment. Real segmentation combines several axes and uses the result to decide where CS time actually goes.</p>
+
+<h2 id="the-axes-that-matter">The axes that actually predict what an account needs</h2>
+<p><strong>ACV/tier</strong> is the obvious starting axis and a legitimate one — it sets the ceiling on how much white-glove attention an account can justify economically. But it's a ceiling, not the whole answer. <strong>Usage maturity</strong> — how deeply and how long an account has used the product, whether they're still in initial rollout or fully embedded into daily workflow — tells you whether an account is at risk of never reaching value or comfortably past that point. <strong>Industry vertical</strong> matters because a healthcare or financial-services customer has compliance and workflow needs a generic playbook won't address, and often needs different onboarding content entirely. <strong>Growth potential / expansion propensity</strong> — seat growth trajectory, usage against plan limits, org headcount trends — identifies accounts worth investing CS time in not because they're at risk, but because the return on that time is a bigger contract, not just a saved one.</p>
+<div class="callout">
+  <strong>Segment on outcome-relevant axes, not convenient ones</strong>
+  <p>ACV is convenient because it's already in your billing system. Usage maturity and expansion propensity require pulling product telemetry into the CS tooling. The second kind is more work to set up and does most of the actual predictive work.</p>
 </div>
-<h2 id="common-misinterpretations">Common misinterpretations</h2>
-<p>In the work I have done on saas customer segmentation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="why-one-size-fits-all-cs-fails">Why a single CS motion fails across a real customer base</h2>
+<p>A single CS motion applied uniformly means one of two things happens: either every account gets the high-touch treatment, which doesn't scale past a few hundred customers and buries the team, or every account gets the same light-touch treatment, which starves the accounts that would justify — and need — deeper investment. Neither serves the business. A 200-seat enterprise account and a 3-seat self-serve account should never be running through the identical cadence of check-ins, QBRs, and renewal conversations; the cost structure and the expected value don't match.</p>
+
+<h2 id="tiered-cs-models">Tiered CS models: high-touch, tech-touch, low-touch</h2>
+<p><strong>High-touch</strong> accounts get a named CSM, scheduled QBRs, proactive outreach ahead of renewal, and involvement in implementation decisions — reserved for accounts where ACV and/or expansion potential justify the headcount cost. <strong>Tech-touch</strong> accounts get automated check-ins, in-app guidance, and a CSM who steps in only when a health signal fires (usage drop, support escalation, renewal window) rather than on a fixed cadence — this is where most of the "middle" of a customer base should live. <strong>Low-touch / self-serve</strong> accounts run almost entirely on product-led automation: in-app onboarding, help docs, triggered emails, with human involvement reserved for inbound support tickets. The tier isn't fixed at signup — an account can move from tech-touch to high-touch when its expansion signals justify the reassignment, or from high-touch down when a champion leaves and usage flatlines.</p>
 <div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+  <strong>Don't let tier assignment go stale</strong>
+  <p>Accounts get segmented once at onboarding and rarely reassessed. A tech-touch account that's tripled its seat count in a year should have moved to high-touch six months ago. Review tier assignment on a regular cycle, not just at signup.</p>
 </div>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>When the work moves from design to production, the questions change. The saas is not the question; the failure mode of the customer is.</p>
+
+<h2 id="resource-allocation-and-playbook-design">How segmentation should actually drive resource allocation</h2>
+<p>The segmentation model earns its value at the point of assigning CSM headcount and building playbooks — not as a reporting exercise. Book-of-business sizing (how many accounts per CSM) should differ by tier: a high-touch CSM might carry 15-30 accounts, a tech-touch CSM might own several hundred with automation covering the routine cadence. Playbooks should be tier-specific too — a high-touch onboarding playbook involves a kickoff call and a named implementation contact; a tech-touch playbook is a sequence of in-app milestones with a CSM alert only on deviation.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · SEGMENTATION RULE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "segment": "tech_touch",
+  "criteria": {
+    "acv_usd": { "min": 5000, "max": 50000 },
+    "usage_maturity": ["ramping", "established"],
+    "expansion_score": { "min": 40 }
+  },
+  "csm_model": "pooled",
+  "cadence": "triggered_only",
+  "escalate_to_high_touch_if": { "expansion_score": { "min": 75 } }
+}</code></pre>
 </div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, customer, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="why-saas-is-the-first-thing-to-look-at">Why saas is the first thing to look at</h2>
-<p>The performance of customer in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="how-customer-distorts-the-picture">How customer distorts the picture</h2>
-<p>Production customer looks different from development customer. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
+
+<h2 id="the-revenue-only-mistake">The mistake of segmenting on revenue alone</h2>
+<p>Revenue-only segmentation misses the accounts most worth acting on in both directions. A high-ACV account with declining usage looks fine on a revenue-sorted list right up until it churns — usage maturity would have flagged it months earlier. A modest-ACV account with fast-growing usage and headcount looks unremarkable on revenue alone but is exactly the account worth a proactive expansion conversation. If usage and growth signals aren't part of the segmentation model, the CS team is triaging on a lagging indicator and finding out about risk and opportunity at the same time — when the renewal or the expansion conversation is already happening.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring customer first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add saas on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with customer when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Tier</th><th>CS model</th><th>Typical book size</th></tr>
+  <tr><td>High-touch</td><td>Named CSM, scheduled cadence</td><td>15-30 accounts</td></tr>
+  <tr><td>Tech-touch</td><td>Pooled CSM, triggered outreach</td><td>100-300 accounts</td></tr>
+  <tr><td>Low-touch / self-serve</td><td>Automation + reactive support</td><td>Unbounded, no dedicated CSM</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on saas customer segmentation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>Segmentation is only useful if it changes what your CS team does differently per group. Build it from ACV plus usage maturity plus growth signal, review tier assignment on a cycle rather than freezing it at signup, and treat the tiers as the basis for headcount and playbook design — not as a label that sits unused in a CRM field.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

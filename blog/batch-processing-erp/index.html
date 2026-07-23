@@ -93,89 +93,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="why-batch-processing-for-erp-matters-in-production">Why Batch Processing for ERP matters in production</h2>
-<p>Why Batch Processing for ERP matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Batch processing is still the backbone of most ERP data movement — nightly GL syncs, bulk price updates, mass invoice generation, year-end reprocessing — even in a world where real-time integration gets more attention. The failure modes are different from a real-time API integration: instead of one request failing, a batch job can fail halfway through 50,000 records, and the recovery strategy has to account for that from the start, not be bolted on after the first partial-failure incident.</p>
+<h2 id="chunking-and-checkpointing">Chunking and checkpointing</h2>
+<p>Processing a million-row batch as a single transaction is the most common mistake — it holds locks for the duration, makes a mid-run failure roll back everything already done, and gives no visibility into progress. Chunk the batch into fixed-size pages (1,000-10,000 rows depending on record complexity), commit each chunk independently, and persist a checkpoint (the last successfully processed key or offset) so a restart after failure resumes from where it left off instead of reprocessing everything.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BatchProcessingExt : PXGraphExtension<BatchEntry>
-{
-    [PXOverride]
-    public virtual void Processing(Batch doc)
-    {
-        // Custom processing logic for batch processing erp
-        if (doc?.Processing == null) return;
-        Base.Processing(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · CHECKPOINT TABLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE batch_checkpoint (
+    job_name       VARCHAR(100) PRIMARY KEY,
+    last_processed_id BIGINT NOT NULL,
+    status         VARCHAR(20) NOT NULL, -- running, completed, failed
+    updated_at     TIMESTAMP NOT NULL DEFAULT now()
+);
+
+-- Resume query for the next chunk
+SELECT * FROM staging_orders
+WHERE id > (SELECT last_processed_id FROM batch_checkpoint WHERE job_name = 'gl_sync')
+ORDER BY id
+LIMIT 5000;</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on batch processing for erp, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="idempotent-writes-into-the-erp">Idempotent writes into the ERP</h2>
+<p>Because a batch step can be retried after a partial failure, every write into the ERP needs to be safe to repeat. The standard pattern is an upsert keyed on a stable business identifier (an external order number, not an auto-increment ID) rather than a blind insert — most ERPs, including Acumatica through its contract-based REST API or OData endpoints, support querying by a key field before deciding whether to create or update. Where the target system genuinely only supports insert, track a processed-records ledger so a retry can skip rows already confirmed written.</p>
+<div class="callout">
+  <strong>Separate validation from posting</strong>
+  <p>Validate the entire batch (or a full chunk) against business rules before posting anything into the ERP. A batch that partially validates and partially fails mid-posting leaves the ERP in an inconsistent state that's harder to reconcile than a batch that failed cleanly before touching production data.</p>
+</div>
+<h2 id="scheduling-and-avoiding-overlap">Scheduling and avoiding overlap</h2>
+<p>A batch job that overruns its scheduled window and is still running when the next scheduled run fires is one of the most common causes of ERP data corruption in practice — two instances of the same job processing overlapping data concurrently. Guard against this with a job-level lock (a row in a status table, a distributed lock, or your scheduler's built-in overlap prevention) that refuses to start a new run while a prior one is still marked running, and alert rather than silently skip when that happens.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>A stuck "running" status is worse than a failure</strong>
+  <p>If a job crashes without updating its status, the lock can be left permanently "running," blocking all future runs. Pair the lock with a staleness check — a run marked "running" for longer than its expected max duration should be treated as failed and alertable, not trusted indefinitely.</p>
 </div>
-<h2 id="batch-implementation-walkthrough">Batch implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The batch is not the question; the failure mode of the processing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for batch
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-batch">Performance and observability for batch</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of processing in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production processing looks different from development processing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BatchProcessingExt : PXGraphExtension<BatchEntry>
-{
-    [PXOverride]
-    public virtual void Processing(Batch doc)
-    {
-        // Custom processing logic for batch processing erp
-        if (doc?.Processing == null) return;
-        Base.Processing(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="error-handling-fail-fast-vs-skip-and-continue">Error handling: fail-fast vs. skip-and-continue</h2>
+<p>Whether a bad record should stop the whole batch or get logged and skipped depends on what the batch does. A GL posting batch where one bad journal entry could unbalance the ledger should fail fast on that chunk. A bulk customer-address update where one malformed row shouldn't block 49,999 good ones should skip-and-continue, writing the failed rows to an error table for manual review. Decide this per job type explicitly — a blanket policy in either direction is wrong for some subset of batches.</p>
+<h2 id="observability-for-long-running-jobs">Observability for long-running jobs</h2>
+<p>A batch job that silently runs for six hours with no progress signal is undebuggable when it's slow — was it always going to take six hours, or did it stall at record 40,000? Emit a progress metric (rows processed, current checkpoint, estimated completion) on a regular interval, not just a start/end log line, and alert on jobs that exceed their typical duration by a meaningful margin rather than waiting for a hard timeout.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring processing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add batch on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with processing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Practice</th><th>Prevents</th></tr>
+  <tr><td>Chunking + checkpointing</td><td>Full reprocessing after a partial failure</td></tr>
+  <tr><td>Idempotent upserts</td><td>Duplicate records from retries</td></tr>
+  <tr><td>Job-level locking</td><td>Overlapping runs corrupting shared data</td></tr>
+  <tr><td>Skip-and-continue for non-critical rows</td><td>One bad record blocking an entire batch</td></tr>
+  <tr><td>Progress metrics</td><td>Silent stalls going undetected for hours</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on batch processing for erp. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Batch processing against an ERP is a reliability problem more than a throughput problem — most ERPs can process records fast enough; the hard part is surviving a partial failure without corrupting data or losing progress. Chunk with checkpoints, make every write idempotent, lock against overlapping runs, and decide fail-fast versus skip-and-continue deliberately per job rather than defaulting to one or the other everywhere.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

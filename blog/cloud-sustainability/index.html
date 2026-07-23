@@ -93,98 +93,37 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Safety, guardrails, and observability is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Cloud sustainability is the practice of measuring and reducing the carbon footprint of workloads running on shared infrastructure — not a compliance checkbox, but an engineering constraint that, done well, tends to overlap heavily with cost optimization, because idle and oversized resources waste both money and energy.</p>
+<h2 id="the-three-scopes-and-why-cloud-changes-them">The three emissions scopes, and why cloud complicates them</h2>
+<p>The GHG Protocol splits emissions into Scope 1 (direct, from things you own — a generator, a company vehicle), Scope 2 (indirect, from the electricity you purchase), and Scope 3 (everything else in the value chain, including your cloud provider's operations). For a company running entirely on AWS, Azure, or GCP, virtually all cloud-related emissions land in Scope 3 — the provider's data centers are the provider's Scope 1/2, but they're your Scope 3. That's why cloud carbon reporting depends heavily on data the provider chooses to expose, and why the three major providers report this differently and with different levels of granularity.</p>
+<h2 id="provider-carbon-tooling">What each provider actually gives you</h2>
+<p>AWS's Customer Carbon Footprint Tool reports estimated emissions at the account level, broken down by service and region, updated monthly with roughly a three-month lag — useful for trend-spotting, not for real-time decisions. Google Cloud's Carbon Footprint tool does similar account-level reporting and additionally publishes region-by-region carbon-free energy percentages, which is genuinely actionable: GCP publishes which regions run on the highest share of carbon-free energy, so region selection becomes a concrete lever. Microsoft's Emissions Impact Dashboard for Azure works similarly, integrated with Power BI for teams already in that ecosystem. None of the three give per-request or per-service real-time carbon data — the granularity is coarser than most teams initially expect.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">TEXT · REGION SELECTION AS A LEVER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Same workload, different regional grid carbon intensity:
 
-def list_cloud(query: str) -> str:
-    """List cloud matching the query."""
-    response = requests.get(
-        f"https://api.example.com/cloud",
-        params={"q": query}
-    )
-    return response.json()
+us-east-1 (N. Virginia)     grid mix ~heavier fossil, higher gCO2/kWh
+us-west-2 (Oregon)          hydro-heavy grid, lower gCO2/kWh
+eu-north-1 (Stockholm)      Nordic grid, largely hydro/nuclear, very low gCO2/kWh
 
-tools = [Tool(name="cloud", func=list_cloud, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+A non-latency-sensitive batch workload gains real carbon
+reduction just by choosing where it runs and when.</code></pre>
 </div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>In the work I have done on cloud sustainability — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="rightsizing-is-still-the-biggest-lever">Rightsizing is still the single biggest lever</h2>
+<p>The single most effective sustainability action for most engineering teams is identical to the single most effective cost action: eliminate idle and oversized resources. An overprovisioned instance running at 8% CPU utilization wastes energy in direct proportion to the money it wastes. Autoscaling to match actual demand, scheduling non-production environments to shut down outside working hours, and rightsizing instance types based on real utilization data all reduce both the bill and the footprint simultaneously — which is exactly why FinOps and sustainability initiatives increasingly share tooling and reporting.</p>
+<div class="callout-warn">
+  <strong>Carbon-aware scheduling only works for delay-tolerant workloads</strong>
+  <p>Shifting batch jobs to run when the grid is cleanest (lower carbon intensity, often when renewable generation is highest) is a real technique — tools like the Green Software Foundation's Carbon Aware SDK support it — but it only applies to workloads with no strict latency requirement. Forcing a user-facing request path through carbon-aware delay logic trades a real sustainability metric for a real user experience regression; reserve the technique for batch and background work.</p>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-cloud">Latency and cost tradeoffs for cloud</h2>
-<p>When the work moves from design to production, the questions change. The cloud is not the question; the failure mode of the sustainability is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-sustainability">Prompt patterns that work for sustainability</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="architectural-choices-that-compound">Architectural choices that compound over the workload's lifetime</h2>
+<p>Serverless and container-based compute generally achieve higher utilization density than dedicated VMs, because the provider packs more workloads onto the same physical hardware — a genuine efficiency gain that shows up as lower emissions per unit of work, not just lower cost. Choosing regions with cleaner grids for non-latency-sensitive workloads, and preferring managed services over self-managed infrastructure where the provider's fleet-wide utilization beats what a single team can achieve on dedicated capacity, both compound over the life of a system in ways a one-time optimization pass doesn't.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Software Carbon Intensity (SCI) gives you a comparable metric</strong>
+  <p>The Green Software Foundation's SCI specification defines a rate metric — carbon per unit of work (per API call, per user, per transaction) — rather than an absolute total, which makes it possible to compare the carbon efficiency of two different architectures serving the same workload, independent of how much traffic either happens to be getting.</p>
 </div>
-<h2 id="how-to-evaluate-cloud-in-production">How to evaluate cloud in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The performance of sustainability in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-role-of-sustainability-in-the-agent-loop">The role of sustainability in the agent loop</h2>
-<p>Production sustainability looks different from development sustainability. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_cloud(query: str) -> str:
-    """List cloud matching the query."""
-    response = requests.get(
-        f"https://api.example.com/cloud",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="cloud", func=list_cloud, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sustainability first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cloud on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sustainability when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cloud sustainability — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<h2 id="where-to-start-if-this-is-new">Where to start if this is new to the team</h2>
+<p>Turn on the provider's carbon reporting tool first — it's free and requires no engineering work — and use a quarter of data to identify the highest-emission services before designing any intervention. From there, the rightsizing and idle-resource work most teams already do for cost reasons delivers the bulk of the sustainability gain; region selection and carbon-aware scheduling are the next-tier levers for delay-tolerant or non-latency-sensitive workloads specifically.</p>
+<p>Cloud sustainability isn't a separate discipline requiring new tooling from scratch — it rides on the same rightsizing, autoscaling, and utilization work that FinOps already demands, with region selection and workload scheduling as the additional levers unique to carbon specifically.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

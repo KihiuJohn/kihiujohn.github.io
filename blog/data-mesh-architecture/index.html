@@ -93,81 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>Performance: cost, latency, freshness is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Data mesh, as Zhamak Dehghani originally defined it, is an organisational answer to a scaling problem, not a new storage technology. A single central data team cannot keep up with data requests from a growing company; data mesh distributes ownership of data to the domain teams that generate it, while keeping enough shared standards that the result is still usable across the company.</p>
+<h2 id="the-four-principles">The four principles, briefly</h2>
+<p>Domain-oriented ownership means the team that generates order data — not a central data engineering team — owns the pipeline that turns it into an analytics-ready dataset. Data as a product means that dataset gets treated like a product: documented, versioned, with an owner accountable for its quality and an SLA for freshness. Self-serve infrastructure means domain teams do not each build their own pipeline tooling from scratch; a platform team provides the paved road (ingestion, orchestration, warehouse access) that domain teams build on. Federated computational governance means standards — naming conventions, PII handling, interoperability — are enforced automatically rather than by a central team reviewing every dataset by hand.</p>
+<h2 id="what-a-data-product-actually-looks-like">What a "data product" actually looks like</h2>
+<p>In practice a data product is a small set of well-modeled tables (often built with dbt), a schema contract, ownership metadata, and documented SLAs, exposed through the same warehouse everyone already queries. It is not a separate database per team — that just recreates data silos with extra steps. The domain team owns the transformation logic that produces it; the platform team owns the infrastructure it runs on.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · DATA PRODUCT CONTRACT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># schema.yml — orders domain data product
+models:
+  - name: orders_data_product
+    description: "Order-level facts, owned by the Orders domain team."
+    meta:
+      owner: orders-team@company.com
+      sla_freshness_hours: 4
+      pii: false
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('customers_data_product')
+              field: customer_id</code></pre>
 </div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>In the work I have done on data mesh architecture — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Data mesh is not free — it is a tradeoff</strong>
+  <p>Distributing ownership means distributing the work of modeling, testing, and documenting data. A ten-person company adopting data mesh usually ends up with worse data quality than a small central team would have produced, because domain teams do not have the bandwidth or expertise to treat their pipeline as a product. Data mesh earns its cost at the scale where a central team has become the bottleneck, typically dozens of domain teams and a data platform team big enough to build real self-serve tooling.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The data is not the question; the failure mode of the mesh is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.data > 0).groupBy("mesh").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="why-data-in-the-warehouse-beats-in-the-lake">Why data in the warehouse beats in the lake</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="schema-evolution-for-mesh">Schema evolution for mesh</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_data') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="cost-optimisation-for-data">Cost optimisation for data</h2>
-<p>The performance of mesh in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="the-testing-pyramid-for-mesh">The testing pyramid for mesh</h2>
-<p>Production mesh looks different from development mesh. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="the-warehouse-does-not-go-away">The warehouse does not go away</h2>
+<p>A common misconception is that data mesh replaces the central data warehouse with fully distributed storage. In most real implementations the warehouse (Snowflake, BigQuery, Databricks) stays as the shared physical layer; what changes is who owns which schemas and models within it, and how discoverable those models are through a data catalog. Mesh is an ownership and governance model layered on largely the same infrastructure you already have.</p>
+<h2 id="signs-you-are-not-actually-ready">Signs you are not actually ready for it</h2>
+<p>If your company has one data team and a handful of domains, you do not need data mesh — you need better modeling practices and a data catalog. If domain teams have no engineers who can own a dbt project, federating ownership just means the pipelines rot unattended. The clearest signal you are ready is a central data team that has become a queue: every new dataset request waits weeks because one team is the only one who can build it.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mesh first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add data on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mesh when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Principle</th><th>What breaks without it</th></tr>
+  <tr><td>Domain ownership</td><td>Central team stays the bottleneck</td></tr>
+  <tr><td>Data as a product</td><td>Datasets have no owner, quality drifts silently</td></tr>
+  <tr><td>Self-serve platform</td><td>Every domain reinvents pipeline tooling</td></tr>
+  <tr><td>Federated governance</td><td>PII and naming standards diverge per team</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on data mesh architecture — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Data mesh solves an organisational bottleneck, not a technical one — adopt it when a central team can no longer keep pace with domain data needs, and only after you have the platform tooling to make self-serve ownership realistic. For most companies, the warehouse stays the same; what changes is who is accountable for each table in it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,81 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Observability: lineage, monitoring, alerts is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM datadog
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on datadog vs new relic — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Datadog and New Relic are the two most direct competitors in full-stack SaaS observability, and the honest answer is that they are closely matched. Both cover APM, infrastructure monitoring, log management, and real user monitoring from a single proprietary platform. Teams that have run both rarely describe one as fundamentally more capable — the differences that matter in practice are pricing model, UI philosophy, integration breadth, and which one your team already knows.</p>
+
+<h2 id="pricing-model-differences">Pricing model differences</h2>
+<p>Datadog prices primarily on host and container count, with several features — APM, log indexing, RUM, synthetics — metered as separate add-ons on top. This is easy to estimate for a stable fleet but can surprise you when host count or log volume spikes, since each capability has its own meter.</p>
+<p>New Relic moved to a consumption/data-ingest-based pricing model a few years back, replacing its older per-host pricing. You pay largely by the volume of data ingested (GB of telemetry) rather than by host count, plus a per-user seat charge above a free tier of seats. This tends to favor teams with a smaller number of high-throughput hosts and can be less predictable for teams with bursty ingest volume, mirroring the cardinality/volume risk that exists on the Datadog side too, just measured differently.</p>
+<p>Neither pricing model is objectively cheaper — it depends on your host-to-data-volume ratio. A fleet of many lightweight hosts with modest telemetry per host often costs less on New Relic's ingest-based model; a smaller number of hosts producing heavy log and trace volume can go the other way.</p>
+
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Get a real usage-based quote, not a list price</strong>
+  <p>Both vendors negotiate on committed spend, and list pricing rarely reflects what a mid-size team actually pays. Before choosing based on pricing model alone, run a short trial with representative host count and log/trace volume and get an actual quote from each.</p>
 </div>
-<h2 id="why-datadog-in-the-warehouse-beats-in-the-lake">Why datadog in the warehouse beats in the lake</h2>
-<p>When the work moves from design to production, the questions change. The datadog is not the question; the failure mode of the new is.</p>
+
+<h2 id="ui-and-workflow-philosophy">UI and workflow philosophy</h2>
+<p>Datadog's UI is built around a large number of purpose-built views — one for infrastructure, one for APM service maps, one for logs, one for synthetics — stitched together with tags. It rewards teams that invest in consistent tagging discipline across services. New Relic's UI centers more around a unified entity model (services, hosts, and their relationships) with dashboards (NRQL-based) that query a single underlying data store. Neither is objectively easier; engineers who've used one tend to find the other's navigation unfamiliar for the first few weeks, which is itself a real switching cost worth weighing.</p>
+
+<h2 id="integration-breadth">Integration breadth</h2>
+<p>Datadog has a notably larger integration marketplace — several hundred one-click integrations for cloud services, databases, and SaaS tools, each shipping prebuilt dashboards. New Relic's integration catalogue is smaller but covers the common cases (major clouds, popular databases, Kubernetes) adequately. If your stack leans toward niche or newer infrastructure tools, it's worth checking both vendors' integration lists directly rather than assuming parity — this is one area where Datadog's larger ecosystem is a genuine, not marketing, advantage.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.datadog > 0).groupBy("new").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · NRQL EXAMPLE (NEW RELIC)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>SELECT average(duration), percentile(duration, 95)
+FROM Transaction
+WHERE appName = 'checkout-service'
+SINCE 1 hour ago
+TIMESERIES</code></pre>
 </div>
-<h2 id="schema-evolution-for-new">Schema evolution for new</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="cost-optimisation-for-datadog">Cost optimisation for datadog</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_datadog') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-new">The testing pyramid for new</h2>
-<p>The performance of new in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-datadog">Backfills and rollbacks for datadog</h2>
-<p>Production new looks different from development new. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM datadog
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+
+<h2 id="alerting-and-dashboarding-maturity">Alerting and dashboarding maturity</h2>
+<p>Both platforms support multi-condition alerting, anomaly detection, and templated dashboards, and both have matured past the point where either has a clear structural edge. Datadog's alerting is organized around monitors tied to tags and metrics; New Relic's is organized around NRQL conditions against its unified data store. Teams migrating from one to the other generally report a re-learning period for alert tuning rather than a capability gap.</p>
+
+<h2 id="choosing-between-them">Choosing between them</h2>
+<p>Don't look for a feature Datadog or New Relic uniquely has that will decide this for you — for most teams, that feature doesn't exist. The decision comes down to: which pricing model fits your host/data-volume shape better, which UI your team already has muscle memory for, and whether you depend on integrations that only one of them supports well. If you're migrating an existing large deployment, the cost of re-instrumenting and re-training the team on a new UI is often larger than any pricing delta between the two.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring new first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add datadog on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with new when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Dimension</th><th>Datadog</th><th>New Relic</th></tr>
+  <tr><td>Pricing basis</td><td>Host/container + per-feature add-ons</td><td>Data ingest volume + per-seat</td></tr>
+  <tr><td>Integration count</td><td>Larger marketplace</td><td>Smaller but covers common stacks</td></tr>
+  <tr><td>Query language</td><td>Tag-based across purpose-built views</td><td>NRQL against unified entity model</td></tr>
+  <tr><td>Best fit signal</td><td>Many services/hosts, broad integration needs</td><td>Fewer hosts, heavier per-host telemetry</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on datadog vs new relic — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Datadog and New Relic are close enough competitors that the honest recommendation is to trial both against your actual traffic and pricing shape rather than trust either vendor's comparison page. Weigh pricing model fit, existing team familiarity, and integration coverage for your specific stack — those three factors decide this far more often than any inherent capability gap between the two.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

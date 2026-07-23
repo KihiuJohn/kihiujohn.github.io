@@ -93,89 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="the-edge-cases-i-have-shipped">The  edge cases I have shipped</h2>
-<p>The  edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>CSS has shipped more genuinely useful layout and styling primitives in the last three years than in the decade before it, and by 2026 the practical question for most teams isn't "is this supported" — it's "which of these should replace the JavaScript or Sass workaround we built before the native feature existed." This is a rundown of what's actually safe to use in production today, not a speculative wishlist.</p>
+<h2 id="container-queries-are-no-longer-the-new-thing">Container queries are no longer "the new thing"</h2>
+<p><code>container-type</code> and the <code>@container</code> at-rule shipped across all major engines back in 2023, and by now they're simply part of the standard toolkit for component-level responsive design — a card or widget adapts to the space its parent gives it, not the viewport. If you're still duplicating a component for sidebar vs. main-column placement because a media-query breakpoint never quite matched actual available width, that's the concrete signal to convert it to a container query instead.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CssXExt : PXGraphExtension<CssEntry>
-{
-    [PXOverride]
-    public virtual void X(Css doc)
-    {
-        // Custom  logic for css 2026 new
-        if (doc?.X == null) return;
-        Base.X(doc);
-    }
+  <div class="code-header"><span class="code-lang">CSS · SUPPORTS + CONTAINER QUERY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>.panel { container-type: inline-size; }
+
+@container (min-width: 480px) {
+  .panel-body { grid-template-columns: 1fr 1fr; }
+}
+
+@supports not (container-type: inline-size) {
+  /* fallback for the rare unsupported engine */
+  .panel-body { grid-template-columns: 1fr; }
 }</code></pre>
 </div>
-<h2 id="migration-path-when-css-changes">Migration path when css changes</h2>
-<p>In the work I have done on css 2026 new features — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="how-to-debug-in-production">How to debug  in production</h2>
-<p>When the work moves from design to production, the questions change. The css is not the question; the failure mode of the  is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for css
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-version-of-css-that-works">The version of css that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="has-the-parent-selector">:has() — the parent selector</h2>
+<p><code>:has()</code> lets you style an element based on what it contains or what follows it — something CSS genuinely couldn't do before without a JavaScript class toggle. <code>.card:has(img)</code> matches a card that contains an image; <code>label:has(+ input:invalid)</code> styles a label based on the validity state of its sibling input. It's supported across all current major browser engines and quietly eliminates a category of "add a class with JS just to style a parent" workaround.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>:has() is powerful enough to misuse for layout logic that belongs in HTML/JS</strong>
+  <p>Just because you can express complex conditional styling in a single selector doesn't mean every case should live there. If a :has() selector chain is doing something closer to business logic than styling, a data attribute set by your framework is often more maintainable than a deeply nested :has() chain.</p>
 </div>
-<h2 id="why-css-2026-new-features-a-field-guide-matters-in-production">Why CSS 2026 New Features — A Field Guide matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+<h2 id="native-nesting-color-mix-and-relative-color-syntax">Native nesting, color-mix(), and relative color syntax</h2>
+<p>Native CSS nesting removed a major reason to reach for Sass on new projects — you can nest selectors directly without a preprocessor, and it's supported everywhere current. <code>color-mix()</code> lets you blend two colors in a specified color space directly in CSS (<code>color-mix(in oklch, var(--brand) 80%, white)</code>), which replaces a lot of hand-maintained tint/shade color palettes. Relative color syntax (<code>oklch(from var(--brand) l c h / 0.5)</code>) lets you derive a new color from an existing one — adjusting just the alpha or lightness — without duplicating the base color value. Both are supported in current versions of all major engines, though relative color syntax landed later and is worth a <code>@supports</code> check if you need to support slightly older browser versions in your audience.</p>
+<h2 id="scroll-driven-animations">Scroll-driven animations</h2>
+<p><code>animation-timeline: scroll()</code> and <code>animation-timeline: view()</code> let you drive a CSS animation's progress from scroll position instead of time — a progress bar that fills as the page scrolls, or an element that fades in as it enters the viewport — without a scroll event listener and manual `requestAnimationFrame` math in JavaScript. This shipped in Chromium-based browsers first and reached Firefox and Safari later; check current support for your audience before relying on it as the only implementation, and keep a reduced-motion fallback since scroll-driven effects should respect <code>prefers-reduced-motion</code> same as any other animation.</p>
+<div class="callout-warn callout">
+  <strong>Don't assume "shipped in one engine" means "safe to ship"</strong>
+  <p>Features that land in Chromium often reach Firefox and Safari on a delay of anywhere from months to over a year. Before depending on something newer than container queries or :has() as a hard requirement, check actual current cross-engine support rather than assuming feature parity — caniuse.com and the MDN browser-compat-data are the two sources worth trusting over blog posts, including this one, since support tables change faster than articles get updated.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of  in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="css-implementation-walkthrough">Css implementation walkthrough</h2>
-<p>Production  looks different from development . The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CssXExt : PXGraphExtension<CssEntry>
-{
-    [PXOverride]
-    public virtual void X(Css doc)
-    {
-        // Custom  logic for css 2026 new
-        if (doc?.X == null) return;
-        Base.X(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="anchor-positioning-still-maturing">Anchor positioning — still maturing</h2>
+<p>CSS anchor positioning (<code>anchor()</code>, <code>position-anchor</code>) lets you position an element — a tooltip, a popover — relative to another element anywhere in the DOM, without JavaScript measuring bounding boxes. It's one of the more exciting layout additions on the horizon because it directly replaces a common JS library dependency (Floating UI, Popper), but cross-engine support was still uneven as of early 2026 — treat it as something to prototype and watch, not something to ship as your only implementation for a production tooltip system yet.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring 2026 first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add css on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with 2026 when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Feature</th><th>Status (2026)</th><th>Replaces</th></tr>
+  <tr><td>Container queries</td><td>Fully shipped, safe to use</td><td>Component-specific media query hacks</td></tr>
+  <tr><td>:has()</td><td>Fully shipped, safe to use</td><td>JS class toggling for parent/sibling styling</td></tr>
+  <tr><td>Native nesting</td><td>Fully shipped, safe to use</td><td>Sass/Less for basic nesting</td></tr>
+  <tr><td>color-mix(), relative color syntax</td><td>Shipped, check older-browser needs</td><td>Manual tint/shade palette generation</td></tr>
+  <tr><td>Scroll-driven animations</td><td>Shipped in most, verify per engine</td><td>Scroll event listeners + rAF for scroll effects</td></tr>
+  <tr><td>Anchor positioning</td><td>Maturing, uneven support</td><td>Floating UI / Popper for tooltip positioning</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on css 2026 new features — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The pattern across most of these features is the same: CSS is absorbing responsibilities that used to require a JavaScript library or a preprocessor. Container queries, :has(), and native nesting are solid enough to adopt without hesitation; scroll-driven animations and anchor positioning are close enough to watch closely and prototype, but still worth a support check before you remove the JS fallback entirely.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

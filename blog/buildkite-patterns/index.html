@@ -92,93 +92,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="incident-response-for-buildkite">Incident response for buildkite</h2>
-<p>Incident response for buildkite is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Buildkite takes a different approach from most hosted CI: the pipeline UI, web dashboard, and scheduling live in Buildkite's cloud, but the actual build agents run wherever you point them — your own VMs, your Kubernetes cluster, spot instances, whatever you already operate. That split is the whole story of Buildkite patterns: you get the orchestration convenience of a hosted service without giving up control of where code executes, which matters a lot once you have compliance requirements, GPU builds, or a cost-sensitive fleet of self-hosted runners.</p>
+<h2 id="pipeline-yaml-and-dynamic-pipelines">Pipeline YAML and dynamic pipelines</h2>
+<p>A Buildkite pipeline is defined in YAML uploaded either from a file in the repo or generated dynamically by a script at runtime. Static YAML is fine for simple pipelines, but the dynamic upload pattern — a small script that inspects the repo and emits pipeline steps as JSON or YAML to stdout — is what lets you do things like generating one test-shard step per changed package, or skipping a deploy step entirely when only docs changed. This is the single biggest practical difference from GitHub Actions' more static workflow model.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Buildkite
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · PIPELINE.YML</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>steps:
+  - label: ":mag: Detect changed packages"
+    command: "scripts/generate-pipeline.sh | buildkite-agent pipeline upload"
+
+  - wait
+
+  - label: ":hammer: Build"
+    command: "make build"
+    agents:
+      queue: "default"
+
+  - label: ":test_tube: Test (parallel)"
+    command: "make test"
+    parallelism: 8
+    agents:
+      queue: "default"
+
+  - block: ":rocket: Deploy to production?"
+    branches: "main"
+
+  - label: ":rocket: Deploy"
+    command: "scripts/deploy.sh"
+    agents:
+      queue: "deploy"</code></pre>
 </div>
-<h2 id="what-buildkite-patterns-a-field-guide-gives-you">What Buildkite Patterns — A Field Guide gives you</h2>
-<p>In the work I have done on buildkite patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The buildkite is not the question; the failure mode of the patterns is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "buildkite_patterns" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="agent-queues-and-self-hosted-runners">Agent queues and self-hosted runners</h2>
+<p>Agents register against one or more queues, and steps target a queue with the <code>agents: { queue: "..." }</code> key. This is the mechanism for routing GPU-heavy ML training steps to a GPU queue, deploy steps to a queue with production credentials, and everything else to a general-purpose autoscaling queue. Because you run the agents, autoscaling is your responsibility — the common pattern is an agent metrics-based autoscaler (Buildkite publishes an official AWS autoscaling stack) that watches the number of scheduled jobs and adds or removes agent instances accordingly.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Ephemeral agents beat long-lived ones</strong>
+  <p>An agent that terminates after one job (spun up fresh per build) avoids the classic "works because of leftover state from the last build" failure class. It costs more compute time for image pulls and setup, but it removes an entire category of flaky, hard-to-reproduce CI bugs.</p>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: buildkite
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: buildkite
-  template:
-    metadata:
-      labels:
-        app: buildkite</code></pre>
+<h2 id="the-block-step-for-manual-gates">The block step for manual gates</h2>
+<p>The <code>block</code> step pauses a pipeline until someone approves it in the UI, which is the standard way to gate production deploys without building a separate approval system. Combined with branch filters, you can require manual approval only on <code>main</code> while feature branches run straight through to a preview environment unattended.</p>
+<h2 id="secrets-and-credential-scoping">Secrets and credential scoping</h2>
+<p>Buildkite itself doesn't store your build secrets — the recommended pattern is pulling them at runtime from a secrets manager (AWS Secrets Manager, Vault, GCP Secret Manager) scoped to the agent's IAM role, so credentials never live in pipeline YAML or environment hooks committed to a repo. Scope deploy credentials to the deploy queue specifically; an agent that only ever runs test steps has no business holding production deploy keys.</p>
+<div class="callout-warn">
+  <strong>Parallelism needs test isolation</strong>
+  <p>The <code>parallelism</code> key splits a step across N parallel jobs, but only helps if your test runner actually partitions tests by job index (most runners expose <code>BUILDKITE_PARALLEL_JOB</code> and <code>BUILDKITE_PARALLEL_JOB_COUNT</code> for this). Turning on parallelism without wiring up test sharding just runs the full suite N times.</p>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of patterns in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production patterns looks different from development patterns. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Buildkite
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring patterns first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add buildkite on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with patterns when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on buildkite patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Buildkite's value is in the seam between hosted orchestration and self-hosted execution — use dynamic pipeline generation to keep YAML from becoming unmanageable, route steps to queues by what credentials or hardware they need, and keep agents ephemeral so a bad build never contaminates the next one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

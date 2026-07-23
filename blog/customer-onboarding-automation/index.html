@@ -93,78 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="what-customer-onboarding-automation-is-for">What Customer Onboarding Automation is for</h2>
-<p>What Customer Onboarding Automation is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Onboarding automation gets pitched as a way to eliminate the CSM from the first 30 days. That's the wrong goal. The right goal is to compress time-to-value for the accounts that don't need a human, and free up CSM time for the accounts that do. This is what that split actually looks like in practice, and where teams get it backwards.</p>
+
+<h2 id="time-to-value-is-the-metric-that-matters">Time-to-value is the metric that matters</h2>
+<p>Every onboarding automation decision should trace back to one question: does this shorten the path to the customer's first real value moment? Not signup, not "completed setup wizard" — the moment they get the outcome they bought the product for. Define that moment concretely per segment (first successful report generated, first integration synced, first team member invited and active) and measure days-to-first-value as the north star metric, not activation-checklist completion rate. Teams that optimize the checklist instead of the actual value moment end up with impressive completion numbers and no correlation to retention.</p>
+<div class="callout">
+  <strong>Instrument the value moment, not just the steps</strong>
+  <p>A checklist item "connected your calendar" is a proxy. The real event is "the first meeting synced correctly and the user saw it." Track the underlying outcome event separately from the UI step that leads to it — the two will drift apart as the product changes.</p>
+</div>
+
+<h2 id="what-automation-handles-well">What automation handles well</h2>
+<p>Three patterns carry most of the load in a good automated onboarding flow. <strong>In-app checklists</strong> that adapt to what the user has and hasn't done, rather than a static list everyone sees regardless of progress. <strong>Triggered email sequences</strong> keyed off actual product events — "you haven't invited a teammate yet" lands better three days after signup with zero teammates than as a generic day-3 email blasted to everyone. <strong>Milestone-based automation</strong> that unlocks the next step only once the prior one is genuinely done — provisioning a workspace, granting a trial feature, or surfacing a template automatically once a prerequisite condition (like a completed integration) is detected server-side rather than self-reported by the user.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CustomerExt : PXCacheExtension<Onboarding>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  <div class="code-header"><span class="code-lang">JSON · ONBOARDING TRIGGER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "event": "workspace_created",
+  "wait_hours": 48,
+  "condition": { "teammates_invited": 0 },
+  "action": "send_email",
+  "template": "invite_your_team",
+  "segment_exclude": ["enterprise", "assisted_onboarding"]
 }</code></pre>
 </div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>In the work I have done on customer onboarding automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The segment exclusion in that trigger isn't an afterthought — it's the difference between automation that helps and automation that annoys the accounts who already have a CSM handling this personally.</p>
+
+<h2 id="where-automation-should-stop">Where automation should stop and a human should start</h2>
+<p>High-ACV accounts and anything with a non-trivial implementation — data migration, SSO/SAML setup, custom workflow configuration, multiple stakeholders across departments — need a named CSM or implementation manager driving the process, not a drip sequence. The failure mode is applying the same self-serve automated flow to a six-figure account because it's operationally easier, and having that account discover in week three that nobody at your company actually knows their setup. The rule of thumb: if the onboarding requires a decision only the customer's team can make and that decision has downstream technical consequences (data model choices, integration architecture, user permission structure), it needs a human guiding it in real time, with automation handling the surrounding logistics (scheduling, reminders, provisioning) rather than the substance.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Over-automating high-touch accounts is the most common failure</strong>
+  <p>It shows up as a $150k account getting the same "complete your profile" nudge email as a $20/month self-serve signup. Segment your onboarding automation at the account/tier level before you build the sequences, not after complaints start.</p>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>When the work moves from design to production, the questions change. The customer is not the question; the failure mode of the onboarding is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'customer'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM customer
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>The performance of onboarding in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production onboarding looks different from development onboarding. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class CustomerExt : PXCacheExtension<Onboarding>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+
+<h2 id="segmenting-by-role-not-just-tier">Segmenting by role, not just tier</h2>
+<p>Tier isn't the only axis that matters — the user's role inside the account changes what "value" even means. An admin setting up the account needs configuration and permissions guidance. An end user added later needs a task-focused walkthrough of the two or three features relevant to their job, not the admin setup flow repeated at them. A generic sequence that ignores role sends billing-admin content to a read-only end user and wonders why engagement is low. If your onboarding automation only branches on plan tier and not on who's actually looking at the screen, you're solving half the segmentation problem.</p>
+
+<h2 id="tools-and-patterns-that-hold-up">Tools and patterns that hold up in practice</h2>
+<p>Product-led onboarding flows work best when the in-app guide is contextual — surfaced at the moment a feature becomes relevant, not front-loaded into a single tour nobody remembers by step 4. Automated provisioning (workspace creation, default templates, sample data) should happen synchronously at signup so the user never lands in an empty state. For the human-assisted tier, automation still has a job: auto-scheduling the kickoff call, auto-populating the CSM's account brief from signup data, and auto-flagging accounts that stall mid-implementation so the CSM doesn't find out from a churn report.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring onboarding first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add customer on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with onboarding when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal</th><th>Route to automation</th><th>Route to CSM</th></tr>
+  <tr><td>Low ACV, single user</td><td>Yes — full automated sequence</td><td>No</td></tr>
+  <tr><td>High ACV, multi-stakeholder</td><td>Logistics only</td><td>Yes — implementation ownership</td></tr>
+  <tr><td>Complex integration/migration</td><td>Provisioning steps</td><td>Yes — technical guidance</td></tr>
+  <tr><td>Self-serve trial, no sales contact</td><td>Yes — checklist + triggered emails</td><td>No, unless usage signals intent</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on customer onboarding automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>Automation earns its place by shortening time-to-value for accounts that don't need a person watching over them, and by handling the logistics around the accounts that do. The moment onboarding automation becomes a substitute for CSM judgment on a complex or high-value account, it stops saving time and starts creating the churn it was meant to prevent.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

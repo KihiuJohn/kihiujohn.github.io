@@ -93,82 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>SaaS companies that survive the first three years are the ones that measure the right metrics. this is one of the metrics that separates the survivors from the deadpools. This article is the field-tested patterns, with the benchmarks and the common misinterpretations.</p>
-<h2 id="how-it-interacts-with-other-metrics">How it interacts with other metrics</h2>
-<p>How it interacts with other metrics is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Burn multiple answers a question growth rate alone can't: how much cash did it cost to buy that growth? Two companies can post the same year-over-year ARR growth while one burns through cash twice as fast as the other to get there. Burn multiple exposes that difference in a single number, which is why investors lean on it heavily when a growth rate alone would flatter a capital-inefficient business.</p>
+<h2 id="the-formula">The formula</h2>
+<p>Burn multiple is net burn divided by net new ARR over the same period: <code>Burn Multiple = Net Burn / Net New ARR</code>. Net burn is cash out minus cash in for the period (typically a quarter), and net new ARR is the increase in annual recurring revenue over that same period, including expansion and net of churn. A company that burns $2M in a quarter while adding $1M in net new ARR has a burn multiple of 2 — it costs two dollars of cash to buy one dollar of new annual recurring revenue.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
-<h2 id="benchmarks-and-what-good-looks-like">Benchmarks and what good looks like</h2>
-<p>In the work I have done on burn multiple for saas — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
-</div>
-<h2 id="how-to-improve-it-over-time">How to improve it over time</h2>
-<p>When the work moves from design to production, the questions change. The burn is not the question; the failure mode of the multiple is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="why-burn-is-the-first-thing-to-look-at">Why burn is the first thing to look at</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
-</div>
-<h2 id="how-multiple-distorts-the-picture">How multiple distorts the picture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
+  <div class="code-header"><span class="code-lang">SQL · QUARTERLY BURN MULTIPLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>WITH quarterly AS (
+  SELECT
+    quarter,
+    cash_out - cash_in AS net_burn,
+    ending_arr - LAG(ending_arr) OVER (ORDER BY quarter) AS net_new_arr
+  FROM finance.quarterly_summary
 )
-SELECT cohort_month, multiple, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
+SELECT
+  quarter,
+  net_burn,
+  net_new_arr,
+  ROUND(net_burn::numeric / NULLIF(net_new_arr, 0), 2) AS burn_multiple
+FROM quarterly
+ORDER BY quarter;</code></pre>
 </div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>The performance of multiple in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<h2 id="what-the-benchmark-bands-mean">What the benchmark bands mean</h2>
+<p>David Sacks, who popularized the metric, proposed rough bands: under 1 is amazing (rare, usually a company approaching or past profitability while still growing fast), 1 to 1.5 is great, 1.5 to 2 is good, 2 to 3 is suspect, and above 3 is bad — cash is being converted into growth extremely inefficiently. These bands are a starting point, not a hard rule; an early-stage company investing heavily in product before go-to-market is expected to run a higher multiple than a company in its scaling phase, where efficient growth becomes the expectation.</p>
 <div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
+  <strong>Stage matters more than the raw number</strong>
+  <p>A burn multiple of 2.5 at $500K ARR building out a first sales motion is a different story than the same 2.5 at $20M ARR with an established go-to-market engine. Compare the multiple against companies at a similar ARR stage, not against a single universal target.</p>
 </div>
-<h2 id="the-cohort-retention-curve-for-burn">The cohort retention curve for burn</h2>
-<p>Production multiple looks different from development multiple. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+<h2 id="why-it-catches-what-growth-rate-hides">Why it catches what growth rate hides</h2>
+<p>Growth rate alone rewards spending your way to a bigger top-line number regardless of cost. Burn multiple penalizes that directly, because it's a ratio, not a rate — a company that doubles its burn to grow 20% faster will see its burn multiple get worse even as its headline growth rate improves. This is exactly the scenario that made the metric popular after the 2021-2022 shift away from growth-at-all-costs: boards started asking not "how fast are we growing" but "how efficiently are we buying that growth."</p>
+<h2 id="common-miscalculations">Common miscalculations</h2>
+<p>The most frequent mistake is using gross new ARR instead of net new ARR in the denominator, which flatters the multiple by ignoring churn and contraction — a company adding $2M in new logos while losing $1M to churn has $1M net new ARR, not $2M. The second common mistake is using GAAP net income instead of actual net cash burn, which can differ substantially due to non-cash items like deferred revenue recognition or stock-based compensation. Use cash, not the income statement.</p>
+<div class="callout-warn">
+  <strong>One quarter is noise; trend it</strong>
+  <p>Burn multiple is volatile quarter to quarter — a single large enterprise deal closing in one quarter can swing net new ARR enough to make the multiple look great or terrible in isolation. Look at a trailing four-quarter or trailing-twelve-month view before drawing conclusions from any single period.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring multiple first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add burn on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with multiple when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on burn multiple for saas — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Burn multiple is net burn over net new ARR — a capital-efficiency check that growth rate alone can't provide. Use net figures (post-churn ARR, actual cash burn), compare against companies at a similar stage rather than a fixed target, and trend it over several quarters rather than reacting to one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

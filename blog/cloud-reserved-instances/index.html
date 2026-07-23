@@ -93,89 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="migration-path-when-cloud-changes">Migration path when cloud changes</h2>
-<p>Migration path when cloud changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Reserved capacity is a commitment-for-discount trade: you commit to a baseline of compute usage for one or three years and the cloud provider discounts it 30-70% off on-demand pricing. It's one of the largest, lowest-effort levers available in FinOps — and one of the easiest to get wrong by over-committing to capacity that doesn't match how the workload actually grows or shifts.</p>
+<h2 id="the-commitment-models-across-providers">The commitment models, and how they differ</h2>
+<p>AWS offers both Reserved Instances (tied to a specific instance family and region, less flexible, historically slightly deeper discount) and Savings Plans (a dollar-per-hour compute commitment that applies automatically across instance families, sizes, and even to Fargate and Lambda — far more flexible, now the generally recommended default for AWS). Azure Reserved VM Instances work similarly to AWS RIs, with Azure Savings Plans for Compute as the newer, more flexible equivalent. GCP takes a different default approach entirely: Committed Use Discounts require an explicit commitment much like AWS RIs, but GCP also applies Sustained Use Discounts automatically with no commitment at all, simply for running an instance for a large fraction of the billing month — a meaningfully different default posture from AWS and Azure.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CloudReservedExt : PXGraphExtension<CloudEntry>
-{
-    [PXOverride]
-    public virtual void Reserved(Cloud doc)
-    {
-        // Custom reserved logic for cloud reserved instances
-        if (doc?.Reserved == null) return;
-        Base.Reserved(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · DISCOUNT SHAPE COMPARISON</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>AWS
+  On-Demand              baseline
+  Savings Plan (1yr)      ~20-40% off, flexible across instance family
+  Savings Plan (3yr)      ~40-60% off, flexible across instance family
+  Reserved Instance       up to ~72% off, locked to instance family+region
+
+Azure
+  Pay-as-you-go           baseline
+  Reserved VM Instance     up to ~65-72% off, 1yr or 3yr
+  Azure Savings Plan       ~similar to AWS Savings Plans, more flexible
+
+GCP
+  On-Demand               baseline
+  Sustained Use Discount   automatic, no commitment, up to ~30% off
+  Committed Use Discount   1yr or 3yr, up to ~57% off</code></pre>
 </div>
-<h2 id="how-to-debug-reserved-in-production">How to debug reserved in production</h2>
-<p>In the work I have done on cloud reserved instances — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+<h2 id="coverage-vs-utilization-the-two-numbers-that-matter">Coverage vs. utilization — the two numbers that matter</h2>
+<p>Coverage measures what percentage of your actual usage is covered by a commitment; utilization measures what percentage of the commitment you're actually using. Low coverage means you're leaving discount on the table by paying on-demand rates for usage that's stable enough to commit. Low utilization means you bought more commitment than you're using and are paying for idle reserved capacity — arguably the worse mistake, because that money is gone whether you use it or not. The healthy target is high coverage on your genuinely stable baseline and near-100% utilization of whatever you've committed to.</p>
+<div class="callout-warn">
+  <strong>Never commit to 100% of current usage</strong>
+  <p>Workloads shrink — a service gets deprecated, a migration moves load elsewhere, a team over-provisioned and later rightsizes. Committing to 100% of today's baseline against a 3-year term means you're paying for capacity you may not need in year two. A common rule of thumb is committing to 60-80% of the trailing baseline and covering the rest with on-demand or shorter-term commitments, leaving room to shrink without stranding a commitment.</p>
 </div>
-<h2 id="the-version-of-cloud-that-works">The version of cloud that works</h2>
-<p>When the work moves from design to production, the questions change. The cloud is not the question; the failure mode of the reserved is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for cloud
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-cloud-reserved-instances-a-field-guide-matters-in-production">Why Cloud Reserved Instances — A Field Guide matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="1-year-vs-3-year-the-real-tradeoff">1-year vs. 3-year: the real tradeoff isn't just discount depth</h2>
+<p>The deeper discount on a 3-year term is tempting, but it assumes you know what your infrastructure looks like three years out — a bet that's much safer for a stable, mature workload than for a team still finding product-market fit or mid-migration to a new architecture. A 1-year term costs a few percentage points of discount in exchange for the ability to re-evaluate annually as the workload, pricing, and even provider strategy evolve.</p>
+<h2 id="the-review-cadence-that-prevents-waste">The review cadence that prevents waste</h2>
+<p>Reserved capacity isn't a set-and-forget purchase. A quarterly review of coverage and utilization reports (AWS Cost Explorer's RI/Savings Plans utilization report, Azure's Reservation utilization view, GCP's Committed Use Discount reports) catches drift before a commitment turns into stranded spend — a team that migrated off EC2 to Fargate, for instance, needs its RI strategy to follow. AWS's Savings Plans and GCP's Committed Use Discounts can often be modified or exchanged mid-term with more flexibility than classic Reserved Instances, which is another reason the more flexible commitment types are usually the safer default for teams without years of stable historical usage data.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Start with the flexible commitment type, graduate to the rigid one</strong>
+  <p>Savings Plans and Committed Use Discounts apply automatically across a broader set of resource types with less operational overhead than instance-family-locked Reserved Instances. Unless you have a very stable, well-understood workload and want the last few points of discount that RIs offer over Savings Plans, the flexible option is the safer starting point.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="cloud-implementation-walkthrough">Cloud implementation walkthrough</h2>
-<p>The performance of reserved in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production reserved looks different from development reserved. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CloudReservedExt : PXGraphExtension<CloudEntry>
-{
-    [PXOverride]
-    public virtual void Reserved(Cloud doc)
-    {
-        // Custom reserved logic for cloud reserved instances
-        if (doc?.Reserved == null) return;
-        Base.Reserved(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring reserved first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add cloud on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with reserved when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on cloud reserved instances — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Reserved capacity is worth pursuing once a workload's baseline is predictable enough to commit against — usually visible after a few months of stable usage data. Commit to the trailing baseline, not the peak, prefer the flexible commitment type, and review coverage and utilization quarterly so the discount doesn't quietly turn into waste.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

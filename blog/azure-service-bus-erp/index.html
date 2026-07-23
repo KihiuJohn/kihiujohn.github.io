@@ -93,89 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="the-service-edge-cases-i-have-shipped">The service edge cases I have shipped</h2>
-<p>The service edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>ERP integrations fail most often not because the individual API calls are wrong, but because the integration assumes both systems are always available and processes messages synchronously. Azure Service Bus decouples that assumption: a message queued for the ERP survives a downstream outage, retries on failure without losing data, and lets producers and consumers scale and deploy independently of each other. For Acumatica and similar ERPs, where a nightly batch job or a third-party system integration can easily overwhelm a synchronous API, this is the difference between a brittle integration and one that survives a bad afternoon.</p>
+<h2 id="queues-vs-topics-picking-the-right-entity">Queues vs. topics: picking the right entity</h2>
+<p>A Service Bus queue is a simple point-to-point channel: one producer, one logical consumer (or a competing set of consumers pulling from the same queue), useful for a single well-defined workflow like "sync new sales orders into the ERP." A topic adds publish/subscribe fan-out — one message published to a topic can be delivered to multiple independent subscriptions, each with its own filter, which is the right shape when an ERP event (say, an invoice posted) needs to notify several unrelated downstream systems without the publisher knowing who's listening.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AzureServiceExt : PXGraphExtension<AzureEntry>
+  <div class="code-header"><span class="code-lang">C# · SENDING A MESSAGE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>await using var client = new ServiceBusClient(connectionString);
+var sender = client.CreateSender("erp-sales-orders");
+
+var message = new ServiceBusMessage(JsonSerializer.SerializeToUtf8Bytes(order))
 {
-    [PXOverride]
-    public virtual void Service(Azure doc)
-    {
-        // Custom service logic for azure service bus
-        if (doc?.Service == null) return;
-        Base.Service(doc);
-    }
-}</code></pre>
+    MessageId = order.ExternalOrderId,   // enables duplicate detection
+    ContentType = "application/json",
+};
+message.ApplicationProperties["source"] = "ecommerce-platform";
+
+await sender.SendMessageAsync(message);</code></pre>
 </div>
-<h2 id="migration-path-when-azure-changes">Migration path when azure changes</h2>
-<p>In the work I have done on azure service bus for erp, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="idempotent-consumers-and-duplicate-detection">Idempotent consumers and duplicate detection</h2>
+<p>Service Bus guarantees at-least-once delivery by default, which means a consumer must tolerate receiving the same message more than once — a network blip between message processing and the completion acknowledgment is enough to cause a redelivery. Set <code>MessageId</code> to a stable business key (an order number, not a random GUID) and enable duplicate detection on the queue so Service Bus itself discards exact re-sends within the detection window; on the consumer side, check whether the referenced ERP record already exists before creating it, since duplicate detection alone doesn't cover every retry scenario.</p>
+<h2 id="dead-letter-queues-for-poison-messages">Dead-letter queues for poison messages</h2>
+<p>Every queue and subscription in Service Bus has a built-in dead-letter sub-queue that messages land in automatically after exceeding <code>MaxDeliveryCount</code> retries or when a consumer explicitly dead-letters a message it can't process. A malformed order payload or an ERP validation failure shouldn't retry forever and block the queue behind it — dead-letter it with a reason code, alert on dead-letter queue depth, and give someone a runbook for inspecting and replaying those messages once the root cause is fixed.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Set MaxDeliveryCount deliberately, not to the default</strong>
+  <p>The default MaxDeliveryCount (10) is often too high for ERP integrations where a validation failure is a data problem, not a transient one — retrying a message that will never succeed 10 times just delays detection. For known-permanent failures (bad account codes, missing required fields), fail fast and dead-letter after 2-3 attempts; reserve higher retry counts for genuinely transient issues like a downstream API timeout.</p>
 </div>
-<h2 id="how-to-debug-service-in-production">How to debug service in production</h2>
-<p>When the work moves from design to production, the questions change. The azure is not the question; the failure mode of the service is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for azure
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-version-of-azure-that-works">The version of azure that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="sessions-for-ordered-processing">Sessions for ordered processing</h2>
+<p>Standard Service Bus queues don't guarantee message order once you have multiple concurrent consumers. If the ERP integration needs strict ordering — line items for the same order must be processed in sequence, for example — enable sessions and set <code>SessionId</code> to a value shared by all messages that must stay in order (the order ID). Service Bus then guarantees a single consumer processes all messages for a given session in the order they were sent, while still allowing different sessions to process in parallel.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Sessions add latency for the ordering guarantee</strong>
+  <p>A session-enabled receiver locks an entire session, not just one message, so an unusually slow message in a session blocks the rest of that session's queue. Only enable sessions where ordering genuinely matters — most ERP sync scenarios (independent order creation, independent inventory updates) don't need it and are faster without it.</p>
 </div>
-<h2 id="why-azure-service-bus-for-erp-matters-in-production">Why Azure Service Bus for ERP matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of service in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="azure-implementation-walkthrough">Azure implementation walkthrough</h2>
-<p>Production service looks different from development service. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AzureServiceExt : PXGraphExtension<AzureEntry>
-{
-    [PXOverride]
-    public virtual void Service(Azure doc)
-    {
-        // Custom service logic for azure service bus
-        if (doc?.Service == null) return;
-        Base.Service(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="scaling-and-cost-considerations">Scaling and cost considerations</h2>
+<p>The Standard tier bills per operation and is the right starting point for most ERP integration volumes; the Premium tier moves to dedicated, predictable-latency capacity billed per messaging unit, worth it once throughput or latency-sensitivity justifies the fixed cost. Auto-forwarding lets a queue automatically push processed messages to another queue or topic, which is a useful pattern for chaining an ERP sync pipeline (validate → transform → post) without custom orchestration code for the handoff between stages.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring service first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add azure on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with service when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Feature</th><th>Use for</th></tr>
+  <tr><td>Queue</td><td>Single consumer/consumer group, point-to-point</td></tr>
+  <tr><td>Topic + subscriptions</td><td>Fan-out to multiple independent consumers</td></tr>
+  <tr><td>Duplicate detection</td><td>At-least-once delivery safety net</td></tr>
+  <tr><td>Dead-letter queue</td><td>Isolating permanently failing messages</td></tr>
+  <tr><td>Sessions</td><td>Strict per-entity ordering when required</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on azure service bus for erp. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Azure Service Bus earns its place in an ERP integration once synchronous, direct API calls between systems start failing under load or during the ERP's own downtime — queuing decouples the two systems' availability from each other. Design consumers to be idempotent from day one, set dead-letter thresholds based on whether a failure is transient or permanent, and reach for sessions only when ordering is a genuine business requirement rather than a default choice.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

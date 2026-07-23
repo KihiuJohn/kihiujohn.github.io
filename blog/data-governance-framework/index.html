@@ -93,81 +93,59 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The data stack in 2026 is more capable than it was in 2020. dbt, lakehouses, vector databases, streaming. this is one of the parts of the modern stack. This article is the part.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="why-data-in-the-warehouse-beats-in-the-lake">Why data in the warehouse beats in the lake</h2>
-<p>In the work I have done on data governance framework, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="schema-evolution-for-governance">Schema evolution for governance</h2>
-<p>When the work moves from design to production, the questions change. The data is not the question; the failure mode of the governance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.data > 0).groupBy("governance").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="cost-optimisation-for-data">Cost optimisation for data</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>A data governance framework is easy to over-design and easy to under-build. Over-designed, it becomes a review committee that every new dataset has to clear before anyone can query it, and teams route around it. Under-built, "governance" means a wiki page nobody reads and a GDPR checkbox nobody checks. The frameworks that actually hold up share the same core structure: clear ownership, quality standards, access controls, metadata that's kept current, and a compliance mapping — rolled out to the highest-risk data first, not everywhere at once.</p>
+
+<h2 id="the-core-components">The core components</h2>
+<p>Every working governance framework covers the same five things, whatever it's called internally: <strong>ownership and stewardship</strong> (who is accountable for a dataset's accuracy and appropriate use), <strong>data quality standards</strong> (what "correct" means for a given dataset and how it's checked), <strong>access control and security policy</strong> (who can see and modify what, and why), <strong>metadata management</strong> (a catalog of what data exists, where it lives, and what it means), and <strong>compliance mapping</strong> (which regulations — GDPR, CCPA, SOC 2, HIPAA if relevant — apply to which data, and how the controls satisfy them). Drop any one of these and the framework has a blind spot: quality standards without ownership means nobody fixes what the checks catch, and access control without metadata means you're restricting data you can't even fully enumerate.</p>
+
+<h2 id="roles-owners-stewards-custodians">Roles: owners, stewards, custodians</h2>
+<p>These three roles get conflated constantly, and the confusion is a common reason governance stalls. A <strong>data owner</strong> is accountable for a domain of data — usually a business role (VP of Sales owns customer/pipeline data) who makes policy calls about who gets access and what quality bar applies. A <strong>data steward</strong> does the day-to-day work of maintaining quality and definitions for that domain — often someone embedded in the team that produces the data, not a separate governance department. A <strong>data custodian</strong> is technical — the engineer or platform team responsible for the systems that store and secure the data, implementing the access controls the owner and steward define. Without this split, "governance" collapses into one overloaded team that owns policy, quality, and infrastructure at once, and becomes the bottleneck everyone routes around.</p>
+
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Assign roles to people who already touch the data</strong>
+  <p>The steward for customer data should be someone on the team that actually works with customer data day to day, not a rotating assignment from a central governance function with no domain context. Stewardship that isn't embedded in the team that produces the data rarely keeps up.</p>
 </div>
-<h2 id="the-testing-pyramid-for-governance">The testing pyramid for governance</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+
+<h2 id="building-it-incrementally">Building it incrementally, not all at once</h2>
+<p>The framework fails when it launches as an org-wide mandate covering every dataset on day one. Start with the data domains that are regulated or genuinely high-risk — customer PII, payment data, health records, anything with a named compliance obligation — and get ownership, access control, and a quality baseline defined there first. Prove the process works on a domain where the stakes justify the friction, then extend it. Trying to catalog and govern every table in the warehouse before shipping anything usually produces a stalled six-month project and no governance at all in the meantime.</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_data') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · DATA CLASSIFICATION EXAMPLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>dataset: customers.contact_info
+owner: vp_sales
+steward: sales_ops_team
+classification: pii
+regulations: [gdpr, ccpa]
+access:
+  read: [sales_team, support_team]
+  write: [sales_ops_team]
+retention_days: 730
+quality_checks:
+  - not_null: [email, customer_id]
+  - unique: [customer_id]</code></pre>
 </div>
-<h2 id="backfills-and-rollbacks-for-data">Backfills and rollbacks for data</h2>
-<p>The performance of governance in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
+
+<h2 id="compliance-mapping">Mapping controls to regulations</h2>
+<p>Compliance mapping means translating a regulation's requirements into concrete controls on specific datasets rather than treating "GDPR compliance" as an abstract goal. GDPR's right-to-erasure requirement, for instance, only means something once you know which datasets hold EU personal data and have a working deletion process for each of them — the mapping is the bridge between the legal requirement and the technical control. The same dataset often maps to multiple regulations (GDPR and CCPA overlapping on personal data handling, SOC 2 overlapping on access control evidence), so the mapping is usually maintained as a matrix rather than a separate document per regulation.</p>
+
+<h2 id="the-governance-vs-velocity-tension">The tension with data team velocity</h2>
+<p>Every access control, review step, or classification requirement adds friction to shipping a new dataset or pipeline. Governance that ignores this trade-off — requiring a committee sign-off for every new table regardless of sensitivity — creates exactly the failure mode teams complain about: engineers quietly building "shadow" pipelines and spreadsheets to avoid the process, which is worse for governance than no framework at all, because now ungoverned copies of the data exist outside the system that's supposed to track it.</p>
+<div class="callout-warn callout">
+  <strong>Governance-as-bureaucracy is a real failure mode</strong>
+  <p>If your framework applies the same approval overhead to a low-risk internal metrics table as it does to customer payment data, teams will build workarounds. Tier the rigor to the actual risk — heavy process for regulated/sensitive data, lightweight self-serve registration for everything else.</p>
 </div>
-<h2 id="what-data-governance-framework-is-for">What Data Governance Framework is for</h2>
-<p>Production governance looks different from development governance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM data
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring governance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add data on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with governance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Component</th><th>Owned by</th><th>What it prevents</th></tr>
+  <tr><td>Ownership/stewardship</td><td>Domain business owner + embedded steward</td><td>Nobody accountable for accuracy</td></tr>
+  <tr><td>Quality standards</td><td>Steward, enforced by custodian tooling</td><td>Silent data drift and bad decisions</td></tr>
+  <tr><td>Access control</td><td>Owner defines, custodian implements</td><td>Over-broad or unmonitored access</td></tr>
+  <tr><td>Metadata/catalog</td><td>Steward, platform team tooling</td><td>Duplicate or "unknown" datasets</td></tr>
+  <tr><td>Compliance mapping</td><td>Legal/compliance + data owner</td><td>Regulatory gaps found during an audit</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on data governance framework. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A governance framework that works is scoped to the data that actually carries risk, assigns ownership to people who understand the domain rather than a central committee, and treats the compliance mapping as a living matrix rather than a one-time document. Roll it out to your regulated and sensitive data first, prove the process doesn't strangle delivery, and extend from there — governance that teams route around isn't governance, it's a reason to build shadow systems.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,89 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="how-to-debug-data-in-production">How to debug data in production</h2>
-<p>How to debug data in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>ERP databases are a harder CDC target than a typical application database, for reasons specific to how ERPs are built: heavily normalized schemas with dozens of tables representing one logical business object, batch-oriented posting processes that write many rows in a single transaction, and — for a platform like Acumatica running on SQL Server — a multi-tenant schema where every table carries a company/branch identifier that CDC consumers need to respect. Getting ERP change data into a warehouse in near-real-time is valuable for finance and ops dashboards, but the source-side complexity is real.</p>
+<h2 id="why-poll-based-extraction-falls-short-for-erp">Why poll-based extraction falls short for ERP</h2>
+<p>The traditional ERP integration pattern — a nightly or hourly job querying tables filtered on <code>LastModifiedDateTime</code> — misses hard deletes entirely (a voided invoice, a reversed journal entry) and can miss intermediate states when multiple updates land between polling windows, which matters when downstream reporting needs to reconcile against an audit trail. It also puts repeated read load on the same database handling live transaction processing, competing for the same I/O the ERP itself needs during business hours. Log-based CDC avoids both problems by reading the transaction log directly rather than querying tables.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ChangeDataExt : PXGraphExtension<ChangeEntry>
-{
-    [PXOverride]
-    public virtual void Data(Change doc)
-    {
-        // Custom data logic for change data capture
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · ENABLING SQL SERVER CDC (ACUMATICA/SQL SERVER)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Enable CDC at the database level
+EXEC sys.sp_cdc_enable_db;
+
+-- Enable CDC on a specific table, scoped to a capture instance
+EXEC sys.sp_cdc_enable_table
+  @source_schema = N'dbo',
+  @source_name   = N'ARInvoice',
+  @role_name     = NULL,
+  @capture_instance = N'dbo_ARInvoice';
+
+-- Downstream consumers query the change table directly,
+-- or a connector reads it and republishes to Kafka/warehouse.
+SELECT *
+FROM cdc.dbo_ARInvoice_CT
+WHERE __$start_lsn > @last_processed_lsn
+ORDER BY __$start_lsn;</code></pre>
 </div>
-<h2 id="the-version-of-change-that-works">The version of change that works</h2>
-<p>In the work I have done on change data capture for erp, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="why-change-data-capture-for-erp-matters-in-production">Why Change Data Capture for ERP matters in production</h2>
-<p>When the work moves from design to production, the questions change. The change is not the question; the failure mode of the data is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for change
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-multi-table-business-object-problem">The multi-table business object problem</h2>
+<p>A single AR invoice in a normalized ERP schema touches a header table, one or more line-item tables, tax detail tables, and GL distribution tables — a "row changed" event on any one of them is meaningless downstream without the others. The workable pattern is capturing change events per table as CDC naturally produces them, then reassembling the complete business object in a downstream transformation step (a streaming join or a batch reconciliation job) rather than trying to make the CDC layer itself understand ERP-level business objects. Keep CDC dumb and table-scoped; do the domain reassembly downstream.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Respect the tenant/branch identifier in every downstream consumer</strong>
+  <p>Multi-tenant and multi-branch ERP schemas carry a company or branch ID on nearly every table. A CDC pipeline that doesn't propagate and filter on that identifier will silently mix data across tenants in a shared downstream table — verify every consumer partitions or filters on it explicitly rather than assuming a single-tenant shape.</p>
 </div>
-<h2 id="change-implementation-walkthrough">Change implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+<h2 id="batch-posting-and-transactional-boundaries">Batch posting and transactional boundaries</h2>
+<p>ERPs frequently post in large batches inside a single database transaction — a month-end close process might insert or update tens of thousands of rows in one commit. Log-based CDC preserves transactional ordering, so downstream consumers can group change events by their originating transaction (via the log sequence number or an equivalent) to process a batch posting as one logical unit rather than thousands of unrelated row events, which matters if a downstream job needs to know a close process completed rather than reacting to each row individually.</p>
+<div class="callout-warn">
+  <strong>ERP schema changes ship with vendor updates, not just custom development</strong>
+  <p>Beyond your own customizations, ERP vendor updates (an Acumatica version upgrade, for instance) can alter table schemas as part of the platform release. A CDC pipeline pointed at ERP tables needs the same schema-compatibility checking as any other CDC source, applied against a schema you don't fully control the release cadence of.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of data in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-change">Performance and observability for change</h2>
-<p>Production data looks different from development data. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ChangeDataExt : PXGraphExtension<ChangeEntry>
-{
-    [PXOverride]
-    public virtual void Data(Change doc)
-    {
-        // Custom data logic for change data capture
-        if (doc?.Data == null) return;
-        Base.Data(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring data first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add change on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with data when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on change data capture for erp. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>CDC against an ERP database works the same way it does anywhere else at the mechanical level — read the transaction log, don't poll — but the normalized multi-table schema, tenant/branch scoping, and vendor-controlled schema changes are ERP-specific complications worth planning for upfront. Keep the CDC layer scoped to individual tables and reassemble business objects downstream, and treat tenant/branch filtering as a correctness requirement, not an optimization.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

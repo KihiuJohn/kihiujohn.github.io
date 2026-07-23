@@ -93,89 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="migration-path-when-bigquery-changes">Migration path when bigquery changes</h2>
-<p>Migration path when bigquery changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>BigQuery performance problems almost never come from BigQuery being slow — they come from queries that scan far more data than they need to, or from a schema that never had partitioning or clustering applied. Because BigQuery bills (and throttles, if you're on flat-rate slots) by bytes scanned and slot-time consumed, the tuning story is really a cost and concurrency story wearing a performance costume. Fix the scan pattern and the "performance problem" usually disappears.</p>
+<h2 id="partitioning-first">Partitioning first</h2>
+<p>Partitioning splits a table into segments — most commonly by a <code>DATE</code> or <code>TIMESTAMP</code> column, or by an integer range — so that a query with a filter on the partitioning column only reads the partitions it needs instead of the whole table. A table partitioned by <code>DATE(created_at)</code> queried with <code>WHERE created_at >= '2026-07-01'</code> will prune everything before that date at the metadata level, before any bytes are scanned. The most common mistake is filtering on a derived expression that hides the partition column from the query planner, such as wrapping it in a function that BigQuery can't use for pruning — always filter on the raw partitioning column directly where possible.</p>
+<h2 id="clustering-on-top-of-partitions">Clustering on top of partitions</h2>
+<p>Clustering sorts data within each partition by up to four columns you specify, and BigQuery uses that ordering to skip blocks that can't match your filter — similar in spirit to an index, though it works by physically co-locating similar rows rather than maintaining a separate structure. Clustering pairs well with high-cardinality filter or join columns, like <code>customer_id</code> or <code>order_id</code>, that you can't partition on directly because partitioning has a limit on the number of partitions a table can have. A table partitioned by day and clustered by <code>customer_id</code> gives you fast date-range scans and fast per-customer lookups within those ranges.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BigqueryPerformanceExt : PXGraphExtension<BigqueryEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Bigquery doc)
-    {
-        // Custom performance logic for bigquery performance tuning
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · PARTITIONED AND CLUSTERED TABLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE analytics.orders
+PARTITION BY DATE(created_at)
+CLUSTER BY customer_id, status
+AS
+SELECT * FROM staging.orders_raw;
+
+-- Prunes to one partition, then skips clustered blocks
+-- that don't match customer_id.
+SELECT order_id, total
+FROM analytics.orders
+WHERE DATE(created_at) = '2026-07-20'
+  AND customer_id = 48213;</code></pre>
 </div>
-<h2 id="how-to-debug-performance-in-production">How to debug performance in production</h2>
-<p>In the work I have done on bigquery performance tuning — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="the-version-of-bigquery-that-works">The version of bigquery that works</h2>
-<p>When the work moves from design to production, the questions change. The bigquery is not the question; the failure mode of the performance is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for bigquery
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-bigquery-performance-tuning-a-field-guide-matters-in-production">Why BigQuery Performance Tuning — A Field Guide matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="reading-the-query-plan-and-bytes-scanned">Reading the query plan and bytes scanned</h2>
+<p>Before optimizing anything, look at the bytes-processed estimate the BigQuery console shows before you run a query, and check the execution details after — specifically slot-time consumed and the per-stage breakdown of records read versus records written. A query that reads billions of rows to return a hundred is almost always missing a partition filter or is doing a <code>SELECT *</code> where a handful of columns would do. BigQuery is columnar, so every column you select is bytes you pay for regardless of whether you filter rows down afterward.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>SELECT * is the single biggest cost lever</strong>
+  <p>Because storage is columnar, <code>SELECT *</code> reads every column in every scanned partition. Naming only the columns a query actually needs is frequently a bigger win than adding clustering, and it costs nothing to try.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+<h2 id="slots-concurrency-and-on-demand-vs-flat-rate">Slots, concurrency, and on-demand vs. flat-rate</h2>
+<p>BigQuery executes queries using slots — units of computational capacity. On the on-demand pricing model, slots scale automatically and you pay per byte scanned; under flat-rate (or the newer editions-based reservations), you purchase a pool of slots and every concurrent query competes for that fixed pool. If dashboards start queuing during business hours, that's usually a slot contention problem, not a query problem — check the <code>INFORMATION_SCHEMA.JOBS</code> views for queries with high wait times relative to execution time, which points to contention rather than inefficiency.</p>
+<div class="callout-warn">
+  <strong>Materialized views vs. scheduled queries</strong>
+  <p>For a dashboard hammering the same aggregation repeatedly, a materialized view keeps a precomputed, incrementally refreshed result and can dramatically cut both latency and scan cost. Don't reach for a scheduled query that just re-runs the same expensive aggregation on a timer when a materialized view solves it with less operational overhead.</p>
 </div>
-<h2 id="bigquery-implementation-walkthrough">Bigquery implementation walkthrough</h2>
-<p>The performance of performance in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class BigqueryPerformanceExt : PXGraphExtension<BigqueryEntry>
-{
-    [PXOverride]
-    public virtual void Performance(Bigquery doc)
-    {
-        // Custom performance logic for bigquery performance tuning
-        if (doc?.Performance == null) return;
-        Base.Performance(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add bigquery on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="joins-and-data-skew">Joins and data skew</h2>
+<p>Large joins in BigQuery can suffer from data skew — one join key with a disproportionate number of matching rows forces a single worker to handle far more data than the rest, stalling the whole query. This shows up as one stage in the query plan taking dramatically longer than others. Broadcasting a small dimension table (letting BigQuery replicate it to every worker instead of shuffling the large table) is often the fix, and BigQuery does this automatically for genuinely small tables — the problem case is a "small" table that's actually a few million skewed rows.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on bigquery performance tuning — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Most BigQuery performance work is unglamorous: partition by the column you filter on, cluster by the column you join or filter on next, select only the columns you need, and watch bytes-scanned before you watch query duration. The expensive query is rarely the one with a bad algorithm — it's the one reading data it never needed to touch.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

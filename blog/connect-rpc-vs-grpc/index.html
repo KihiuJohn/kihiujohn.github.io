@@ -93,83 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production APIs to know the patterns that work. They share a few traits: versioned from day one, idempotent, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="why-connect-is-not-rest-anymore">Why connect is not REST anymore</h2>
-<p>Why connect is not REST anymore is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Connect is an RPC framework from Buf (the company behind the modern Protobuf tooling ecosystem) built on the same Protobuf schema and code-generation model as gRPC, but designed to speak plain HTTP/1.1 and JSON as well as gRPC's native protocol — no separate gateway, no proxy translation layer required. The practical question isn't "which is technically superior" so much as "which fits the clients you actually need to serve."</p>
+<h2 id="same-schema-different-wire-story">Same schema, different wire story</h2>
+<p>Both start from an identical place: a <code>.proto</code> file defining services and messages, compiled with <code>protoc</code> or Buf's own <code>buf</code> CLI into strongly-typed client and server code. gRPC mandates HTTP/2 and its own binary framing on the wire, which is efficient but means browsers can't call a gRPC service directly — you need grpc-web plus a proxy (typically Envoy) to translate. Connect's protocol speaks native, unary HTTP/1.1 and HTTP/2 with JSON or Protobuf binary encoding, is callable directly from a browser's <code>fetch</code>, curl, or any HTTP client with zero translation layer, and is also wire-compatible with gRPC — a Connect server can serve gRPC clients unmodified, and vice versa via Connect's protocol negotiation.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/connects/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await connectService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">PROTO · SHARED SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>syntax = "proto3";
+package invoice.v1;
+
+service InvoiceService {
+  rpc GetInvoice(GetInvoiceRequest) returns (GetInvoiceResponse);
+}
+
+message GetInvoiceRequest {
+  string invoice_id = 1;
+}
+
+message GetInvoiceResponse {
+  string invoice_id = 1;
+  double total = 2;
+  string status = 3;
+}</code></pre>
 </div>
-<h2 id="idempotency-in-rpc">Idempotency in rpc</h2>
-<p>In the work I have done on connect rpc vs grpc — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="contract-testing-for-connect">Contract testing for connect</h2>
-<p>When the work moves from design to production, the questions change. The connect is not the question; the failure mode of the rpc is.</p>
+<h2 id="why-connect-exists-at-all">Why Connect exists when gRPC already works</h2>
+<p>gRPC's HTTP/2-and-binary-only requirement is fine service-to-service inside a cluster, but it forces browser clients through grpc-web plus a translating proxy, and it forces debugging through specialized tooling (`grpcurl` instead of `curl`) because you can't just read the wire format in a browser's network tab. Connect was built specifically to remove that friction: the same generated client works from a Go backend, a browser via `connect-web`, or a plain curl command against the JSON endpoint, without deploying Envoy purely to translate protocols.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /connects/{id}:
-    get:
-      operationId: getConnect
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · CALLING A CONNECT SERVICE WITH CURL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>curl \
+  --header "Content-Type: application/json" \
+  --data '{"invoiceId": "INV-1042"}' \
+  http://localhost:8080/invoice.v1.InvoiceService/GetInvoice</code></pre>
 </div>
-<h2 id="observability-tracing-rpc">Observability: tracing rpc</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="streaming-the-real-technical-gap">Streaming: the real technical gap</h2>
+<p>gRPC's native bidirectional streaming over HTTP/2 is more mature and battle-tested than Connect's streaming support, which layers on top and has less production mileage at very high throughput. For unary request/response — the shape of the large majority of internal service APIs — the gap doesn't matter. For workloads genuinely built around long-lived bidirectional streams (a real-time collaboration backend, high-frequency telemetry ingestion), gRPC's ecosystem maturity is still the safer default.</p>
+<div class="callout-warn">
+  <strong>Don't reach for either without a schema-first discipline</strong>
+  <p>Both frameworks derive their value from the shared .proto contract generating client and server code together — that's what eliminates an entire class of integration bugs. Skipping schema-first design and hand-writing structs against a Connect or gRPC endpoint gives up most of the benefit either framework offers over a plain REST API.</p>
+</div>
+<h2 id="when-to-pick-which">When to pick which</h2>
+<p>Choose gRPC for pure service-to-service communication inside a cluster where every caller is another backend service you control, especially if streaming is central to the design and you're already invested in the gRPC ecosystem (Envoy, grpc-gateway, existing tooling). Choose Connect when clients include browsers, mobile apps, or external partners who need to call the API directly without a translation proxy, or when the team wants curl-debuggable endpoints during development without sacrificing the Protobuf schema and generated-client benefits.</p>
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>Connect servers can be gRPC-compatible from day one</strong>
+  <p>Because Connect's Go and other server implementations support all three protocols (Connect, gRPC, and gRPC-Web) simultaneously off the same handler, adopting Connect doesn't require abandoning existing gRPC clients — they keep working against the same endpoint unmodified.</p>
 </div>
-<h2 id="sdk-generation-for-connect">SDK generation for connect</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type ConnectResponse = {
-    id: string;
-    rpc: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="what-connect-rpc-vs-grpc-a-comparison-gives-you">What Connect RPC vs gRPC — A Comparison gives you</h2>
-<p>The performance of rpc in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>Production rpc looks different from development rpc. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/connects/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await connectService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rpc first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add connect on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rpc when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on connect rpc vs grpc — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<h2 id="the-migration-path-is-genuinely-low-risk">The migration path is genuinely low-risk</h2>
+<p>Because both frameworks generate code from the same Protobuf schema, moving an existing gRPC service to a Connect-based server implementation is usually a server-side swap with no schema changes and no client-visible break — existing gRPC clients keep working. That low migration cost is a meaningful part of Connect's pitch: it's a strict superset of protocol support built on infrastructure teams already have, not a rip-and-replace decision.</p>
+<p>Both frameworks solve the same schema-first RPC problem well. Default to gRPC for internal, streaming-heavy, service-to-service traffic; default to Connect when browsers or external clients need to call the API directly without standing up a translation proxy just to make that possible.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
