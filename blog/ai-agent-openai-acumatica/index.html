@@ -93,98 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="what-openai-acumatica-integration-patterns-actually-does">What OpenAI + Acumatica Integration Patterns actually does</h2>
-<p>What OpenAI + Acumatica Integration Patterns actually does is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Acumatica's contract-based REST API is a natural fit for OpenAI's function-calling: it's already a well-defined set of entities and actions (Sales Orders, Bills, Invoices, Stock Items) that map cleanly onto function schemas. The integration work isn't teaching the model to "understand" Acumatica — it's defining a tight set of functions, handling the API's session and auth model correctly, and putting a validation layer between what the model decides and what actually posts.</p>
+<h2 id="authenticating-against-the-contract-based-api">Authenticating against the contract-based API</h2>
+<p>Acumatica's REST endpoint uses cookie-based session auth by default: you POST credentials to <code>/entity/auth/login</code>, get a session cookie back, and reuse it for subsequent calls until you explicitly log out or the session expires. For a service account driving an agent, request an OAuth 2.0 bearer token instead (configured under a connected application in Acumatica) — it avoids the session-affinity issues you get with cookies behind a load balancer, and it's the credential type you want long-lived automation to hold rather than a login/logout pair per request.</p>
+<h2 id="defining-functions-that-match-the-endpoint-shape">Defining functions that match the endpoint shape</h2>
+<p>Each OpenAI function should map to one Acumatica entity action, not a vague "do something in Acumatica" catch-all. Narrow, typed functions get better tool-selection accuracy from the model than one big generic function with a free-text parameter. Put required fields, enums, and formats directly in the JSON schema — the model uses that schema to decide what to ask the user for before it ever calls the function.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · FUNCTION SCHEMA FOR A SALES ORDER LOOKUP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>tools = [{
+    "type": "function",
+    "function": {
+        "name": "get_sales_order_status",
+        "description": "Look up the status and total of a Sales Order in Acumatica by order number.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_nbr": {"type": "string", "description": "Acumatica Sales Order number, e.g. SO004821"},
+            },
+            "required": ["order_nbr"],
+        },
+    },
+}]
 
-def list_openai(query: str) -> str:
-    """List openai matching the query."""
-    response = requests.get(
-        f"https://api.example.com/openai",
-        params={"q": query}
+def get_sales_order_status(order_nbr: str) -> dict:
+    resp = session.get(
+        f"{BASE_URL}/entity/Default/23.200.001/SalesOrder/{order_nbr}",
+        headers={"Authorization": f"Bearer {token}"},
     )
-    return response.json()
-
-tools = [Tool(name="openai", func=list_openai, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    resp.raise_for_status()
+    body = resp.json()
+    return {"status": body["Status"]["value"], "total": body["OrderTotal"]["value"]}</code></pre>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>In the work I have done on openai + acumatica integration patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="the-tool-call-loop">The tool-call loop</h2>
+<p>The pattern is standard OpenAI function-calling: send the user message plus the tool schemas, check whether the response contains <code>tool_calls</code>, execute the matching Python function, append the result as a <code>tool</code> role message, and call the model again so it can produce a natural-language answer grounded in the real API response. The important discipline is that the model never sees or invents the Acumatica data directly — it only sees what your function actually returned, which is what keeps it from hallucinating an order total that doesn't exist.</p>
+<div class="callout-warn">
+  <strong>Never let the model construct write payloads unchecked</strong>
+  <p>For read operations (status lookups, balance checks) letting the model call the function directly is low risk. For writes — creating a bill, releasing a payment, adjusting a quantity — validate the model's extracted parameters against business rules (amount limits, valid GL accounts, duplicate-check against existing records) in your own code before the PUT/POST goes to Acumatica. The model proposes the action; your code decides whether it's allowed to happen.</p>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>When the work moves from design to production, the questions change. The openai is not the question; the failure mode of the acumatica is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The performance of acumatica in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>Production acumatica looks different from development acumatica. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_openai(query: str) -> str:
-    """List openai matching the query."""
-    response = requests.get(
-        f"https://api.example.com/openai",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="openai", func=list_openai, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="mapping-acumatica-field-types-to-json-schema">Mapping Acumatica field types to JSON schema</h2>
+<p>Acumatica's contract-based API wraps every field as <code>{"value": ...}</code>, and numeric/date fields serialize as strings in some endpoints and native types in others depending on the endpoint version. Don't hand the raw API response to the model — normalize it into a flat, clean dict in your function before returning it as the tool result. A model reasoning over <code>{"OrderTotal": {"value": "1250.00"}}</code> is more likely to misquote the number than one reasoning over <code>{"total": 1250.00}</code>; flattening is a five-line function that meaningfully improves reliability.</p>
+<h2 id="handling-acumatica-specific-failure-modes">Handling Acumatica-specific failure modes</h2>
+<p>Two things bite integrations that work fine in testing: session/token expiry mid-conversation (handle a 401 by re-authenticating once and retrying the single failed call, not the whole conversation), and Acumatica's long-running-operation pattern on some PUT/POST endpoints, which returns a 202 with a location header rather than the final result immediately. Poll that location with backoff before returning a result to the model — if you return "submitted" as if it were "completed," the agent will confidently tell the user something is done before it actually is.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring acumatica first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add openai on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with acumatica when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Acumatica behavior</th><th>Integration handling</th></tr>
+  <tr><td>Cookie session vs OAuth bearer</td><td>Use OAuth for service accounts, not login/logout per call</td></tr>
+  <tr><td>Fields wrapped as {"value": ...}</td><td>Flatten before returning as tool result</td></tr>
+  <tr><td>202 + polling for long operations</td><td>Poll to completion before telling the model "done"</td></tr>
+  <tr><td>Custom fields per tenant</td><td>Keep function schemas tenant-specific, don't hardcode across installs</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on openai + acumatica integration patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The OpenAI side of this integration is standard function-calling with well-scoped, typed tool definitions. The Acumatica side needs a service-account OAuth token, response flattening so the model reasons over clean numbers, and explicit polling for long-running writes. Keep read access loose and write access gated by your own validation layer — the API contract makes this straightforward once you stop treating the raw REST payload as something safe to hand the model directly.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

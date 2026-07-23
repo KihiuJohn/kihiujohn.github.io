@@ -93,98 +93,94 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Cost optimisation: caching and batching is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Asking an LLM to "reply in JSON" and hoping for the best works in a demo and breaks in production. The model wraps the object in a markdown fence, adds a sentence of preamble, drops a trailing comma, or quietly renames a field. None of that shows up until a downstream parser throws on request number 4,000. Getting structured output that a program can trust means treating the schema as a contract enforced at the API level, not as a suggestion in the prompt.</p>
+
+<h2 id="why-prompted-json-fails">Why prompted JSON fails</h2>
+<p>A plain instruction like "respond only with JSON matching this shape" relies on the model's training to produce well-formed output, and it usually does — until the input is unusual, the schema is deep, or the model decides an explanation is helpful and prepends one anyway. The common failure modes are markdown code fences around the object, single quotes instead of double, trailing commas, numbers rendered as strings ("42" instead of 42), and enums that drift ("in_progress" vs "In Progress" vs "inprogress"). Every one of these is a silent break for a naive <code>json.loads</code> call, and every one of them is more likely under load, not less — the failure rate does not average out, it clusters on the inputs your prompt didn't anticipate.</p>
+<p>The fix is not a better prompt. It's using the provider's constrained decoding path instead of asking nicely.</p>
+
+<h2 id="json-mode-vs-tool-use">JSON mode vs. tool-use-as-structured-output</h2>
+<p>Most providers now expose two different mechanisms, and they are not interchangeable. <strong>JSON mode</strong> (OpenAI's <code>response_format: {"type": "json_object"}</code>, or the stricter <code>json_schema</code> variant) constrains decoding so the model can only emit tokens that form valid JSON, optionally validated against a schema at generation time. It's the right tool when the output is genuinely "fill in this document" — a single object, no branching logic. <strong>Tool-use / function-calling</strong> (Anthropic's <code>tools</code> parameter, OpenAI's <code>tools</code> with <code>tool_choice</code>) asks the model to call a named function with arguments matching a JSON Schema. This is the better fit when the "output" is really a decision among several possible actions, or when you want the model to choose between multiple schemas — one tool per intent.</p>
+<p>In practice, forcing a single tool call (<code>tool_choice: {"type": "tool", "name": "extract_invoice"}</code> on Anthropic, or <code>tool_choice: {"type": "function", "function": {"name": "..."}}</code> on OpenAI) is the most reliable structured-output primitive available today, because it constrains generation to the tool's declared schema rather than relying on the model choosing to follow format instructions in free text.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_structured(query: str) -> str:
-    """List structured matching the query."""
-    response = requests.get(
-        f"https://api.example.com/structured",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="structured", func=list_structured, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · TOOL SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "name": "extract_invoice",
+  "description": "Extract structured invoice data from raw text",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "invoice_number": { "type": "string" },
+      "total_amount": { "type": "number" },
+      "currency": { "type": "string", "enum": ["USD", "KES", "EUR"] },
+      "line_items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string" },
+            "quantity": { "type": "integer" },
+            "unit_price": { "type": "number" }
+          },
+          "required": ["description", "quantity", "unit_price"]
+        }
+      }
+    },
+    "required": ["invoice_number", "total_amount", "currency", "line_items"]
+  }
+}</code></pre>
 </div>
-<h2 id="the-role-of-output-in-the-agent-loop">The role of output in the agent loop</h2>
-<p>In the work I have done on structured output from llms — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="schema-design">Schema design: flat beats clever</h2>
+<p>The schema you hand the model is not just documentation — it's part of the prompt, and it shapes what the model produces. Deeply nested objects, heavy use of <code>oneOf</code>/<code>anyOf</code>, and fields marked optional "just in case" all increase the chance of a malformed or incomplete response. A few rules that hold up in practice: keep nesting to two or three levels; make fields required unless there's a genuine reason a value won't exist, because optional fields get skipped under ambiguity; use enums instead of free-text strings for anything with a closed set of values, since an enum constrains generation and a free-text field invites synonyms; and avoid <code>additionalProperties: true</code> — an open schema is an invitation for the model to invent keys you didn't ask for.</p>
+<div class="callout">
+  <strong>Split, don't nest</strong>
+  <p>If you find yourself three levels deep with sibling objects that differ only by type, it's usually cleaner to call the model once per record type with a flatter schema than to ask it to fill one deeply polymorphic structure in a single pass. Flat schemas are also easier to validate and diff when something goes wrong.</p>
+</div>
+
+<h2 id="validate-dont-trust">Validate, don't trust</h2>
+<p>Constrained decoding reduces malformed output; it does not eliminate semantically wrong output. A tool call can be syntactically perfect JSON and still put a negative number in <code>quantity</code>, an out-of-range date, or a currency code the enum forgot to include. Parse the response through a real schema validator — Pydantic in Python, Zod in TypeScript — rather than trusting the shape because it came from a "structured output" call. This is also where you catch the provider-side edge case where JSON mode is enabled but the model still returns an empty object or an object missing a required key, which does happen, particularly on longer contexts or unusual inputs.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · PYDANTIC VALIDATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from pydantic import BaseModel, Field, ValidationError
+
+class LineItem(BaseModel):
+    description: str
+    quantity: int = Field(gt=0)
+    unit_price: float = Field(ge=0)
+
+class Invoice(BaseModel):
+    invoice_number: str
+    total_amount: float = Field(ge=0)
+    currency: str
+    line_items: list[LineItem]
+
+try:
+    invoice = Invoice.model_validate(tool_call["input"])
+except ValidationError as e:
+    # feed e.errors() back to the model, don't just retry blind
+    raise</code></pre>
+</div>
+
+<h2 id="retry-with-error-feedback">Retry loops that actually improve the second attempt</h2>
+<p>When validation fails, a bare retry — same prompt, same schema, hope for a different roll — fixes the problem maybe half the time, because you haven't told the model what was wrong. A better loop feeds the validator's error message back into the next turn: "Your previous response failed validation: <code>line_items.0.quantity: must be greater than 0</code>. Correct and resend." This turns the retry into a targeted correction instead of a fresh guess, and it caps the number of attempts — two or three, not an unbounded loop — with a clear failure path (queue for human review, return a typed error) rather than silently retrying until the process times out.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Don't retry on your own bugs</strong>
+  <p>Before wiring up a retry loop, confirm the failure is actually the model's fault. A validator that's stricter than the real business rule, or a schema that doesn't match what you actually asked for, will burn retries and tokens on output that was correct. Log the raw response alongside the validation error so you can tell the two apart.</p>
 </div>
-<h2 id="what-structured-output-from-llms-a-field-guide-actually-does">What Structured Output from LLMs — A Field Guide actually does</h2>
-<p>When the work moves from design to production, the questions change. The structured is not the question; the failure mode of the output is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The performance of output in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Production output looks different from development output. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_structured(query: str) -> str:
-    """List structured matching the query."""
-    response = requests.get(
-        f"https://api.example.com/structured",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="streaming-complicates-parsing">Streaming makes this harder, not easier</h2>
+<p>If you stream the response for latency reasons, you no longer have a complete JSON document to hand to a validator until the stream ends — a naive <code>JSON.parse</code> on a partial chunk throws on every token. Either buffer the full tool-call arguments before parsing (the simplest and usually correct choice, since structured extraction is rarely latency-critical the way chat is), or use an incremental JSON parser that tolerates partial input if you specifically need to render fields as they arrive, such as a UI showing an invoice total updating live. Don't try to hand-roll partial JSON repair; it's a well-understood problem with existing libraries, and hand-rolled versions tend to silently produce wrong values instead of failing loudly.</p>
 
-tools = [Tool(name="structured", func=list_structured, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring output first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add structured on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with output when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Mechanism</th><th>Best for</th><th>Failure mode to watch</th></tr>
+  <tr><td>Prompted JSON</td><td>Nothing, in production</td><td>Fences, preamble, drifted enums</td></tr>
+  <tr><td>JSON mode / <code>json_schema</code></td><td>Single-document extraction</td><td>Empty or partial object on edge inputs</td></tr>
+  <tr><td>Forced tool call</td><td>Extraction, classification, routing</td><td>Valid JSON, invalid business value</td></tr>
+  <tr><td>Streaming + incremental parse</td><td>Live-updating UI on long output</td><td>Partial-parse bugs, wrong-but-parseable state</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on structured output from llms — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>None of this removes the need for validation — it just moves most of the failures from "malformed JSON" to "wrong value in a well-formed object," which is a much easier class of bug to catch and correct. Force the tool call, keep the schema flat and mostly-required, validate every response for real, and feed validation errors back into the retry instead of guessing again blind.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

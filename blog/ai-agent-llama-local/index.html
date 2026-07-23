@@ -93,98 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Cost optimisation: caching and batching is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Running an open-weight model yourself is a genuinely different trade-off than calling a hosted API, not a cheaper clone of the same thing. You give up the frontier-model ceiling and the zero-ops convenience, and in exchange you get fixed cost per token, data that never leaves your network, and a model you can quantize, fine-tune, or pin to a specific version indefinitely. For agent workloads — tool use, structured output, long context — the local story has closed a lot of ground but still has sharp edges worth knowing before you commit infrastructure to it.</p>
+
+<h2 id="picking-a-model-and-quantization">Picking a model and quantization level</h2>
+<p>The current Llama-family and comparable open-weight models (Llama 3.x, Mistral/Mixtral, Qwen2.5) ship at a range of parameter counts, and the parameter count you can actually run is bounded by VRAM, not ambition. A rough rule: full fp16 needs about 2 GB of VRAM per billion parameters, 8-bit quantization roughly halves that, and 4-bit (GPTQ, AWQ, or GGUF's Q4_K_M) gets you to about 0.6-0.7 GB per billion parameters with a modest, usually acceptable quality drop. A 70B model at 4-bit fits in roughly 40-48 GB of VRAM — a single high-end workstation card or a couple of consumer cards — where fp16 would need multiple data-center GPUs.</p>
+<p>Quantization degrades tool-calling reliability before it degrades fluent prose; a model that reads fine in chat can start emitting malformed JSON or hallucinated function names at 4-bit under load. If your agent depends on structured tool calls, test the exact quantized checkpoint against a tool-use eval set before assuming the quality numbers from a general benchmark transfer.</p>
+
+<h2 id="tool-use-support-in-open-weight-models">Tool-use support is uneven, and it matters most</h2>
+<p>Hosted APIs guarantee schema-conformant function calling because the provider trains and constrains for it server-side. Local serving stacks have to replicate that themselves. llama.cpp and vLLM both support grammar-constrained decoding — GBNF grammars or JSON-schema-constrained sampling — which forces the model's output tokens to match a schema at the sampling level, not just via prompting. Use that constrained decoding rather than relying on prompted "respond only in JSON" instructions; unconstrained local models drift into prose or broken JSON far more often than hosted GPT-4o or Claude with native structured output modes.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">BASH · VLLM WITH CONSTRAINED OUTPUT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Serve an OpenAI-compatible endpoint with guided decoding enabled
+vllm serve meta-llama/Llama-3.1-8B-Instruct \
+  --quantization awq \
+  --max-model-len 8192 \
+  --guided-decoding-backend outlines
 
-def list_self(query: str) -> str:
-    """List self matching the query."""
-    response = requests.get(
-        f"https://api.example.com/self",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="self", func=list_self, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+# Client call — schema is enforced at the token level, not hoped for
+curl http://localhost:8000/v1/chat/completions \
+  -d '{
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "Extract the order ID and status"}],
+    "guided_json": {"type":"object","properties":{"order_id":{"type":"string"},"status":{"type":"string"}}}
+  }'</code></pre>
 </div>
-<h2 id="the-role-of-hosted-in-the-agent-loop">The role of hosted in the agent loop</h2>
-<p>In the work I have done on self-hosted llm with acumatica — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="deployment-stack-choices">Deployment: llama.cpp, vLLM, or a managed inference box</h2>
+<p>For single-node, low-concurrency workloads — an internal tool, a batch job — llama.cpp with a GGUF quant is the least operational overhead: one binary, CPU offload for layers that don't fit in VRAM, no Python dependency hell. For anything serving concurrent agent sessions, vLLM's continuous batching and PagedAttention give you real throughput gains, at the cost of running an actual inference server you now own the uptime of. Neither replaces the retry logic, rate limiting, and circuit breakers you'd get for free from a hosted API — you have to build those yourself, because your own GPU box has no SLA.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>You inherit the ops burden hosted APIs hide</strong>
+  <p>A hosted provider absorbs GPU failures, model upgrades, and capacity scaling invisibly. Self-hosting means you now own health checks, autoscaling (or accepting a fixed ceiling), driver and CUDA version drift, and the on-call rotation for when the inference box falls over at 2am. Budget for this before comparing per-token cost — the cost that matters is total cost of ownership, not GPU-hour price.</p>
 </div>
-<h2 id="what-self-hosted-llm-with-acumatica-a-complete-guide-actually-does">What Self-Hosted LLM with Acumatica — A Complete Guide actually does</h2>
-<p>When the work moves from design to production, the questions change. The self is not the question; the failure mode of the hosted is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The performance of hosted in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Production hosted looks different from development hosted. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_self(query: str) -> str:
-    """List self matching the query."""
-    response = requests.get(
-        f"https://api.example.com/self",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="when-local-wins-and-when-it-doesnt">When local actually wins</h2>
+<p>Local makes sense when: data residency or compliance rules out sending prompts to a third party, request volume is high and steady enough that fixed GPU cost beats per-token pricing, or latency needs to be sub-100ms and colocated with the data. It does not make sense when your traffic is bursty, your team doesn't want to own GPU infrastructure, or your agent's hardest tasks need frontier-level reasoning that open-weight models at any quantization still lag behind on — long-horizon planning and complex multi-step tool orchestration are still where hosted frontier models pull ahead.</p>
 
-tools = [Tool(name="self", func=list_self, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring hosted first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add self on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with hosted when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Factor</th><th>Hosted API</th><th>Self-hosted open-weight</th></tr>
+  <tr><td>Cost model</td><td>Per-token, scales with usage</td><td>Fixed GPU cost, scales with capacity</td></tr>
+  <tr><td>Data residency</td><td>Leaves your network</td><td>Stays on-prem/VPC</td></tr>
+  <tr><td>Tool-call reliability</td><td>High, provider-constrained</td><td>Depends on grammar-constrained decoding</td></tr>
+  <tr><td>Ops burden</td><td>None — provider's problem</td><td>Yours — GPUs, drivers, scaling</td></tr>
+  <tr><td>Frontier reasoning</td><td>Best available</td><td>Lags on hard multi-step tasks</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on self-hosted llm with acumatica — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Self-hosting a Llama-family model for agent workloads is a real option in 2026, not a compromise you settle for — but only once you've priced in the GPU ops you're taking on and validated tool-call reliability at your chosen quantization level with grammar-constrained decoding. Start with the smallest model that clears your tool-use eval bar; a well-quantized 8B model with constrained decoding often beats a poorly-served 70B model in practice.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

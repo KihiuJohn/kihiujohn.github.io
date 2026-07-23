@@ -92,98 +92,64 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>Latency and cost tradeoffs for agent is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Summarisation is the LLM use case with the shortest path to production value and the easiest way to quietly corrupt a decision. A support-ticket digest, a contract clause summary, or a rollup of an ERP audit trail all look the same on the surface — feed in text, get back fewer words — but the failure modes differ from ordinary chat. Wrong numbers in a summary of a finance thread get treated as fact by whoever reads only the summary. This is what actually matters when you build summarisation into a business workflow.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="extractive-vs-abstractive">Extractive vs abstractive, and when each is safer</h2>
+<p>Extractive summarisation picks and reorders sentences that already exist in the source; abstractive summarisation generates new sentences that paraphrase the source. Abstractive summaries read better and compress harder, but every generated sentence is a new opportunity to introduce a claim that was not in the original text. For anything with dollar amounts, dates, or account numbers — AP invoice threads, AR dunning history, GL adjustment notes — bias toward extractive or hybrid approaches: pull the sentences containing the numbers verbatim, and let the model write connective prose around them rather than regenerating the numbers itself.</p>
+<p>A practical middle ground is structured extraction first, narrative second: ask the model to pull out entities (amounts, dates, parties, statuses) into a fixed schema, then generate the narrative summary from that schema instead of directly from raw text. If the schema step fails or looks wrong, you catch it before it reaches the reader.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-document">Prompt patterns that work for document</h2>
-<p>In the work I have done on ai agent for document summarisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the document is.</p>
+<h2 id="chunking-long-documents">Chunking long documents: map-reduce and its failure modes</h2>
+<p>An email thread with forty replies, a support ticket with a year of comments, or a contract with fifty pages will exceed a single context window, or at least exceed the point where attention degrades and the model starts skimming. The standard fix is map-reduce: split the document into chunks, summarise each chunk independently (map), then summarise the summaries (reduce). It works, but it has a specific failure mode — information that depends on connecting two facts from different chunks never gets connected, because no single map step sees both. A contract clause defined in section 2 and referenced in section 40 will summarise fine in isolation and lose the cross-reference entirely.</p>
+<p>Two mitigations that are worth the extra cost: overlap chunks by a paragraph or two so boundary information survives, and run a final reduce pass with the <em>original</em> key entities (party names, amounts, dates) carried forward explicitly rather than trusting the intermediate summaries to have preserved them.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-role-of-document-in-the-agent-loop">The role of document in the agent loop</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="what-ai-agent-for-document-summarisation-actually-does">What AI Agent for Document Summarisation actually does</h2>
-<p>The performance of document in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>Production document looks different from development document. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · MAP-REDUCE SUMMARY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def summarise_chunk(chunk: str, focus: str) -> str:
+    prompt = f"""Summarise the following excerpt in 3-5 sentences.
+Focus only on: {focus}
+Quote any dollar amounts, dates, or account numbers exactly as written.
+If a fact is not stated explicitly, do not infer it.
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+Excerpt:
+{chunk}"""
+    return llm.complete(prompt, max_tokens=200)
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def reduce_summaries(chunk_summaries: list[str], focus: str) -> str:
+    joined = "\n\n".join(chunk_summaries)
+    prompt = f"""Combine these partial summaries into one coherent summary,
+under 200 words, focused on: {focus}
+Preserve every dollar amount and date exactly as given below —
+do not recalculate or round.
+
+{joined}"""
+    return llm.complete(prompt, max_tokens=300)</code></pre>
 </div>
+
+<h2 id="hallucination-risk-with-numbers">Hallucination risk: numbers and dates are where it bites</h2>
+<p>LLMs summarise prose well and arithmetic poorly. Ask for a summary of an AR aging thread and the model will happily state "the balance is approximately $12,000" when the source says $11,842.50 — close enough to sound right, wrong enough to matter on a reconciliation. The same happens with dates: a model summarising a change log will sometimes collapse "created March 3, last modified March 19" into a single date, or invent a due date that was implied but never stated.</p>
+<div class="callout-warn">
+  <strong>Never let the model do arithmetic in a summary</strong>
+  <p>If the summary needs a total, a percentage, or a duration, compute it in code from the source data and inject the computed value into the prompt or into the output template. Ask the LLM to summarise; do not ask it to add up. This single rule prevents most of the numeric hallucinations that show up in financial summarisation.</p>
+</div>
+<p>For audit trails specifically, the safest pattern is to treat the LLM as a narrator over a diff you already computed deterministically — you know exactly which fields changed and by how much from the database; the model's job is only to phrase that in plain language, not to re-derive it from unstructured text.</p>
+
+<h2 id="controlling-length-and-focus">Controlling length and focus with prompts</h2>
+<p>Vague instructions like "summarise this" produce inconsistent length and inconsistent focus, which is unusable in a UI that needs a predictable card size. Two things fix most of it: give an explicit length constraint tied to a unit the model can count against (sentences, not "briefly"), and give an explicit focus so the model knows what to keep when it has to drop something. "Summarise this support ticket in 3 sentences, focused on unresolved action items" produces a materially different and more useful summary than "summarise this ticket."</p>
+<p>For recurring summary types — daily ticket digests, weekly AP exception reports — lock the prompt template down and version it like code. A prompt change that shifts summary length or tone should go through the same review as a schema change, because downstream automation or dashboards may depend on the shape of the output.</p>
+
+<h2 id="evaluating-summary-quality">Evaluating summary quality: faithfulness before fluency</h2>
+<p>Fluency is the wrong metric to optimise first — a summary can read beautifully and still misstate the invoice total. The metric that matters for business use is faithfulness: does every factual claim in the summary trace back to something actually present in the source. A cheap, effective check is to extract all numbers and dates from the summary with a regex, then verify each one appears verbatim in the source document; anything that doesn't match is flagged for human review before the summary ships.</p>
+<p>For higher-stakes summaries (contract obligations, financial rollups), a second LLM call as a faithfulness checker — "does this summary contain any claim not supported by the source text below, answer yes/no and list them" — catches paraphrased hallucinations the regex check misses, at the cost of a second API call. Reserve it for the summaries someone will actually act on financially, not for every ticket digest.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring document first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with document when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Source type</th><th>Recommended approach</th><th>Main risk</th></tr>
+  <tr><td>Support ticket thread</td><td>Abstractive, focus on open action items</td><td>Losing the most recent status</td></tr>
+  <tr><td>Long email thread</td><td>Map-reduce with chunk overlap</td><td>Dropped cross-references between replies</td></tr>
+  <tr><td>Contract clauses</td><td>Extractive for obligations/dates, abstractive narrative around them</td><td>Paraphrased obligation changes meaning</td></tr>
+  <tr><td>ERP audit trail / change log</td><td>Deterministic diff, LLM narrates only</td><td>Model inventing values instead of reading the diff</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for document summarisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Summarisation earns its keep fast because the cost of being wrong looks small — a slightly off sentence, not a broken transaction. That is exactly why it deserves the same discipline as any other production LLM feature: keep numbers out of the model's hands wherever a deterministic value already exists, chunk long documents with overlap so cross-references survive, constrain length and focus explicitly, and check faithfulness before you trust fluency. If you're building this against Acumatica data specifically, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,78 +93,49 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The vertical SaaS model on a horizontal platform is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Accounts payable automation has a well-worn shape by now: capture the invoice, extract structured data from it, match it against a PO and receipt, route it for approval, and post it — with humans only touching the exceptions. The interesting engineering is almost entirely in the exception path; the happy path where an invoice matches perfectly is the easy 60% of the problem.</p>
+<h2 id="capture-and-extraction">Capture and extraction: OCR is the easy part now</h2>
+<p>Document AI (Google's Document AI, AWS Textract, Azure Document Intelligence) has made raw text and field extraction from PDF/image invoices commodity-level accurate. The harder problem is <em>structured</em> extraction — reliably mapping "Net 30" or a vendor's inconsistent line-item layout into a normalized schema the downstream matching engine can consume. Most production systems combine a general OCR/layout model with a lightweight, vendor-specific template or fine-tuned extraction step for high-volume suppliers, since a generic model's accuracy on a novel invoice layout is meaningfully lower than on a template it's seen before.</p>
+<h2 id="two-way-and-three-way-matching">Two-way and three-way matching</h2>
+<p><strong>Two-way match</strong> compares the invoice against the purchase order (price and quantity). <strong>Three-way match</strong> adds the goods receipt, confirming the quantity invoiced actually arrived before payment is approved — the standard control for preventing payment on goods never received. The automation design question is tolerance: an exact match requirement on price or quantity will kick almost every invoice to manual review, because rounding, partial shipments, and freight surcharges are the norm, not the exception.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AutomationExt : PXCacheExtension<Patterns>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · TOLERANCE-BASED MATCH RULE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def three_way_match(invoice, po, receipt):
+    qty_variance = abs(invoice.qty - receipt.qty_received) / receipt.qty_received
+    price_variance = abs(invoice.unit_price - po.unit_price) / po.unit_price
+
+    if qty_variance > 0.02:   # 2% quantity tolerance
+        return "review", "quantity_variance"
+    if price_variance > 0.05:  # 5% price tolerance
+        return "review", "price_variance"
+    if invoice.qty > receipt.qty_received:
+        return "review", "over_invoiced"  # never auto-approve over-billing
+
+    return "auto_approve", None</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>In the work I have done on ap automation patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout">
+  <strong>Set tolerances per vendor, not globally</strong>
+  <p>A single global tolerance either lets bad invoices through from unreliable vendors or sends every invoice from your most trusted suppliers to manual review unnecessarily. Track each vendor's historical variance and tighten or loosen the auto-approve threshold accordingly — this alone typically doubles straight-through processing rates over a flat tolerance.</p>
+</div>
+<h2 id="duplicate-invoice-detection">Duplicate invoice detection</h2>
+<p>Duplicate payment is one of the most common and expensive AP failure modes, and vendors resubmitting a slightly reformatted copy of the same invoice defeats naive exact-match duplicate checks. Effective duplicate detection fuzzy-matches on vendor ID, invoice amount, and a normalized invoice date/number, and flags near-duplicates for review rather than either auto-rejecting (which can incorrectly block a legitimately resubmitted invoice) or silently paying twice.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Check against paid, not just open, invoices</strong>
+  <p>A duplicate check scoped only to unpaid invoices misses the most damaging case: a duplicate submitted after the original has already been paid and archived. The dedup window needs to cover paid history, typically 12+ months back, not just the open AP queue.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>When the work moves from design to production, the questions change. The automation is not the question; the failure mode of the patterns is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'automation'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM automation
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of patterns in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="why-automation-on-a-horizontal-platform-beats-from-scratch">Why automation on a horizontal platform beats from-scratch</h2>
-<p>Production patterns looks different from development patterns. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class AutomationExt : PXCacheExtension<Patterns>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+<h2 id="approval-routing">Approval routing that reflects real authority limits</h2>
+<p>Routing rules should encode actual delegation of authority — dollar thresholds per approver role, category-based routing (a marketing invoice and a capex invoice shouldn't hit the same approver), and escalation timers so an invoice doesn't sit unapproved past a vendor's payment terms. The failure mode to avoid is a routing tree so granular that finding the right approver becomes its own bottleneck; most systems degrade gracefully with 3-4 threshold tiers rather than a rule per department.</p>
+<h2 id="measuring-straight-through-processing">Measuring straight-through processing rate</h2>
+<p>The single metric that tells you whether AP automation is actually working is straight-through processing (STP) rate — the percentage of invoices that go from capture to posting with zero human touches. Segment it by vendor and invoice source; a low blended STP rate usually hides a handful of problem vendors (inconsistent formats, frequent PO mismatches) dragging down an otherwise healthy rate, and fixing those few vendors moves the number more than tuning the matching engine further.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring patterns first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add automation on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with patterns when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Stage</th><th>Common automation failure</th></tr>
+  <tr><td>Capture/extraction</td><td>Novel vendor layout, low-confidence field extraction</td></tr>
+  <tr><td>Matching</td><td>Global tolerance too tight or too loose across vendor mix</td></tr>
+  <tr><td>Duplicate detection</td><td>Dedup window excludes already-paid invoices</td></tr>
+  <tr><td>Approval routing</td><td>Escalation timers absent, invoices stall past terms</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ap automation patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>AP automation succeeds or fails on the exception path, not the extraction model. Per-vendor tolerances, duplicate checks that cover paid history, and routing rules that mirror real approval authority move straight-through processing rate more reliably than a better OCR model. Track STP by vendor, not as a single blended number, and fix the worst few vendors before tuning the matching logic further.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

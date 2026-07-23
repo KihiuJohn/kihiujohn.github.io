@@ -93,83 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real production APIs, this is rarely the question. The question is the failure mode: what happens when the consumer retries, when the rate limit hits, when the schema changes. This article is the patterns.</p>
-<h2 id="the-api-design">The API design</h2>
-<p>The API design is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Apollo Server is the most widely deployed GraphQL server implementation for Node.js, and most of the pain reported about GraphQL in production — N+1 queries, runaway query cost, unclear errors — traces back to a handful of patterns Apollo makes easy to get wrong and just as easy to get right once you know where to look.</p>
+<h2 id="resolvers-and-the-n1-problem">Resolvers and the N+1 problem</h2>
+<p>A naive resolver for a nested field — say, fetching the author of each post in a list of posts — issues one database query per post if written straight-forwardly, turning a single request for 50 posts into 51 queries. This is the single most common GraphQL performance bug, and the standard fix is DataLoader: a per-request batching and caching layer that collects all the individual "get author by ID" calls made during one tick of the event loop and turns them into a single batched query.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/apollos/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await apolloService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · DATALOADER BATCHING IN A RESOLVER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const authorLoader = new DataLoader(async (ids) => {
+  const authors = await db.author.findMany({
+    where: { id: { in: ids } }
+  })
+  const byId = new Map(authors.map(a => [a.id, a]))
+  return ids.map(id => byId.get(id))
+})
+
+const resolvers = {
+  Post: {
+    author: (post, _args, { loaders }) =>
+      loaders.authorLoader.load(post.authorId),
+  },
+}</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>In the work I have done on apollo server patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>Create a new DataLoader instance per request, never a shared singleton</strong>
+  <p>DataLoader caches within its own lifetime. A DataLoader shared across requests will leak stale data between users and, in the worst case, leak one user's data into another user's response. Instantiate it fresh in your context function on every request.</p>
 </div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>When the work moves from design to production, the questions change. The apollo is not the question; the failure mode of the server is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /apollos/{id}:
-    get:
-      operationId: getApollo
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="schema-design-nullable-by-default">Schema design: nullable by default, non-null deliberately</h2>
+<p>GraphQL's type system tempts teams into marking every field non-null because it looks stricter and safer. In practice this is backwards: if any single field in a non-null chain fails to resolve, GraphQL nulls out the entire parent object up to the nearest nullable ancestor — a failure in one minor field can wipe out an entire response tree. The safer default is nullable fields everywhere except identifiers, with non-null reserved for fields you're certain can never fail to resolve. This makes partial failures degrade gracefully instead of cascading.</p>
+<h2 id="query-complexity-and-depth-limiting">Query complexity and depth limiting</h2>
+<p>Because GraphQL lets clients construct arbitrarily nested queries, an unbounded schema is a denial-of-service vector — a deeply nested query against circular relationships (posts → author → posts → author...) can generate exponential backend work from a small request payload. Apollo Server supports plugins for query depth limiting and cost analysis (assigning a computed "cost" to each field and rejecting queries above a threshold) — this is not optional hardening for a production public-facing schema, it's baseline.</p>
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>Persisted queries reduce both attack surface and payload size</strong>
+  <p>For client apps you control, persisted queries — where the client sends a hash instead of the full query text, and the server only executes pre-registered queries — close off arbitrary query construction entirely while also shrinking request payloads.</p>
 </div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type ApolloResponse = {
-    id: string;
-    server: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of server in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="why-apollo-is-not-rest-anymore">Why apollo is not REST anymore</h2>
-<p>Production server looks different from development server. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/apollos/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await apolloService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+<h2 id="error-handling-that-clients-can-act-on">Error handling that clients can actually act on</h2>
+<p>GraphQL's default error format (a flat <code>errors</code> array with a message and path) is too generic for clients to branch logic on reliably. Apollo Server supports typed errors via extensions — attaching a machine-readable <code>code</code> (e.g., <code>UNAUTHENTICATED</code>, <code>VALIDATION_FAILED</code>) alongside the human-readable message — so clients can distinguish "retry this" from "show this error to the user" from "the user needs to log in again" without string-matching on error text.</p>
+<h2 id="caching-in-a-single-endpoint-world">Caching in a single-endpoint world</h2>
+<p>Because every GraphQL request hits the same URL via POST, the HTTP caching that works for free with REST doesn't apply. Apollo Server's response cache plugin can cache full query responses server-side keyed by the query and variables, and field-level caching hints let you mark specific fields as cacheable for a TTL — but both require deliberate setup, unlike REST where a CDN can cache a GET request without any application-level configuration at all.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring server first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add apollo on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with server when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Pattern</th><th>Problem it solves</th></tr>
+  <tr><td>DataLoader batching</td><td>N+1 queries in nested resolvers</td></tr>
+  <tr><td>Nullable-by-default schema</td><td>Prevents cascading nulls from one failed field</td></tr>
+  <tr><td>Query depth/cost limiting</td><td>Denial-of-service via deeply nested queries</td></tr>
+  <tr><td>Typed error extensions</td><td>Clients can branch on error code, not message text</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on apollo server patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Most Apollo Server problems in production trace back to one of two omissions: no DataLoader (so N+1 queries), or no depth/cost limiting (so an unbounded query surface). Get those two in place from the start, keep the schema nullable by default, and the rest of what makes GraphQL painful in production mostly doesn't happen.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

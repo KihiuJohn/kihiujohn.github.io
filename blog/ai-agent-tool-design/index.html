@@ -93,98 +93,72 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="what-ai-agent-tool-design-a-field-guide-actually-does">What AI Agent Tool Design — A Field Guide actually does</h2>
-<p>What AI Agent Tool Design — A Field Guide actually does is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Most agent failures I've debugged were not model failures — they were tool-definition failures. The model picked the wrong tool, filled a parameter with a plausible-looking guess, or called something twice because the first response didn't tell it whether the action had succeeded. Tool design is API design for an audience that can't read your source code, can't set a breakpoint, and only gets one shot at inferring intent from a name and a description string. Get that contract wrong and no amount of prompting fixes it.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="fewer-coarser-tools-beat-many-narrow-ones">Fewer, coarser tools beat many narrow ones</h2>
+<p>The instinct coming from traditional API design is to expose one tool per CRUD operation: <code>get_customer</code>, <code>get_customer_orders</code>, <code>get_customer_invoices</code>, <code>get_customer_balance</code>. That's the right shape for a REST client with a compiler checking call sites. It's the wrong shape for a model choosing from a flat list of names with no type system backing it up. Every additional tool in the schema is another row the model has to disambiguate at selection time, and accuracy on tool selection degrades measurably once you're past a few dozen options — the model starts confusing similarly-named tools or picking the "closest" one instead of the correct one.</p>
+<p>The fix is usually to collapse related fine-grained operations into one coarser tool with a mode or query parameter, doing the equivalent of a join server-side instead of asking the model to orchestrate four calls and stitch the results together itself. A single <code>get_customer_summary</code> tool that returns orders, balance, and contact info in one response is both easier for the model to select and cheaper in round trips than four separate lookups it has to remember to chain correctly.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="write-descriptions-for-the-model-not-the-team">Write descriptions for the model, not for your team</h2>
+<p>A tool description is the only documentation the model ever sees — it has no access to your internal wiki, your code comments, or the tribal knowledge of what "active" means in your schema. Descriptions copied from an internal API doc ("Returns the Customer entity") tell the model nothing about when to call it, what it returns on a miss, or how it differs from the three other tools with similar names. A description written for the model states the purpose, the expected inputs in plain language, what a successful result looks like, and — critically — when *not* to use it if there's a similarly named neighbor tool that could be confused for it.</p>
+<div class="callout">
+  <strong>Test descriptions the way you'd test code</strong>
+  <p>If two people on your team would guess differently about which tool to call from the descriptions alone, the model will too. Run a handful of ambiguous prompts against the tool set before shipping and see which tool actually gets picked.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>In the work I have done on ai agent tool design — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="designing-parameters-that-cant-be-wrong">Designing parameters that can't be wrong</h2>
+<p>Every optional parameter combination you allow is a combination the model will eventually produce, including the invalid ones. A search tool that accepts both <code>customer_id</code> and <code>customer_email</code> as optional filters, with no guidance on what happens when both are set or neither is, will get called with both, or neither, or a fabricated ID that looks right but isn't. Prefer required parameters over optional ones when a sensible call genuinely can't omit them, use enums instead of free-text strings wherever the valid values are a closed set, and avoid parameters that mix concerns — a single <code>status</code> enum beats a <code>status</code> string plus a separate <code>is_archived</code> boolean that can contradict it.</p>
+<p>The other common trap is requiring an internal ID the model has no way to have obtained — a database primary key, an internal ticket UUID, anything that was never surfaced in a prior tool response. If a tool needs an ID, either look it up by a human-readable field (email, order number, name) inside the tool itself, or make sure a prior tool call in the same conversation actually returned that ID so the model has something real to pass forward instead of inventing one.</p>
+
+<h2 id="a-tool-schema-worth-copying">A tool schema worth copying</h2>
+<p>Below is the shape I use for a lookup tool that resolves by human-readable identifiers instead of internal IDs, and returns a bounded result set rather than an unbounded dump — both details matter more to reliability than anything in the prompt around it.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · TOOL DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "name": "find_customer_orders",
+  "description": "Look up recent orders for a customer, identified by email or order number (never an internal customer ID, which you will not have). Returns up to 20 most recent orders with status, total, and order date. Use this before refund_order or cancel_order to confirm the order exists and check its current status — do not guess an order number.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "customer_email": {
+        "type": "string",
+        "description": "Customer's email address. Provide this or order_number, not both."
+      },
+      "order_number": {
+        "type": "string",
+        "description": "Order number as shown to the customer, e.g. ORD-48213. Provide this or customer_email, not both."
+      },
+      "status_filter": {
+        "type": "string",
+        "enum": ["any", "open", "shipped", "cancelled", "refunded"],
+        "description": "Restrict results to orders in this status. Defaults to any."
+      }
+    },
+    "required": []
+  }
+}</code></pre>
+</div>
+<p>Note what's absent: no internal customer ID parameter, no free-text status field, and a description that tells the model the intended call order relative to other tools — not just what this one tool does in isolation.</p>
+
+<h2 id="errors-the-model-can-act-on">Return errors the model can act on, not stack traces</h2>
+<p>When a tool call fails, the temptation is to pass the raw exception back — a database constraint violation, an HTTP 500 body, a null-reference message. The model has no way to act on that; it either retries blindly or apologizes to the user and gives up. A tool's error surface should be as deliberately designed as its success surface: a structured reason code plus a short human-readable explanation the model can either relay or use to pick a different action. "Order ORD-48213 not found — check the order number" lets the model ask the user to double-check. "System.NullReferenceException at line 214" does not.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Distinguish retryable from terminal failures</strong>
+  <p>A rate limit or timeout is worth a retry; a validation error on a malformed order number is not. If every failure looks the same to the model, it either retries things that will never succeed or gives up on things that would have worked a second later.</p>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the tool is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The performance of tool in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>Production tool looks different from development tool. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="good-vs-bad-tool-design-side-by-side">Good vs. bad tool design, side by side</h2>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tool first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tool when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concern</th><th>Bad pattern</th><th>Better pattern</th></tr>
+  <tr><td>Tool count</td><td>One tool per DB table/endpoint</td><td>One tool per task the model actually needs to do</td></tr>
+  <tr><td>Description</td><td>Copied from internal API docs</td><td>States purpose, inputs, and when not to use it</td></tr>
+  <tr><td>Identifiers</td><td>Requires an internal ID the model never saw</td><td>Accepts human-readable lookup fields</td></tr>
+  <tr><td>Parameters</td><td>Free-text fields for closed value sets</td><td>Enums with explicit valid values</td></tr>
+  <tr><td>Errors</td><td>Raw exception text</td><td>Structured reason code + actionable message</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent tool design — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Good tool design for an LLM agent looks a lot like good API design for a junior developer with no access to your codebase: name things plainly, document intent rather than mechanics, make invalid states unrepresentable in the schema, and fail loudly with something actionable. The difference is that the model reads the whole tool list every single call, so bloat and ambiguity cost you on every turn, not just at integration time. Trim the tool set before you tune the prompt — it's usually the higher-leverage fix.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

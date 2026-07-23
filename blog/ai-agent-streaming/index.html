@@ -93,98 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>The architecture: how the pieces fit together is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>A non-streamed LLM call feels broken before it feels slow: the user sends a request and stares at a blank state for anywhere from two to twenty seconds while the model generates the full response server-side. Streaming turns that dead air into a typing effect — tokens appear as the model produces them, so perceived latency drops even though total generation time is identical. For anything chat-shaped, or any UI where an LLM is drafting text a human will read live, streaming isn't a nice-to-have, it's the difference between a tool that feels responsive and one people stop using.</p>
 
-def list_streaming(query: str) -> str:
-    """List streaming matching the query."""
-    response = requests.get(
-        f"https://api.example.com/streaming",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="why-streaming-changes-perceived-latency">Why streaming changes perceived latency</h2>
+<p>Time-to-first-token (TTFT) is what users actually judge, not total completion time. A response that takes 8 seconds end-to-end but starts rendering at 400ms reads as fast; the same 8-second response delivered as one blob at second 8 reads as hung. This matters more with larger models and longer outputs — a 1,500-token answer from a frontier model can take several seconds to generate in full, and non-streaming forces the whole wait up front with zero feedback that anything is happening.</p>
+<p>There's a secondary benefit specific to agentic or tool-using flows: streaming lets you show intermediate state (“searching records…”, “calling create_invoice…”) instead of a single opaque spinner covering a multi-step chain.</p>
 
-tools = [Tool(name="streaming", func=list_streaming, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>In the work I have done on streaming llm responses to ui, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>When the work moves from design to production, the questions change. The streaming is not the question; the failure mode of the llm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="sse-vs-websockets-vs-chunked-http">SSE vs WebSockets vs plain chunked HTTP</h2>
+<p>For LLM output specifically, the traffic is one-directional (server to client) after the initial request, so a full-duplex protocol like WebSockets is usually more infrastructure than the problem needs. Server-Sent Events (SSE) is the pragmatic default: it rides over plain HTTP, works through most corporate proxies and load balancers without special configuration, reconnects automatically via <code>EventSource</code>, and both the OpenAI and Anthropic APIs emit their streaming responses as SSE natively — so a browser client can, in the simplest case, forward the same event format the model API sent.</p>
+<p>WebSockets earn their cost when you need bidirectional interaction mid-generation — the user is expected to interrupt, steer, or send follow-ups while tokens are still arriving, or you're multiplexing many independent streams over one connection. For a single request/response chat turn, that's usually unneeded complexity. Chunked <code>transfer-encoding</code> without SSE framing works too, but you lose the built-in event typing and reconnection semantics for very little benefit over SSE.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>What the model APIs actually send</strong>
+  <p>Anthropic's streaming API emits typed SSE events — <code>message_start</code>, <code>content_block_start</code>, repeated <code>content_block_delta</code> events carrying a <code>text_delta</code>, <code>content_block_stop</code>, then <code>message_delta</code> and <code>message_stop</code>. OpenAI's Chat Completions streaming sends a series of <code>chat.completion.chunk</code> objects, each with a <code>delta</code> containing the next fragment, terminated by a <code>data: [DONE]</code> line. Build your parser against the real event names — don't assume a bare token per line.</p>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The performance of llm in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-streaming">Latency and cost tradeoffs for streaming</h2>
-<p>Production llm looks different from development llm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_streaming(query: str) -> str:
-    """List streaming matching the query."""
-    response = requests.get(
-        f"https://api.example.com/streaming",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="proxying-the-stream-server-side">Proxying the stream through your own backend</h2>
+<p>You rarely want the browser calling the model API directly — that leaks your API key client-side. The usual shape is: browser opens a fetch/EventSource connection to your backend, your backend opens its own streaming request to Claude or OpenAI, and re-emits each delta to the browser as it arrives, adding your own SSE framing on top if you need custom event types (e.g. a distinct event for tool calls vs. text).</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · NODE/EXPRESS PROXY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>app.post('/api/chat', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-tools = [Tool(name="streaming", func=list_streaming, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  const stream = await anthropic.messages.stream({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 1024,
+    messages: req.body.messages,
+  });
+
+  req.on('close', () => stream.controller.abort()); // client cancelled
+
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+    }
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+});</code></pre>
 </div>
+<p>The <code>req.on('close', ...)</code> line matters as much as the happy path: if the user navigates away or cancels, propagate that abort down to the upstream model call. Otherwise you keep paying for tokens nobody will read, and under load that's a real cost line, not a theoretical one.</p>
+
+<h2 id="rendering-partial-and-partial-json">Rendering partial text and partial structured output</h2>
+<p>Plain prose is easy — append each delta to a buffer and re-render. Markdown is slightly harder: an unclosed code fence or bold marker mid-stream will render wrong for a frame or two. Most chat UIs accept this and let the markdown parser re-run on each chunk (it self-corrects once the closing token arrives); trying to fully suppress the flicker is rarely worth the complexity.</p>
+<p>Structured output (JSON mode / tool calls) is the harder case, because the payload isn't valid JSON until the last token lands. Don't try to <code>JSON.parse</code> a growing string on every delta — it will throw on every intermediate chunk. Either wait for the block to close before parsing (fine if the JSON is small and arrives quickly), or use a streaming/partial JSON parser that tolerates truncated input and exposes whatever keys have resolved so far. If you're rendering a tool-call argument live — say, showing a search query as it's being typed by the model — a partial-JSON tolerant parser is the only way to do that without flashing parse errors.</p>
+
+<h2 id="backpressure-and-cancellation">Backpressure, error handling, and cancellation mid-stream</h2>
+<p>A stream can fail after it's already started — rate limits, a dropped upstream connection, a content filter trip. Because headers are already sent (200 OK, <code>text/event-stream</code>), you can't fall back to a normal HTTP error response once generation begins; you have to send an error as an SSE event and let the client interpret it. Design one dedicated event type for this from the start (an <code>event: error</code> line or a JSON payload with a <code>type: "error"</code> field) rather than discovering mid-incident that your client has no way to distinguish a truncated-but-successful stream from one that died.</p>
+<p>Cancellation should be cheap and explicit in both directions: the client aborts its <code>fetch</code>/<code>EventSource</code> (call <code>.close()</code> or abort the <code>AbortController</code>) when the user clicks stop or navigates away, and your server must be wired to notice that disconnect and abort the upstream model call — see the <code>req.on('close')</code> handler above. Skipping that half of the loop is the single most common streaming bug: the UI looks cancelled but the backend keeps burning tokens against the model API in the background.</p>
+
+<h2 id="ui-considerations">UI details that matter more than they seem</h2>
+<p>A few small things separate a streaming UI that feels solid from one that feels janky: batch DOM updates (append to a string buffer and flush on <code>requestAnimationFrame</code> rather than re-rendering on every single delta, especially for React where naive per-token state updates will visibly stutter), show a distinct "thinking" state before the first token arrives versus mid-stream, auto-scroll only if the user hasn't manually scrolled up, and disable the input/send button until the stream closes or errors so a second request can't race the first.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring llm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add streaming on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with llm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Approach</th><th>Best for</th><th>Cost</th></tr>
+  <tr><td>SSE</td><td>One-directional LLM token streaming, chat UIs</td><td>Low — plain HTTP, auto-reconnect</td></tr>
+  <tr><td>WebSockets</td><td>Bidirectional mid-stream steering, multiplexed streams</td><td>Higher — connection management, no proxy-friendliness by default</td></tr>
+  <tr><td>Chunked HTTP (no SSE framing)</td><td>Simple raw text streaming, no event typing needed</td><td>Low, but you lose reconnection and event semantics</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on streaming llm responses to ui. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>None of this requires a framework. The core loop — open a stream, forward deltas, tolerate partial JSON, propagate cancellation both ways — is a few dozen lines on top of whatever HTTP server you already run, and it's the difference users actually notice between a demo and a product.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

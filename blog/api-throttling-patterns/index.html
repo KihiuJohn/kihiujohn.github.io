@@ -93,89 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-api-throttling-patterns-matters-in-production">Why API Throttling Patterns matters in production</h2>
-<p>Why API Throttling Patterns matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Throttling and rate limiting are often used interchangeably, but the useful distinction is that rate limiting typically rejects requests outright once a threshold is crossed, while throttling slows them down — delaying, queuing, or degrading service gracefully rather than returning a hard error. Which patterns you reach for depends on whether you're protecting your own infrastructure or shaping traffic for someone else's benefit.</p>
+<h2 id="token-bucket-vs-leaky-bucket">Token bucket vs. leaky bucket</h2>
+<p>Token bucket is the most common algorithm: a bucket holds tokens up to a cap, tokens refill at a fixed rate, and each request consumes one. This naturally allows bursts — a client that's been idle can fire a flurry of requests up to the bucket's capacity before being throttled — which suits most real traffic patterns, since legitimate clients are bursty rather than perfectly steady. Leaky bucket enforces the opposite property: requests go into a queue and drain out at a strictly constant rate, smoothing bursts into a steady stream regardless of how they arrived. Token bucket is the better default for API rate limiting because it tolerates legitimate burstiness; leaky bucket is the better fit when you need to protect a downstream system that genuinely cannot handle bursts at all, like a legacy database with a hard connection cap.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiThrottlingExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Throttling(Api doc)
-    {
-        // Custom throttling logic for api throttling patterns
-        if (doc?.Throttling == null) return;
-        Base.Throttling(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · TOKEN BUCKET, MINIMAL FORM</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>class TokenBucket:
+    def __init__(self, capacity, refill_rate):
+        self.capacity = capacity
+        self.tokens = capacity
+        self.refill_rate = refill_rate  # tokens per second
+        self.last_check = time.monotonic()
+
+    def allow(self):
+        now = time.monotonic()
+        elapsed = now - self.last_check
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)
+        self.last_check = now
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        return False</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on api throttling patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="sliding-window-more-accurate-more-expensive">Sliding window: smoother limits at a memory cost</h2>
+<p>Fixed-window counters (reset the count every 60 seconds on the clock) are simple but have an edge case: a client can send a full window's worth of requests in the last second of one window and again in the first second of the next, doubling the effective rate right at the boundary. A sliding window — weighting the previous window's count by how much of it overlaps the current moment, or tracking individual request timestamps — avoids that burst-at-the-boundary problem at the cost of more state per client. For most APIs, a sliding window approximation (weighted average of the current and previous fixed windows) gets close enough accuracy without the cost of storing every timestamp.</p>
+<div class="callout">
+  <strong>Fixed windows are fine until someone notices the boundary trick</strong>
+  <p>The double-burst-at-the-boundary problem in fixed windows is rarely worth fixing pre-emptively. Ship the simple version, and upgrade to sliding window only if you observe clients actually exploiting the edge.</p>
+</div>
+<h2 id="per-key-vs-global-throttling">Per-key throttling vs. global capacity protection</h2>
+<p>Throttling needs to happen at more than one granularity. Per-API-key or per-user limits enforce fairness and plan tiers — one noisy customer shouldn't be able to degrade service for everyone else. A global limit protects total system capacity regardless of how it's distributed across keys — useful during a traffic spike or a partial outage where even well-behaved, individually-compliant clients can collectively overwhelm a degraded backend. Systems that only implement per-key limits can still fall over if enough distinct keys hit the API simultaneously; you need both layers.</p>
+<h2 id="graceful-degradation-over-hard-rejection">Graceful degradation instead of a flat rejection</h2>
+<p>A 429 response is the blunt tool. A more considerate throttling strategy degrades gracefully first: serve a cached or slightly stale response instead of a fresh computed one, drop optional fields from the response to reduce backend load, or queue the request with a delay rather than rejecting it outright. This matters most for internal APIs where you control both ends and can afford a slower response far more easily than a failed one — for public APIs, a clear 429 with a <code>Retry-After</code> header is usually the more honest contract.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Always return Retry-After on a throttled response</strong>
+  <p>A 429 without guidance on when to retry pushes clients toward guessing — usually with an aggressive retry loop that makes the overload worse. A concrete <code>Retry-After</code> value turns throttling into cooperative backoff instead of a fight.</p>
 </div>
-<h2 id="api-implementation-walkthrough">Api implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the throttling is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for api
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-api">Performance and observability for api</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of throttling in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production throttling looks different from development throttling. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiThrottlingExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Throttling(Api doc)
-    {
-        // Custom throttling logic for api throttling patterns
-        if (doc?.Throttling == null) return;
-        Base.Throttling(doc);
-    }
-}</code></pre>
-</div>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring throttling first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with throttling when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Pattern</th><th>Behavior under load</th><th>Best for</th></tr>
+  <tr><td>Token bucket</td><td>Allows bursts up to capacity</td><td>Typical API rate limiting</td></tr>
+  <tr><td>Leaky bucket</td><td>Strictly smooths to a constant rate</td><td>Protecting burst-intolerant downstreams</td></tr>
+  <tr><td>Fixed window</td><td>Simple, has a boundary-burst edge case</td><td>Low-stakes limits, quick to implement</td></tr>
+  <tr><td>Sliding window</td><td>Smooth, more state per client</td><td>Limits that need to be precise</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api throttling patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Start with a token bucket per API key plus a global capacity ceiling — it covers the overwhelming majority of real traffic shapes. Add sliding-window precision or graceful degradation only once you've observed a specific gap the simple version doesn't cover, and always give a throttled client a concrete number to retry against.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

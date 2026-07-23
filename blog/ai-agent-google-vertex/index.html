@@ -93,98 +93,41 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="the-role-of-vertex-in-the-agent-loop">The role of vertex in the agent loop</h2>
-<p>The role of vertex in the agent loop is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Vertex AI is Google's umbrella for the Gemini model family, and building an agent on it means dealing with three things that don't exist on a bare chat API: the SDK split between the older <code>google-generativeai</code> client and the newer <code>google-genai</code> unified SDK, native grounding via Google Search, and function calling that behaves slightly differently from OpenAI's and Anthropic's depending on whether you're on Gemini 1.5 or 2.x. None of that is exotic once you've seen it once, but the gaps between "the demo works" and "this survives production traffic" are the same gaps every LLM integration has.</p>
+<h2 id="setting-up-the-vertex-client">Setting up the Vertex client</h2>
+<p>Use the Vertex AI endpoint (<code>google-genai</code> SDK with <code>vertexai=True</code>) rather than the consumer Gemini API key for anything production-facing — Vertex gives you IAM-scoped service accounts, VPC-SC support, regional endpoint pinning, and quota that's tied to a GCP project rather than a personal key. The trade-off is more setup: a service account, a project ID, and a region have to be configured before the first call, versus a single API key on the consumer endpoint. If you're prototyping, start with the API key; the moment you need audit logging or a data-residency guarantee, move to Vertex proper.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · CLIENT SETUP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from google import genai
+from google.genai import types
 
-def list_google(query: str) -> str:
-    """List google matching the query."""
-    response = requests.get(
-        f"https://api.example.com/google",
-        params={"q": query}
-    )
-    return response.json()
+client = genai.Client(
+    vertexai=True,
+    project="my-gcp-project",
+    location="us-central1",
+)
 
-tools = [Tool(name="google", func=list_google, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="what-google-vertex-ai-acumatica-integration-actually-does">What Google Vertex AI + Acumatica Integration actually does</h2>
-<p>In the work I have done on google vertex ai + acumatica integration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>When the work moves from design to production, the questions change. The google is not the question; the failure mode of the vertex is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
+response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents="Summarize the open support tickets from the last 24 hours",
+    config=types.GenerateContentConfig(
+        tools=[get_tickets_tool],
+        temperature=0.2,
+    ),
 )</code></pre>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="function-calling-on-gemini">Function calling on Gemini</h2>
+<p>Gemini's function-calling loop is conceptually the same as OpenAI's and Anthropic's — the model returns a structured call instead of text, you execute it, and you send the result back as a follow-up turn — but the response object shape differs enough that a thin adapter layer pays for itself if you're supporting multiple providers. Gemini also supports parallel function calls and, as of the 2.x models, "compositional" calling where the model can chain tool outputs into a second call without a round trip back to your orchestration code for simple cases. Don't rely on that for anything with side effects; keep execute-and-confirm on your side of the loop for writes, and only let the model chain freely for read-only lookups.</p>
+<h2 id="grounding-with-google-search">Grounding with Google Search</h2>
+<p>Vertex's built-in Google Search grounding tool is the one capability that's genuinely differentiated from the other major providers — you attach it as a tool and Gemini decides when to issue a search and cites sources in the response, without you standing up your own retrieval pipeline. It's useful for anything time-sensitive (current events, pricing, recent releases) but it is not a substitute for RAG over your own private documents. Use grounding for "what's true on the public internet right now" and your own vector store or search index for "what's true about our data" — mixing the two into one tool call makes it hard to tell which source informed which claim.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Grounding citations still need verification</strong>
+  <p>Grounded responses come back with source URLs attached, which makes them look more trustworthy than they are. The model can still misattribute a claim to a source that doesn't actually support it. If the output feeds a decision that matters, surface the citations to the end user rather than trusting the summary blindly.</p>
 </div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The performance of vertex in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Production vertex looks different from development vertex. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_google(query: str) -> str:
-    """List google matching the query."""
-    response = requests.get(
-        f"https://api.example.com/google",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="google", func=list_google, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring vertex first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add google on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with vertex when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="safety-settings-and-context-caching">Safety settings and context caching</h2>
+<p>Vertex exposes per-category safety thresholds (harassment, hate speech, sexually explicit, dangerous content) that block or allow content independently of your own guardrail layer — treat these as a coarse floor, not your actual safety system, since they're tuned for general-purpose harm categories and won't catch domain-specific issues like a customer-support agent giving legal advice it shouldn't. Separately, for agents that reuse a large system prompt or document context across many calls, Vertex's context caching cuts cost meaningfully on Gemini's per-token pricing — cache the static instructions and RAG context, and only send the turn-specific delta on each call.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on google vertex ai + acumatica integration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Vertex AI gets you IAM-grade access control and a genuinely useful built-in search-grounding tool, at the cost of more setup than a bare API key and an SDK surface that's still catching up to OpenAI's and Anthropic's in ergonomics. Use it when data residency or centralized GCP billing matter, keep your own guardrail and RAG layers regardless of provider, and don't let compositional function calling touch anything with a side effect without a confirmation step.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

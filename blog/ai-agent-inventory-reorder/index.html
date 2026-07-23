@@ -93,98 +93,57 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>How to evaluate agent in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Reorder decisions are a good fit for an LLM-orchestrated agent for one reason: the inputs are scattered across systems (POS or ERP sales history, supplier lead times, current on-hand, open POs, seasonality) and the output is a judgment call that pure statistical forecasting handles poorly when demand is noisy or intermittent. The wrong mental model is "the AI decides what to order." The right one is "the agent assembles the evidence and proposes a number, a deterministic reorder-point calculation checks it against policy, and a human approves anything above a materiality threshold."</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="forecasting-is-not-the-agents-job">Forecasting is not the agent's job</h2>
+<p>Don't ask an LLM to predict next month's demand from a chat prompt — that's a regression problem, and classical methods (moving average, exponential smoothing, or a proper model like Prophet or a gradient-boosted forecaster for higher-value SKUs) will beat an LLM's guess and are far cheaper to run at scale across thousands of SKUs. The agent's job is upstream and downstream of the forecast: pulling the right data together, catching signals a pure time-series model misses (a supplier email saying lead time just doubled, a marketing calendar showing a promotion next week), and turning a raw reorder quantity into a readable recommendation with reasoning attached. Use the LLM for synthesis and communication, the stats model for the number.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on ai agent for inventory reorder optimisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-inventory-in-the-agent-loop">The role of inventory in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the inventory is.</p>
+<h2 id="reorder-point-as-a-tool-not-a-guess">Reorder point as a deterministic tool call</h2>
+<p>Expose your reorder-point formula as a tool the agent calls, not something it computes in its head from token predictions. Classic reorder point is <code>ROP = (average daily demand × lead time in days) + safety stock</code>, with safety stock sized off demand and lead-time variability. The agent's contribution is populating that formula correctly — pulling actual lead time from the last N purchase orders rather than the supplier's quoted number, which drifts — and flagging when a SKU's demand pattern doesn't fit the assumptions (a launch product with three weeks of history, a seasonal item about to hit its peak).</p>
+
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · REORDER TOOL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def calculate_reorder(sku: str) -> dict:
+    """Deterministic ROP calc — the agent calls this, never estimates it."""
+    demand = get_daily_demand_stats(sku, window_days=90)
+    lead_time = get_actual_lead_time_days(sku)  # from PO history, not quoted
+    safety_stock = Z_SCORE_95 * demand.stddev * (lead_time ** 0.5)
+    rop = (demand.mean * lead_time) + safety_stock
+    on_hand = get_on_hand(sku)
+    open_po_qty = get_open_po_quantity(sku)
+
+    return {
+        "sku": sku,
+        "reorder_point": round(rop),
+        "current_position": on_hand + open_po_qty,
+        "needs_reorder": (on_hand + open_po_qty) < rop,
+        "suggested_qty": max(0, round(rop * 1.5 - (on_hand + open_po_qty))),
+        "confidence": "low" if demand.sample_days < 30 else "normal",
+    }
+
+# Agent calls this per flagged SKU, then explains the "why" in plain language
+# using the returned fields plus any qualitative context it retrieved.</code></pre>
 </div>
-<h2 id="what-ai-agent-for-inventory-reorder-optimisation-actually-does">What AI Agent for Inventory Reorder Optimisation actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="grounding-with-retrieval-not-vibes">Ground the recommendation in retrieved context, not vibes</h2>
+<p>A reorder recommendation without a citation to real data is not more useful than a spreadsheet formula — arguably less, since it's harder to audit. Structure the agent's tool access so every claim in its recommendation traces to a retrieved fact: "reorder 400 units of SKU-4471; demand has run 18% above the 90-day average for the last 3 weeks (see sales report), and the last two POs to this supplier took 21 days instead of the quoted 14." That's RAG in the practical sense — retrieval over your own transactional data, not a vector database of PDFs — and it's what makes a buyer trust the output enough to act on it without re-deriving it themselves.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Cite the source system, not just the number</strong>
+  <p>Require the model's system prompt to demand a source for every quantitative claim in a recommendation — order ID, report name, or date range. This is cheap to enforce and turns "trust me" outputs into outputs a buyer can verify in thirty seconds.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of inventory in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production inventory looks different from development inventory. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="the-approval-threshold">Set the approval threshold by dollar exposure, not by SKU count</h2>
+<p>Auto-approve reorders below a spend threshold and route everything else to a buyer for confirmation — the threshold should be a dollar amount tied to your working-capital tolerance, not a flat rule like "always ask for restocks over 100 units," which treats a $2 fastener the same as a $2,000 component. Most inventory agents that get adopted successfully start with a low auto-approve ceiling and raise it only after enough approved recommendations have gone through without correction to justify the trust.</p>
+<div class="callout-warn">
+  <strong>Watch for the demand-shock blind spot</strong>
+  <p>Reorder-point math assumes historical demand is a reasonable predictor of near-term demand. It isn't, right after a demand shock — a viral product mention, a competitor stockout, a regulatory change. Have the agent flag any SKU where the last 7 days deviate sharply from the 90-day baseline for manual review instead of letting the formula smooth over a spike it can't yet explain.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring inventory first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with inventory when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+
+<h2 id="closing-the-loop-with-outcomes">Close the loop by tracking what happened after</h2>
+<p>The single highest-value thing you can add after launch is feeding actual outcomes back into evaluation: did the SKU stock out anyway, did it overstock, was the buyer's edit to the suggested quantity significant. Log the agent's recommendation, the buyer's final decision, and the outcome 30/60/90 days later. That dataset is what tells you whether to raise the auto-approve threshold, whether a particular supplier's lead-time estimate needs recalibrating, and whether the agent's qualitative reasoning (not just the math) is actually adding signal or just noise dressed up in confident prose.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for inventory reorder optimisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Keep the forecasting math in a deterministic tool, use the LLM to gather scattered context and explain the recommendation in language a buyer can verify, and gate anything above a dollar threshold behind human approval. The payoff isn't replacing the buyer — it's cutting the time they spend hunting down lead times and sales history before they can make the call they were always going to make.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,89 +93,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="why-api-developer-portal-a-field-guide-matters-in-production">Why API Developer Portal — A Field Guide matters in production</h2>
-<p>Why API Developer Portal — A Field Guide matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A developer portal's real job is reducing time-to-first-successful-call. Every day a new integrator spends confused before their first working request is a day they might spend evaluating a competitor's API instead — the portal is marketing and support infrastructure disguised as documentation.</p>
+<h2 id="interactive-docs-generated-from-the-spec">Generate docs from the OpenAPI spec, don't hand-write them</h2>
+<p>Docs hand-written separately from the API implementation drift the moment someone ships a change without remembering to update a markdown file somewhere. Tools like Redoc, Stoplight, or Scalar render interactive reference documentation directly from an OpenAPI/Swagger spec, so the docs are provably accurate as of the last deploy — the spec becomes the single source of truth instead of a parallel, decaying artifact. The spec should be generated from code annotations or contract tests wherever possible, not maintained as a hand-written YAML file that can also drift.</p>
+<h2 id="try-it-now-with-real-authentication">"Try it now" needs to work with the developer's own credentials</h2>
+<p>An interactive API explorer that only shows example requests without letting a developer substitute their own API key and actually fire the request off is a documentation viewer, not a developer tool. The highest-value single feature on a portal is a working "Try it" panel scoped to sandbox or test-mode credentials, so the first successful call happens inside the docs rather than requiring a separate Postman setup before anyone can validate anything.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiDeveloperExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Developer(Api doc)
-    {
-        // Custom developer logic for api developer portal
-        if (doc?.Developer == null) return;
-        Base.Developer(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · OPENAPI SECURITY SCHEME FOR TRY-IT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Use your sandbox key (starts with sk_test_) here to
+        try requests directly from this page against test data.
+security:
+  - ApiKeyAuth: []</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on api developer portal — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="self-service-key-management">Self-service key issuance and sandbox environments</h2>
+<p>Requiring a sales call or a support ticket to get an API key is the single biggest drop-off point for developer-led adoption — evaluators self-select out rather than wait. A portal with self-service signup, an isolated sandbox environment seeded with realistic test data, and instantly issued test-mode keys lets a developer go from landing on the docs to a successful call in minutes, which is the actual benchmark portals like Stripe's and Twilio's are built around.</p>
+<div class="callout">
+  <strong>Sandbox data needs to be realistic, not empty</strong>
+  <p>A sandbox account with zero existing records forces every evaluator to write create-then-read boilerplate before they can see anything meaningful. Seed sandbox accounts with representative sample data (a handful of orders, customers, whatever the domain is) so a GET request on day one returns something useful, not an empty array.</p>
+</div>
+<h2 id="sdks-and-code-samples-per-language">Auto-generated SDKs beat hand-maintained ones — mostly</h2>
+<p>Generating client SDKs from the OpenAPI spec (via OpenAPI Generator, or commercial tools like Speakeasy and Fern) keeps every language binding in sync with the API automatically, at the cost of sometimes-awkward generated code compared to a hand-crafted SDK. Most API-first companies now generate SDKs and hand-polish the highest-traffic languages (Python, JavaScript) on top of the generated base rather than maintaining every language's SDK by hand from scratch — full hand-maintenance across 6+ languages rarely stays in sync with the API long-term.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Code samples must match the current API version</strong>
+  <p>A documentation page showing a code sample against a deprecated field or a removed endpoint actively damages trust the moment a developer copies it and it fails. Tie code sample generation to the same versioned spec that drives the reference docs, so a spec update regenerates samples automatically instead of leaving stale ones to be found by users.</p>
 </div>
-<h2 id="api-implementation-walkthrough">Api implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the developer is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for api
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-api">Performance and observability for api</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of developer in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production developer looks different from development developer. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiDeveloperExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Developer(Api doc)
-    {
-        // Custom developer logic for api developer portal
-        if (doc?.Developer == null) return;
-        Base.Developer(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="changelog-and-status-visibility">A visible changelog and status page close the trust loop</h2>
+<p>Developers building against an API want to know what changed and whether the API is currently healthy without asking support. A structured changelog (dated entries, tagged by breaking/non-breaking) alongside a public status page (Statuspage, Better Uptime, or self-hosted) covers the two questions integrators ask most often, and answering them without a support ticket is a direct measure of portal quality.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring developer first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with developer when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Portal element</th><th>What it solves</th></tr>
+  <tr><td>Spec-generated reference docs</td><td>Docs that can't drift from actual behavior</td></tr>
+  <tr><td>Try-it-now with real auth</td><td>First successful call happens on the docs page</td></tr>
+  <tr><td>Self-service sandbox + keys</td><td>No sales gate before evaluation can start</td></tr>
+  <tr><td>Generated SDKs</td><td>Every language binding stays in sync automatically</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api developer portal — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The portal features that move the needle are the ones that shrink time-to-first-call: docs generated from a spec that can't drift, a try-it panel that uses the developer's own key, and self-service sandbox access with no sales gate in front of it. Everything else — changelogs, status pages, polished SDKs — matters for retention and trust once developers are already through the door.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

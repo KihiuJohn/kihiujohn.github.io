@@ -93,98 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When to use it (and when not to) is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>An agent that can post a bill, adjust a quantity, or release a payment is a different risk category than one that only answers questions. Oversight is the design work that decides, deliberately, which actions an agent can take unsupervised, which need a human to approve, and how every action — approved or not — gets recorded so an auditor (or a confused finance manager) can reconstruct exactly what happened and why.</p>
+<h2 id="not-every-action-deserves-the-same-oversight">Not every action deserves the same oversight</h2>
+<p>Treating "read a record" and "post a journal entry" identically is either too restrictive (nobody wants to approve every lookup) or too permissive (nobody wants an agent posting entries unsupervised). Classify actions by blast radius before writing any oversight logic: read-only lookups need none, reversible low-value actions (draft a message, tag a record) can run unsupervised with logging, and anything that moves money, changes a customer-facing document, or is hard to reverse needs a human in the loop before it executes, not after.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · ACTION CLASSIFICATION GATE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>ACTION_TIERS = {
+    "get_invoice_status": "auto",
+    "draft_customer_email": "auto",
+    "apply_credit_memo": "approval_required",
+    "post_ap_bill": "approval_required",
+    "release_payment": "approval_required",
+}
 
-def list_oversight(query: str) -> str:
-    """List oversight matching the query."""
-    response = requests.get(
-        f"https://api.example.com/oversight",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="oversight", func=list_oversight, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def execute(action_name: str, args: dict, requested_by: str):
+    tier = ACTION_TIERS.get(action_name, "approval_required")  # default deny
+    log_action(action_name, args, requested_by, tier)
+    if tier == "auto":
+        return run_action(action_name, args)
+    return queue_for_approval(action_name, args, requested_by)</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-oversight">Latency and cost tradeoffs for oversight</h2>
-<p>In the work I have done on ai oversight and audit — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<div class="callout-warn">
+  <strong>Default to approval-required for anything unclassified</strong>
+  <p>New tools get added over time. A new action that isn't explicitly in the "auto" list should require approval by default, not run unsupervised because someone forgot to classify it. Fail closed, not open.</p>
 </div>
-<h2 id="prompt-patterns-that-work-for-audit">Prompt patterns that work for audit</h2>
-<p>When the work moves from design to production, the questions change. The oversight is not the question; the failure mode of the audit is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-oversight-in-production">How to evaluate oversight in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-role-of-audit-in-the-agent-loop">The role of audit in the agent loop</h2>
-<p>The performance of audit in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="what-ai-oversight-and-audit-a-field-guide-actually-does">What AI Oversight and Audit — A Field Guide actually does</h2>
-<p>Production audit looks different from development audit. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_oversight(query: str) -> str:
-    """List oversight matching the query."""
-    response = requests.get(
-        f"https://api.example.com/oversight",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="oversight", func=list_oversight, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="the-approval-queue-has-to-be-fast-enough-to-use">The approval queue has to be fast enough to use</h2>
+<p>A human-in-the-loop step that takes a day to clear defeats the point of automating the task in the first place — people route around slow approval queues, which quietly reintroduces the risk you built oversight to prevent. Show the approver exactly what will happen in plain terms (amount, account, counterparty) rather than a raw JSON payload, and make approve/reject a single action, not a multi-click form. If approvals consistently take too long, that's a signal the tier classification is too conservative for that action, not that the queue needs to be bypassed.</p>
+<h2 id="the-audit-trail-has-to-survive-the-agent-being-wrong">The audit trail has to survive the agent being wrong</h2>
+<p>Every action — proposed, approved, rejected, or auto-executed — needs a durable record: what was proposed, what data it was based on, who or what approved it, and the actual result from the system of truth (not what the agent said would happen). This is not optional infrastructure you add later; it's what lets you answer "why did this happen" six months after the fact, and it's what most audit frameworks (SOX, internal controls) will explicitly require once an LLM is in the approval chain for financial transactions.</p>
+<h2 id="explaining-the-agents-reasoning-not-just-its-action">Explaining the agent's reasoning, not just its action</h2>
+<p>Logging "posted bill #4821 for $1,200" is necessary but not sufficient. Log the reasoning trace too — which tool calls informed the decision, what data was pulled from Acumatica, what the model's stated justification was. When something goes wrong, "the agent decided to do X" is a much smaller improvement over "the agent did X, based on Y and Z, when the actual PO was for a different amount" — the second version tells you exactly what to fix.</p>
+<h2 id="review-the-tier-boundaries-periodically">Review the tier boundaries periodically</h2>
+<p>Oversight isn't a one-time classification exercise. As an agent proves reliable on a given action class over months of approved-and-correct decisions, it's reasonable to reconsider whether that action still needs a human gate — moving it to auto-with-logging once the error rate has been low for a sustained period. Move in the other direction immediately if an action class produces even one incident; tightening oversight after a near-miss costs far less than the incident it prevents.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring audit first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add oversight on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with audit when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Action class</th><th>Oversight level</th></tr>
+  <tr><td>Read-only lookup</td><td>None, log only</td></tr>
+  <tr><td>Reversible, low value</td><td>Auto-execute, log, sampled review</td></tr>
+  <tr><td>Financial write, hard to reverse</td><td>Human approval before execution</td></tr>
+  <tr><td>Unclassified / new tool</td><td>Approval required by default</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai oversight and audit — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Classify actions by blast radius, gate anything hard to reverse behind a fast human approval step, and log the reasoning as well as the outcome for every action the agent takes. The oversight layer is what makes it defensible to give an agent write access to ERP data at all — skip it and you're trusting prompt engineering to enforce controls that belong in code.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

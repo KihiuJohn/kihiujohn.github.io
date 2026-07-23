@@ -93,98 +93,40 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="the-role-of-route-in-the-agent-loop">The role of route in the agent loop</h2>
-<p>The role of route in the agent loop is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="what-ai-agent-for-route-optimisation-in-field-service-actually-does">What AI Agent for Route Optimisation in Field Service actually does</h2>
-<p>In the work I have done on ai agent for route optimisation in field service, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the route is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Route optimisation for field service technicians is a classic operations-research problem — the vehicle routing problem, essentially — and it's been solved well by non-AI algorithms for decades. The interesting question isn't whether an LLM can compute an optimal route (it can't, reliably); it's where an agent adds value around a solver that's already doing the actual optimisation.</p>
+<h2 id="the-optimiser-is-not-the-llm">The optimiser is not the LLM</h2>
+<p>Route sequencing with time windows, technician skills, and travel time is a constraint satisfaction problem with well-established solvers — OR-Tools, or a dedicated routing engine, applied to the day's Acumatica Field Service appointments (<strong>FS300100</strong> service orders with their scheduled time windows and required skill sets). Asking an LLM to directly output an optimal sequence of stops is asking it to do arithmetic it's bad at; LLMs don't reliably reason about minimizing total travel distance across a dozen constrained stops, and a wrong route costs a technician real hours on the road. Keep the actual optimisation in a real solver and give the LLM a narrower job around it.</p>
+<h2 id="where-the-agent-actually-helps">Where the agent actually helps</h2>
+<p>The genuinely useful agent work is upstream and downstream of the solver: turning a dispatcher's natural-language request ("swap technician B onto the downtown jobs, they know that customer") into a constraint change the solver can consume, and turning the solver's output — a list of stop sequences and ETAs — into a plain-language summary a dispatcher or technician can scan in five seconds instead of parsing a table. This is a translation layer, not a computation layer, and it's where the LLM's actual strength (language, not arithmetic) applies.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Never let the model silently override a constraint</strong>
+  <p>If a dispatcher's natural-language instruction conflicts with a hard constraint (a technician lacking a required certification, a time window that's already full), the agent should surface the conflict back to the dispatcher explicitly, not quietly produce a route that ignores it. A route that looks reasonable but silently violates a skill requirement is worse than an error message.</p>
 </div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="handling-same-day-disruption">Handling same-day disruption</h2>
+<p>The case where an agent earns its keep operationally is mid-day disruption: a job runs long, a technician calls in sick, an emergency service request comes in. Re-running the full solver from scratch for every disruption is expensive and slow; a well-scoped agent can decide when a full re-optimisation is warranted versus when a local patch (reassign the one affected stop, extend the one time window) is enough, and hand off to the solver either way rather than improvising a route itself.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The performance of route in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Production route looks different from development route. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · DISPATCH-CHANGE ROUTING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def handle_disruption(event, current_routes):
+    if event.type == "single_job_delay" and event.delay_minutes < 45:
+        # local patch: push downstream stops for one technician
+        return patch_single_route(current_routes, event.technician_id, event.delay_minutes)
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    # technician unavailable, or major delay: re-run the real solver
+    remaining_jobs = extract_unstarted_jobs(current_routes)
+    return routing_solver.solve(remaining_jobs, constraints=current_constraints())</code></pre>
 </div>
+<h2 id="feeding-the-solver-good-inputs">Feeding the solver good inputs</h2>
+<p>Route quality depends more on input data quality than on solver sophistication. Stale service-address geocoding, missing skill tags on technicians, or optimistic service-duration estimates in Acumatica will produce a technically optimal route around bad data. Before investing in a fancier optimisation layer, audit whether FS300100 appointment durations reflect actual historical job lengths and whether technician skill assignments are actually maintained — this is unglamorous data hygiene work, but it moves route quality more than model choice does.</p>
+<h2 id="measure-against-the-manual-baseline">Measure against the manual baseline</h2>
+<p>Before rolling this out broadly, compare solver-generated routes against what an experienced dispatcher already produces manually for a representative week. In mature field service operations, a good dispatcher's routes are often close to optimal already, and the win is less about beating their route quality and more about doing it in seconds instead of forty minutes, and handling disruption without dropping other technicians' schedules.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring route first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with route when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>Responsibility</th></tr>
+  <tr><td>Routing solver (OR-Tools etc.)</td><td>Actual constraint-satisfying route optimisation</td></tr>
+  <tr><td>Agent</td><td>Natural-language input/output translation, disruption triage</td></tr>
+  <tr><td>Data hygiene</td><td>Accurate durations, addresses, skill tags — biggest quality lever</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for route optimisation in field service. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Route optimisation is a solved problem for the actual math — lean on a real constraint solver, not an LLM, for sequencing. The agent's job is translating dispatcher intent into solver constraints, summarizing output in plain language, and deciding when a disruption needs a full re-solve versus a quick patch. Data hygiene in Acumatica's Field Service module will move the needle more than any model upgrade.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

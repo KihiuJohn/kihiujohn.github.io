@@ -93,81 +93,62 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>Performance: cost, latency, freshness is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM vector
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+    <p>Once you've wired an LLM into an internal tool — answering questions against a knowledge base, a set of Acumatica help docs, or a pile of PDFs a client dropped in a shared drive — the first hard problem isn't the model, it's retrieval. You need to find the handful of paragraphs that actually answer the question out of thousands of documents, and pass only those to the model. That's what a vector database is for. Here's what actually matters when you build one of these, and where teams get it wrong.</p>
+<h2 id="what-an-embedding-actually-is">What an embedding actually is</h2>
+<p>An embedding model turns a chunk of text into a fixed-length vector of floats — typically 384, 768, or 1536 dimensions depending on the model. The property that makes this useful is that semantically similar text ends up close together in that vector space, measured by cosine similarity or dot product. "Cancel a purchase order" and "void a PO" land near each other even though they share almost no words. That's the whole value proposition: it's semantic similarity, not keyword matching.</p>
+<p>It's also the source of most surprises. Embeddings don't understand negation well ("orders that are not overdue" can retrieve overdue-order content), they conflate topically similar but factually different things, and they have no idea what's true — they only know what's *near*. If your retrieval keeps surfacing the wrong fiscal year or the superseded version of a policy, that's not a bug in the vector database, it's a property of similarity search you have to design around.</p>
+<h2 id="chunking-is-where-quality-is-won-or-lost">Chunking is where quality is won or lost</h2>
+<p>Before anything gets embedded, you have to split source documents into chunks, and this decision affects retrieval quality more than which vector database you pick. Chunk too large (a full page) and you dilute the vector with unrelated content, so a specific question matches a vaguely-relevant blob. Chunk too small (one sentence) and you lose the surrounding context the model needs to actually answer — "the fee is 2%" is useless without knowing which fee.</p>
+<p>A reasonable starting point for prose documentation is 300-500 tokens per chunk with roughly 15-20% overlap between consecutive chunks, so a sentence that got cut off at a boundary still shows up whole in the next chunk. For structured content — API references, tables, code samples — chunk along natural boundaries (one function, one table, one config block) rather than a fixed token count. Whatever you pick, store the source document ID and section heading alongside each chunk; when retrieval goes wrong, that metadata is how you debug it.</p>
+<h2 id="do-you-actually-need-a-dedicated-vector-database">Do you actually need a dedicated vector database?</h2>
+<p>For a lot of ERP-adjacent teams, the answer is no. If you're already running Postgres — which most Acumatica and Laravel shops are, one way or another — the <code>pgvector</code> extension gives you a vector column type and approximate nearest-neighbor indexes (IVFFlat or HNSW) in the same database that holds your actual records. No new service to deploy, back up, monitor, or explain to ops. For document sets in the tens of thousands to low millions of chunks, pgvector's HNSW index is fast enough that users won't notice the difference versus a dedicated store.</p>
+<p>Where a dedicated vector database (Pinecone, Qdrant, Weaviate, Chroma) earns its keep is at real scale — tens of millions of vectors with tight latency SLAs — or when you need features pgvector doesn't have out of the box, like multi-tenant namespace isolation at scale, built-in hybrid search scoring, or horizontal scaling independent of your primary database. If you're not at that scale, adding a second data store just to hold embeddings is infrastructure you now have to run, patch, and back up for no measurable retrieval improvement.</p>
+<div class="callout">
+  <strong>Start with what you have</strong>
+  <p>If the document set is under a few hundred thousand chunks and you already run Postgres, add pgvector before you evaluate a dedicated vector database. Migrate later if you actually hit a scaling wall — most teams never do.</p>
 </div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>In the work I have done on vector databases for erp ai — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="a-minimal-pgvector-retrieval-query">A minimal pgvector retrieval query</h2>
+<p>The pattern is: embed the incoming question with the same model used to embed the documents, then search for the nearest chunks by distance.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · PGVECTOR</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- schema
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE doc_chunks (
+  id           bigserial PRIMARY KEY,
+  document_id  text NOT NULL,
+  section      text,
+  content      text NOT NULL,
+  embedding    vector(1536),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON doc_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- retrieval: nearest 8 chunks to the query embedding
+SELECT document_id, section, content,
+       1 - (embedding &lt;=&gt; $1) AS similarity
+FROM doc_chunks
+ORDER BY embedding &lt;=&gt; $1
+LIMIT 8;</code></pre>
+</div>
+<p>The <code>$1</code> parameter is the query embedding, generated at request time by calling the same embedding model against the user's question. The <code>&lt;=&gt;</code> operator is pgvector's cosine distance operator — smaller means more similar, which is why the similarity score subtracts it from 1.</p>
+<h2 id="hybrid-search-vector-alone-is-not-enough">Hybrid search: vector alone is not enough</h2>
+<p>Pure vector search struggles with exact matches — part numbers, invoice IDs, error codes, config keys — because embeddings compress away exact token identity in favor of semantic meaning. A question like "what does error E-4021 mean" often retrieves conceptually-related error handling text without ever surfacing the chunk containing "E-4021" verbatim.</p>
+<p>The fix is hybrid search: run a traditional keyword search (Postgres full-text search with <code>tsvector</code>, or BM25 in a search engine) alongside the vector search, then combine the two ranked lists — commonly with reciprocal rank fusion — before picking the top chunks to send to the model. This is a few extra lines of SQL if you're already on Postgres, and it meaningfully reduces the "the answer is in the document but retrieval never found it" failure mode, which is usually the single biggest source of bad RAG answers in practice.</p>
+<h2 id="keeping-embeddings-fresh">Keeping embeddings fresh</h2>
+<p>Documents change — a policy gets updated, an invoice template changes, a procedure gets revised — and a stale embedding pointing at superseded content is worse than no retrieval at all, because it looks confident and is wrong. The embedding itself doesn't know its source document changed; nothing invalidates it automatically. You need a re-embedding trigger tied to whatever already tracks document updates (a <code>modified_at</code> column, a webhook from your CMS, a cron job that diffs checksums), and it needs to delete-and-reinsert affected chunks rather than update them in place, since a content change usually shifts chunk boundaries too.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>When the work moves from design to production, the questions change. The vector is not the question; the failure mode of the databases is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.vector > 0).groupBy("databases").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="why-vector-in-the-warehouse-beats-in-the-lake">Why vector in the warehouse beats in the lake</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="schema-evolution-for-databases">Schema evolution for databases</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_vector') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="cost-optimisation-for-vector">Cost optimisation for vector</h2>
-<p>The performance of databases in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="the-testing-pyramid-for-databases">The testing pyramid for databases</h2>
-<p>Production databases looks different from development databases. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM vector
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <strong>Silent staleness is the common failure</strong>
+  <p>Nothing errors when an embedding goes stale — the query still returns a result, it's just the wrong one. Track embedding age against source document age explicitly, and alert when the gap grows past whatever your update cadence should be.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring databases first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add vector on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with databases when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Approach</th><th>Best for</th></tr>
+  <tr><td>In-memory (list of vectors, linear scan)</td><td>Prototypes, under ~10k chunks, no persistence needed between runs.</td></tr>
+  <tr><td>pgvector on existing Postgres</td><td>Most production cases up to low millions of chunks, especially if you already run Postgres and want one less service.</td></tr>
+  <tr><td>Dedicated vector DB (Pinecone, Qdrant, Weaviate)</td><td>Tens of millions+ vectors, strict latency SLAs, multi-tenant isolation at scale.</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on vector databases for erp ai — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of this replaces getting the basics right first: chunk sensibly, store the metadata you'll need to debug bad answers, and don't reach for a new database service before you've actually measured that pgvector can't keep up. Most retrieval problems people blame on "the vector database" turn out to be chunking or staleness issues that no amount of infrastructure fixes.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

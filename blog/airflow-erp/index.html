@@ -93,98 +93,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="what-apache-airflow-for-erp-workflows-actually-does">What Apache Airflow for ERP Workflows actually does</h2>
-<p>What Apache Airflow for ERP Workflows actually does is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_apache(query: str) -> str:
-    """List apache matching the query."""
-    response = requests.get(
-        f"https://api.example.com/apache",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="apache", func=list_apache, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    <p>ERP workflows are a good match for Airflow's execution model: they're batch-shaped, dependency-heavy, and need a retry history you can actually audit. Pulling sales orders, posting AP batches, or reconciling inventory between an ERP and a warehouse are all DAGs in the literal sense — a set of tasks with dependencies, not a stream. The failure modes that matter are different from a typical analytics DAG, though, because ERP APIs are slower, more rate-limited, and less tolerant of duplicate writes.</p>
+<h2 id="modeling-erp-syncs-as-dags">Modeling ERP syncs as DAGs</h2>
+<p>The natural unit of work is one DAG per entity type — orders, invoices, inventory adjustments — rather than one giant DAG that walks the whole ERP schema. Each entity sync typically breaks into extract (pull changed records since the last watermark), stage (land raw JSON or XML, unmodified, somewhere durable), and load (upsert into the warehouse or push transformed records back into the ERP). Keeping extract and load as separate tasks, rather than one fused step, means a transform bug doesn't force you to re-hit the ERP API to retry it.</p>
+<div class="callout">
+  <strong>Watermark on the ERP's timestamp, not your own clock</strong>
+  <p>Use the ERP record's <code>LastModifiedDateTime</code> (or equivalent) as the incremental watermark, not the time your DAG ran. If a task retries or runs late, a self-generated watermark silently skips records that changed during the gap. Store the watermark as XCom or in a small control table keyed by entity, and only advance it after a successful load.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>In the work I have done on apache airflow for erp workflows, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="idempotency-against-erp-apis">Idempotency against ERP write APIs</h2>
+<p>Most ERP integration failures aren't extraction failures, they're double-posting failures from ambiguous retries. If a task pushes a batch of AP bills and times out waiting for a response, you don't know if the ERP received and processed it or not. Design the write task around an idempotency key — many ERP REST endpoints (Acumatica's contract-based API included) accept a client-supplied reference number that lets a retry either update the existing record or safely no-op instead of creating a duplicate.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · IDEMPOTENT WRITE TASK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from airflow.sdk import task
+import hashlib
+
+@task(retries=3, retry_delay=60)
+def post_ap_batch(batch: dict):
+    # deterministic key from batch contents, not a random uuid,
+    # so a retried task reuses the same key as the first attempt
+    idem_key = hashlib.sha256(
+        f"{batch['vendor_id']}:{batch['period']}".encode()
+    ).hexdigest()[:16]
+
+    resp = erp_client.post(
+        "/entity/Default/23.200.001/Bill",
+        json=batch,
+        headers={"Idempotency-Key": idem_key},
+    )
+    resp.raise_for_status()
+    return resp.json()["id"]</code></pre>
+</div>
+<h2 id="rate-limits-and-connection-pooling">Rate limits and connection pooling</h2>
+<p>ERP APIs commonly cap concurrent sessions far lower than a typical SaaS API — Acumatica's default license, for instance, limits concurrent API sessions per endpoint. Airflow's <strong>pools</strong> exist for exactly this: create a pool sized to the ERP's actual concurrency limit and assign every task that hits that ERP instance to it, so parallel task instances queue instead of tripping the ERP's own throttling or session limits.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Don't let backfills bypass the pool</strong>
+  <p>A manually triggered backfill DAG run still respects pool slots, but if you spin up a second DAG that hits the same ERP endpoint outside the pool, you'll blow the concurrency limit anyway. Route every task against a given ERP connection through the same named pool, regardless of which DAG it lives in.</p>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>When the work moves from design to production, the questions change. The apache is not the question; the failure mode of the airflow is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The performance of airflow in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>Production airflow looks different from development airflow. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_apache(query: str) -> str:
-    """List apache matching the query."""
-    response = requests.get(
-        f"https://api.example.com/apache",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="apache", func=list_apache, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="sensors-vs-polling-for-batch-windows">Sensors versus polling for ERP batch windows</h2>
+<p>Some ERP processes — period close, batch posting jobs — run on the ERP's own schedule, not Airflow's. Rather than polling with a classic Sensor (which occupies a worker slot for the whole wait), use a deferrable sensor so the task suspends and frees the worker while it waits, or move to asset-based triggering if the ERP can push a webhook when the batch closes. Airflow 2.4+ handles both patterns natively; picking the wrong one is the usual reason a small Airflow deployment runs out of worker slots during a nightly ERP window.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring airflow first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add apache on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with airflow when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>ERP integration concern</th><th>Airflow mechanism</th></tr>
+  <tr><td>Incremental extraction</td><td>Watermark stored per entity, advanced only on success</td></tr>
+  <tr><td>Duplicate writes on retry</td><td>Idempotency key derived from record content</td></tr>
+  <tr><td>ERP session/concurrency limits</td><td>Named pool sized to the ERP's actual limit</td></tr>
+  <tr><td>Waiting on ERP batch jobs</td><td>Deferrable sensor or asset-triggered DAG</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on apache airflow for erp workflows. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Airflow's value for ERP workflows is less about scheduling — cron could do that — and more about the retry, backfill, and observability semantics that come for free with a DAG run history. Model each entity as its own DAG, treat idempotency as a first-class design constraint rather than an afterthought, and size pools to the ERP's real limits, not Airflow's defaults.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

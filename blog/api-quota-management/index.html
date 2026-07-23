@@ -93,89 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Quota management and rate limiting get talked about together so often that people treat them as the same thing. They're not: rate limiting shapes traffic over short windows to protect capacity, while quotas cap total consumption over a longer period — a day, a month, a billing cycle — to enforce a plan or a budget. Getting quotas right means getting the accounting right, and accounting problems don't forgive sloppy engineering.</p>
+<h2 id="quota-vs-rate-limit-different-problems">Quota vs. rate limit: different problems, different windows</h2>
+<p>A rate limit answers "how fast can you send requests right now" — 100 requests per minute, enforced with a short rolling window. A quota answers "how many can you send this month" — 50,000 requests per billing cycle, tracked over a much longer horizon and usually tied to a plan tier rather than abuse prevention. A caller can be well within their rate limit and still be out of quota, and the two need to be checked independently: rate limiting protects your infrastructure in the moment, quota enforcement protects your business model over time.</p>
+<h2 id="where-quota-state-lives">Where quota state lives, and why it's a hard problem</h2>
+<p>The core engineering challenge is that quota consumption has to be tracked consistently across every instance of your API, under concurrent load, without becoming a bottleneck itself. A naive implementation — read the counter, check it, increment it — has a race condition under concurrency: two simultaneous requests can both read the same "499 of 500 used" state and both proceed, blowing past the cap. The fix is an atomic increment-and-check, typically done in Redis with <code>INCR</code> plus a TTL, or with a database-level atomic update rather than a read-then-write from application code.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiQuotaExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Quota(Api doc)
-    {
-        // Custom quota logic for api quota management
-        if (doc?.Quota == null) return;
-        Base.Quota(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · REDIS ATOMIC QUOTA CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Atomic increment, TTL set only on first request of the period
+MULTI
+INCR quota:acct_4521:2026-07
+EXPIRE quota:acct_4521:2026-07 2678400 NX
+EXEC
+# Application checks the returned INCR value against
+# the account's plan limit — no separate read step,
+# so no window for a race between two concurrent requests</code></pre>
 </div>
-<h2 id="the-quota-edge-cases-i-have-shipped">The quota edge cases I have shipped</h2>
-<p>In the work I have done on api quota management — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Read-then-write quota checks will eventually overcount an account's allowance</strong>
+  <p>Under low concurrency this bug is invisible. Under a traffic spike — the exact moment a customer is most likely to hit their limit — it lets requests through that should have been rejected, and the discrepancy shows up as a billing dispute weeks later.</p>
 </div>
-<h2 id="migration-path-when-api-changes">Migration path when api changes</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the quota is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for api
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-quota-in-production">How to debug quota in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-api-that-works">The version of api that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-api-quota-management-a-field-guide-matters-in-production">Why API Quota Management — A Field Guide matters in production</h2>
-<p>The performance of quota in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production quota looks different from development quota. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiQuotaExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Quota(Api doc)
-    {
-        // Custom quota logic for api quota management
-        if (doc?.Quota == null) return;
-        Base.Quota(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="soft-vs-hard-quota-enforcement">Soft limits, hard limits, and warning thresholds</h2>
+<p>A hard quota rejects every request once the cap is hit — simple, but it turns a customer's success (their usage growing) into a hard outage at the worst possible moment. A soft quota allows overage, often at a different price point, and only hard-stops at some higher ceiling. Most production systems land on a hybrid: warn the customer at 80% via email or a dashboard banner, allow modest overage with a billing consequence, and hard-stop only well past the point where continued consumption is either abusive or a runaway bug on the customer's end.</p>
+<h2 id="resetting-and-resolving-quota-periods">Resetting and resolving quota periods correctly</h2>
+<p>Monthly quotas reset on a billing anniversary, not the calendar month, for most B2B APIs — a customer who signed up on the 15th expects their quota to reset on the 15th, not the 1st. This sounds like a minor detail until you're debugging why a customer's dashboard shows a different number than your billing system; the two need to agree on exactly which period boundary they're using, and that boundary needs to be stored per account, not computed ad hoc in two different places.</p>
+<h2 id="communicating-quota-state-to-the-caller">Communicating quota state back to the caller</h2>
+<p>A caller should never have to guess their quota status by counting rejected requests. Return remaining quota and reset time on every response, not just the rejection — this lets well-behaved clients throttle themselves proactively instead of hammering the API until they get blocked.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring quota first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with quota when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concept</th><th>Time window</th><th>Enforces</th></tr>
+  <tr><td>Rate limit</td><td>Seconds to minutes</td><td>Infrastructure protection</td></tr>
+  <tr><td>Quota</td><td>Days to a billing cycle</td><td>Plan tier / budget</td></tr>
+  <tr><td>Soft quota + overage</td><td>Billing cycle</td><td>Revenue capture without hard outages</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api quota management — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Quota bugs are accounting bugs wearing an engineering costume — get the atomicity and the period boundaries right, and the rest (thresholds, overage policy, dashboards) is product decisions layered on top of a foundation that has to be correct under concurrency from day one.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

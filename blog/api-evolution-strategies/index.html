@@ -93,82 +93,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Fiscalisation is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to push the integration towards being boring, recoverable, and audit-ready. This article is the discipline.</p>
-<h2 id="what-api-evolution-strategies-is-for">What API Evolution Strategies is for</h2>
-<p>What API Evolution Strategies is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+    <p>An API is a promise to every client that already integrated against it. The hard part of API evolution isn't designing the next version — it's changing behaviour without breaking the consumers you can't see and can't force to upgrade on your schedule. Every strategy below is really just a different answer to the same question: how do you change your mind in public without breaking someone else's production system.</p>
+<h2 id="additive-changes-first">Additive changes first</h2>
+<p>The cheapest form of evolution is the change that doesn't require a version bump at all. Adding a new optional field to a response, adding a new endpoint, adding a new enum value a client doesn't recognise yet — these are backward compatible by construction, provided your clients follow Postel's law and ignore fields they don't understand. Most breaking changes in practice aren't forced by necessity; they're the result of not designing the schema to tolerate addition in the first place. A JSON schema with <code>additionalProperties: false</code> turns every future field into a breaking change for strict clients. Default to permissive parsing and you buy yourself years of additive-only evolution before you need anything heavier.</p>
+<div class="callout">
+  <strong>Removing is the breaking change, not adding</strong>
+  <p>Renaming a field is really two operations: add the new name, deprecate the old one, remove the old one later. Treat it that way explicitly rather than as a single atomic rename, and you get a compatibility window for free.</p>
 </div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>In the work I have done on api evolution strategies, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="versioning-strategies">Versioning strategies: URI, header, and content negotiation</h2>
+<p>When a change genuinely breaks the contract, you need a versioning scheme. URI versioning (<code>/v1/orders</code>, <code>/v2/orders</code>) is the most common because it's visible, cacheable, and trivial to route at the gateway or load balancer — the cost is that it encourages whole-resource forking even when only one field changed. Header versioning (a custom <code>API-Version</code> header, or content negotiation via <code>Accept: application/vnd.acme.v2+json</code>) keeps URLs stable and lets you version resources independently, at the cost of being invisible in logs and harder to test with a browser. Neither is objectively correct; URI versioning wins when your clients are external and diverse, header versioning wins when you control the client population and want finer-grained control. Semantic versioning at the API level (not just the SDK) helps only if you're disciplined about what counts as a major bump — most teams aren't, and end up on <code>v2</code>, <code>v3</code> forever with no clear rule for when v4 happens.</p>
+<h2 id="deprecation-as-a-process">Deprecation as a process, not an announcement</h2>
+<p>A deprecation notice in the changelog is not a deprecation process. A real process has four parts: an announced sunset date, a machine-readable signal (the <code>Deprecation</code> and <code>Sunset</code> HTTP headers, RFC 8594, are the standard way to do this), usage telemetry so you know who's still calling the old endpoint, and direct outreach to the accounts still generating traffic in the final weeks. Cutting off an endpoint because "we announced it six months ago" without checking who's still on it is how you end up reverting a deprecation at 2am.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">HTTP · DEPRECATION HEADERS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GET /v1/invoices/4521 HTTP/1.1
+Host: api.example.com
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Deprecation: true
+Sunset: Sat, 01 Nov 2026 00:00:00 GMT
+Link: &lt;https://api.example.com/v2/invoices/4521&gt;; rel="successor-version"
+Warning: 299 - "This endpoint is deprecated, migrate to /v2/invoices"</code></pre>
+</div>
+<h2 id="parallel-running-old-and-new">Running old and new versions in parallel</h2>
+<p>Supporting two major versions simultaneously is expensive — double the test surface, double the bug classes — but it's usually cheaper than a forced migration deadline. The pattern that scales is a thin adapter layer: the new version is the source of truth, and the old version is served by a translation layer that maps old shapes to new ones. This keeps the business logic in one place and confines the compatibility debt to a layer you can delete outright once usage hits zero. Trying to maintain two parallel implementations of the actual logic is how version skew bugs creep in, where v1 and v2 quietly disagree on rounding or timezone handling.</p>
+<h2 id="contract-testing-against-real-consumers">Contract testing against real consumers</h2>
+<p>Schema validation tells you the shape is right; it doesn't tell you a client will still parse the response correctly. Consumer-driven contract testing (Pact is the common tool here) flips the responsibility: each consumer publishes the contract it depends on, and the provider's CI runs those contracts before any deploy. This catches the case schema diffing misses — a client that breaks not because a field left the schema, but because it changed from a string to a number, or an array that used to always have at least one element now can be empty. For public APIs with unknown consumers, a request-diffing approach (replay production traffic against the new version, diff the responses) does a similar job without needing consumers to opt in.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>A green schema diff is not a green light</strong>
+  <p>Schema-compatible does not mean behaviour-compatible. Changing the sort order of a list, or the rounding mode on a currency field, passes every schema check and still breaks a client that depended on the old behaviour implicitly.</p>
 </div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the evolution is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The performance of evolution in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production evolution looks different from development evolution. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
+<h2 id="picking-a-strategy-for-your-api">Picking a strategy for your API</h2>
+<p>Internal APIs with a single, known set of consumers can evolve fast and loose — coordinate the breaking change in a Slack channel and deploy both sides together. Public APIs with unknown, unbounded consumers need the full toolkit: additive-first design, explicit versioning, deprecation headers, and telemetry on who's still calling what. Most teams over-invest in versioning machinery for internal APIs and under-invest in deprecation telemetry for public ones — it's usually the wrong way round.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring evolution first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with evolution when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Strategy</th><th>Best for</th><th>Cost</th></tr>
+  <tr><td>Additive-only changes</td><td>Most day-to-day evolution</td><td>Low — needs disciplined schema design upfront</td></tr>
+  <tr><td>URI versioning</td><td>External, diverse consumers</td><td>Medium — encourages whole-resource forks</td></tr>
+  <tr><td>Header/content negotiation</td><td>Controlled client population</td><td>Medium — harder to observe and debug</td></tr>
+  <tr><td>Parallel version + adapter layer</td><td>Mandatory breaking change with slow migration</td><td>High — until old version usage hits zero</td></tr>
+  <tr><td>Consumer-driven contract tests</td><td>Known consumer set, CI-gated releases</td><td>Medium — requires consumer buy-in</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api evolution strategies. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Evolution strategy is really a bet on how much you trust your consumers to upgrade on their own. Design for additive change by default, reserve versioning for the changes that truly can't be additive, and treat deprecation as a monitored process with a real signal, not a changelog entry. Get those three right and you rarely need anything more elaborate.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

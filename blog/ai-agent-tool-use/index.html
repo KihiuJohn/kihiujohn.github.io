@@ -93,98 +93,85 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="the-role-of-tool-in-the-agent-loop">The role of tool in the agent loop</h2>
-<p>The role of tool in the agent loop is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>"Tool use" gets talked about as if it's magic, but the mechanism is plain: the model never executes anything. It emits a structured block describing what it wants called and with what arguments, your application code runs that call, and you feed the result back in the next request. Everything interesting — retries, authorization, parallelism, loop termination — lives in the code around that exchange, not in the model.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+<h2 id="the-request-response-loop">The request/response loop</h2>
+<p>A tool-enabled conversation is not one API call, it's a loop. You send the message history plus a list of available tools. The model replies with either a normal text answer, or a response containing one or more <code>tool_use</code> blocks — a name and a JSON object of arguments. Your code matches the name against a function it actually has, runs it, and appends the result as a <code>tool_result</code> block keyed to that call's ID. That whole assembled message goes back to the model as the next turn. The model sees the result and decides: answer now, or call another tool. Nothing stops the loop except the model returning a turn with no tool calls, or your code hitting a max-iterations guard.</p>
+<div class="callout">
+  <strong>The tool_use_id is the join key</strong>
+  <p>Every tool result must reference the id of the specific tool_use block it answers. With parallel calls in one turn, mismatching an id (or omitting a result for one of the calls) is the single most common cause of a malformed-request error on the next turn.</p>
 </div>
-<h2 id="what-ai-agent-tool-use-function-calling-patterns-actually-does">What AI Agent Tool Use — Function Calling Patterns actually does</h2>
-<p>In the work I have done on ai agent tool use — function calling patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="anatomy-of-a-turn">Anatomy of a turn, concretely</h2>
+<p>Here's what the wire format actually looks like with the Anthropic Messages API for a single tool call, end to end. The assistant turn contains the tool_use block; your next user turn carries the tool_result back.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · MESSAGES API</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// 1. Model's response to the initial request
+{
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "I'll check the invoice status." },
+    {
+      "type": "tool_use",
+      "id": "toolu_01A2b3C4",
+      "name": "get_ap_bill_status",
+      "input": { "bill_number": "00123456" }
+    }
+  ],
+  "stop_reason": "tool_use"
+}
+
+// 2. Your code runs get_ap_bill_status(bill_number="00123456"),
+//    then sends this back as the next message
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "toolu_01A2b3C4",
+      "content": "{\"status\":\"On Hold\",\"reason\":\"3-way match variance\"}"
+    }
+  ]
+}
+
+// 3. Model reads the result and either answers or calls another tool
+{
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "Bill 00123456 is on hold due to a 3-way match variance." }
+  ],
+  "stop_reason": "end_turn"
+}</code></pre>
+</div>
+<p>Note <code>stop_reason: "tool_use"</code> — that's the signal your loop checks to know whether to keep going or hand the reply to the user. Skipping that check and always treating the first response as final is a common bug: you silently drop the tool call and return the model's filler text ("I'll check the invoice status.") instead of the answer.</p>
+
+<h2 id="parallel-tool-calls">Parallel tool calls in one turn</h2>
+<p>The model can return multiple <code>tool_use</code> blocks in a single response when the calls don't depend on each other — for example, looking up an AR customer and an AP vendor in the same request. Your code should execute those concurrently and return one <code>tool_result</code> block per call, all in the same next message, matched by id. Executing them sequentially still works correctly, it's just slower; the model doesn't know or care about your execution strategy, only that every id it sent gets an id back. Don't assume "one tool call per turn" in your loop code — that assumption breaks silently the first time the model batches two lookups.</p>
+
+<h2 id="forced-vs-free-tool-choice">The model deciding vs. you forcing it</h2>
+<p>By default the model chooses whether to call a tool, call several, or just answer in text — this is <code>tool_choice: {"type": "auto"}</code> in Anthropic's API (or omitting <code>tool_choice</code> in OpenAI's). You can instead force a call: require that the model use some tool (<code>"type": "any"</code>) or a specific named one (<code>"type": "tool", "name": "..."</code>). Forcing is useful for structured extraction where you want the "tool call" purely as a typed output schema and never want prose back. It is not a substitute for validation — a forced call still means the model filled in the arguments, and arguments from a language model are untrusted input no matter how the call was triggered.</p>
+
+<h2 id="handling-tool-errors">Handling tool errors so the model can recover</h2>
+<p>When a tool call fails — bad argument, downstream API timeout, record not found — resist the urge to swallow the error and abort the loop. Return a <code>tool_result</code> with <code>is_error: true</code> and a short, specific message describing what went wrong. The model reads that like any other result and can retry with corrected arguments, pick a different tool, or tell the user it can't complete the request. An empty or generic "an error occurred" result gives the model nothing to correct, and it will often just repeat the identical failing call.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · ERROR RESULT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "type": "tool_result",
+  "tool_use_id": "toolu_01A2b3C4",
+  "is_error": true,
+  "content": "bill_number '00123456' not found in branch 'US-EAST'. Did you mean to search all branches?"
+}</code></pre>
+</div>
+
+<h2 id="never-let-the-model-bypass-authorization">Never let the tool call bypass your authorization layer</h2>
+<p>The tool_use block is a request, not a command — treat it exactly like an HTTP request from an untrusted client. The model has no concept of "this user isn't allowed to void this invoice"; it only knows the tool schema you gave it. Every tool implementation needs to independently check permissions, validate argument shapes and ranges, and apply the same business rules you'd enforce on a REST endpoint, before touching anything. If the underlying action needs a human sign-off in your normal workflow (releasing a payment, deleting a record), the tool should stop short of executing it and instead return a result telling the model to ask the user to confirm — the confirmation has to happen outside the model's control, not inside a system prompt instructing it to "always ask first," which it can and will forget under load.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>A system prompt is not an authorization check</strong>
+  <p>Telling the model "never call delete_record without confirming" in the prompt is a suggestion, not a guarantee. Enforce it in the delete_record function itself — require an explicit confirmed=true argument that only gets set after a separate user-facing confirmation step your code controls.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the tool is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>The performance of tool in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Production tool looks different from development tool. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tool first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tool when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent tool use — function calling patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Strip away the framework naming and tool use is a request/response loop: model emits a typed call, your code executes and validates it, the result goes back keyed by id, and the loop ends when the model stops asking. Get that mechanism right — matching ids, handling parallel calls, returning structured errors, and keeping authorization entirely in your code — and the rest is just adding more tools to the list.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

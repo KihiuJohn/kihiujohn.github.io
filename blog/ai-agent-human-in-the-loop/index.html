@@ -93,98 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="how-to-evaluate-human-in-production">How to evaluate human in production</h2>
-<p>How to evaluate human in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Human-in-the-loop is not a UI feature you bolt on later — it's a control structure you decide on before the agent gets write access to anything. The question isn't "should a human review this," it's "which actions can the agent take unattended, which need a human to confirm before execution, and which need a human to act because the agent shouldn't be trusted with them at all." Get that classification wrong and you either drown reviewers in rubber-stamp approvals they stop reading, or you let an agent silently take an action that needed a second pair of eyes.</p>
 
-def list_human(query: str) -> str:
-    """List human matching the query."""
-    response = requests.get(
-        f"https://api.example.com/human",
-        params={"q": query}
+<h2 id="three-tiers-of-autonomy">Three tiers, not a binary switch</h2>
+<p>Treating human review as on/off is where most implementations fail. In practice you want at least three tiers. <strong>Tier 1 — autonomous:</strong> low-blast-radius, reversible actions (searching a knowledge base, drafting a reply, querying a read-only API) execute without approval. <strong>Tier 2 — approve-before-execute:</strong> actions with real consequences (sending an email to a customer, issuing a refund under $500, merging a PR) generate a proposed action that a human confirms or rejects before the tool actually runs. <strong>Tier 3 — human-only:</strong> the agent is not allowed to call the tool at all — it can only draft a recommendation and hand it to a person, because the cost of a wrong call (terminating an account, wiring money above a threshold) is asymmetric enough that you don't want an LLM anywhere near the execute path.</p>
+<p>The mistake teams make is picking one tier for the whole agent. A support agent that's autonomous for FAQ answers and locked to Tier 3 for refunds needs the classification to live at the <em>tool</em> level, not the agent level — each tool declares its own tier, and the orchestration layer enforces it regardless of what the model decides to do.</p>
+
+<h2 id="confidence-thresholds-are-a-trap">Confidence thresholds are a trap if that's all you have</h2>
+<p>It's tempting to route to a human whenever the model's self-reported confidence is low. Don't rely on this alone — LLMs are frequently confidently wrong, and asking a model to grade its own certainty produces a number that correlates poorly with actual correctness. A better signal is structural: does the action match a pattern you've seen before and validated, is the dollar amount inside a known range, does the tool call touch a resource the agent has touched successfully many times. Combine a cheap structural check with an optional confidence score rather than trusting the score in isolation.</p>
+<div class="callout-warn">
+  <strong>Self-reported confidence is not calibrated</strong>
+  <p>Asking "on a scale of 1-10, how confident are you" and gating on the number gives you a false sense of safety. Models trained with RLHF tend to hedge toward the middle regardless of actual correctness. If you need a real confidence signal, use log-probabilities on the decision token where the API exposes them, or run the same query twice and check for agreement — disagreement is a far more honest escalation trigger than a self-graded score.</p>
+</div>
+
+<h2 id="designing-the-approval-gate">Designing the approval gate</h2>
+<p>An approval gate is a pause in the tool-calling loop, not a separate system. When the agent emits a tool call for a Tier 2 action, you intercept it before execution, store the proposed call (name, arguments, and the reasoning that led to it) with a pending status, and surface it to a reviewer with enough context to decide in seconds — not "review this JSON blob," but "Agent wants to refund $340 to order #88213 because the customer reported a damaged item; here's the support thread." The agent's chain of reasoning, not just the final action, is what makes the review fast. Strip that context out and every approval becomes a coin flip.</p>
+<p>On approval, replay the exact tool call against the real API — don't let the reviewer's approval trigger a fresh, possibly-different generation. On rejection, feed the rejection reason back into the conversation as a tool result so the agent can propose an alternative, rather than silently dropping the turn.</p>
+
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · APPROVAL GATE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>TOOL_TIERS = {
+    "search_kb": "auto",
+    "draft_reply": "auto",
+    "issue_refund": "approve",
+    "close_account": "human_only",
+}
+
+def handle_tool_call(call, context):
+    tier = TOOL_TIERS.get(call.name, "approve")  # unknown tools default to approve
+    if tier == "human_only":
+        raise ToolBlocked(f"{call.name} requires a human operator")
+    if tier == "auto":
+        return execute(call)
+
+    pending = save_pending_action(
+        tool=call.name,
+        args=call.arguments,
+        reasoning=context.last_assistant_reasoning,
+        status="pending",
     )
-    return response.json()
+    notify_reviewer(pending)
+    return {"status": "awaiting_approval", "pending_id": pending.id}
 
-tools = [Tool(name="human", func=list_human, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def on_reviewer_decision(pending_id, approved, reason=""):
+    pending = load_pending_action(pending_id)
+    if approved:
+        return execute_exact(pending.tool, pending.args)
+    return {"status": "rejected", "reason": reason}  # fed back as a tool result</code></pre>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on human-in-the-loop for ai agents, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-loop-in-the-agent-loop">The role of loop in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The human is not the question; the failure mode of the loop is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="what-human-in-the-loop-for-ai-agents-actually-does">What Human-in-the-Loop for AI Agents actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+
+<h2 id="escalation-paths">Escalation paths need an owner and a timeout</h2>
+<p>A queue of pending approvals that nobody is paged for is worse than no human-in-the-loop at all — it just adds latency with no safety benefit. Route Tier 2 actions to a specific queue with an on-call owner and a timeout policy: does the action expire and get rejected automatically, or does it escalate to a second reviewer after 15 minutes? For customer-facing agents, a stale pending approval usually means "tell the customer we're looking into it" rather than leaving them stuck mid-conversation. Decide this explicitly instead of discovering the gap when a customer complains that the bot went silent.</p>
+
+<h2 id="watch-approval-rate-not-just-latency">Watch the approval rate, not just latency</h2>
+<p>The metric that tells you whether human-in-the-loop is working isn't how fast reviewers approve things — it's the ratio of approvals to rejections to edits, tracked per tool and per agent version. A tool sitting at 98%+ approval for months is a strong signal it's safe to demote from Tier 2 to Tier 1. A tool with a rising edit rate (reviewers approving but changing the arguments first) means the agent's reasoning has drifted from what reviewers actually want, and that's worth investigating before it becomes a rejection spike.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Let the data move the tier boundary</strong>
+  <p>Human-in-the-loop should shrink over time for well-behaved tools and grow for tools that start misfiring after a model or prompt change. Treat the tier assignment as a config value you revisit with real approval-rate data, not a one-time design decision.</p>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of loop in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production loop looks different from development loop. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_human(query: str) -> str:
-    """List human matching the query."""
-    response = requests.get(
-        f"https://api.example.com/human",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="human", func=list_human, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring loop first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add human on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with loop when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on human-in-the-loop for ai agents. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Human-in-the-loop works when the tiering lives at the tool level, the approval gate gives reviewers the reasoning behind the call instead of raw arguments, and escalation has an owner and a timeout instead of an open-ended queue. Confidence scores are a weak standalone signal — use structural checks and agreement-across-samples instead, and let real approval-rate data tell you when a tool has earned its way down to a lower tier.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

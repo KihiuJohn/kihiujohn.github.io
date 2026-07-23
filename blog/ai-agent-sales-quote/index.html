@@ -93,98 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>Implementation: from prompt to production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>In the work I have done on ai agent for sales quoting in acumatica, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Sales quoting in Acumatica is one of the better-scoped AI-agent use cases in the whole ERP-plus-LLM space, because the inputs (a customer's request, in an email or a call transcript) and the outputs (a structured <strong>SOQuote (SO304000)</strong> record with line items and pricing) are both well-defined. The agent's job is bridging unstructured intent to a structured record, which is exactly what LLMs are good at — as long as pricing stays out of the model's hands.</p>
+<h2 id="parse-intent-price-with-the-system">Parse intent, price with the system</h2>
+<p>Let the LLM extract structured intent from an unstructured request — which items, what quantities, what special terms were mentioned, who the customer is — and hand that structured extraction to Acumatica's own pricing engine (price classes, price lists, volume discounts already configured in the system) to compute the actual quoted price. Never let the model itself state a price; if it hallucinates a discount percentage or misreads a unit price, that error goes straight onto a document a customer sees, and a wrong quote is a worse customer-facing failure than an internal report being wrong.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>A quote is a customer-facing financial document</strong>
+  <p>Treat quote generation with the same rigor as invoice generation, not like a chatbot response. Every number on the quote should trace back to a query against Acumatica's pricing tables, never to LLM-generated text, even when the LLM is very confident.</p>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the sales is.</p>
+<h2 id="handling-ambiguous-requests">Handling ambiguous requests</h2>
+<p>Real customer requests are messy — "the usual setup but for the Nairobi office, add two more licenses" requires resolving "the usual setup" against quote history for that customer. This is where the agent earns its value: querying prior quotes and orders for the customer, identifying the most likely referenced configuration, and presenting it back for confirmation rather than guessing silently. An agent that asks "did you mean the configuration from quote Q-004821 from March?" before generating a document is far safer than one that silently interprets ambiguity and ships a wrong quote.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>The performance of sales in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-sales">Prompt patterns that work for sales</h2>
-<p>Production sales looks different from development sales. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
+  <div class="code-header"><span class="code-lang">PYTHON · QUOTE GENERATION PIPELINE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def generate_quote_draft(customer_request_text, customer_id):
+    extracted = llm.extract_structured(
+        text=customer_request_text,
+        schema=QuoteIntentSchema,  # items, quantities, references, special terms
     )
-    return response.json()
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    if extracted.has_ambiguous_reference:
+        candidates = find_similar_prior_quotes(customer_id, extracted.reference_text)
+        return {"status": "needs_confirmation", "candidates": candidates}
+
+    # pricing computed entirely by Acumatica's pricing engine, not the LLM
+    priced_lines = [price_line_item(customer_id, item) for item in extracted.line_items]
+    return create_draft_quote(customer_id, priced_lines, status="pending_review")</code></pre>
 </div>
+<h2 id="always-land-as-a-draft">Always land as a draft, never auto-send</h2>
+<p>Every agent-generated quote should land in Acumatica as a draft pending sales rep review, not go out to the customer automatically. This isn't excessive caution — it's the same principle as any agent action with external, hard-to-reverse consequences: a sales rep catches the case where the extraction was subtly wrong in about a minute, versus the much more expensive cleanup of a wrong quote already in the customer's inbox.</p>
+<h2 id="close-the-loop-with-outcomes">Close the loop with outcomes</h2>
+<p>Log every agent-generated quote against whether the rep edited it before sending, and what specifically they changed. A pattern of the same field being corrected repeatedly — say, the agent consistently misreading which price class a specific customer falls under — is a concrete, fixable extraction bug, not a mysterious "AI accuracy" problem. This feedback loop is what turns a quoting agent from static to steadily improving.</p>
+<h2 id="respect-approval-thresholds">Respect approval thresholds</h2>
+<p>If a quote's discount level or total value crosses a threshold that would normally require manager approval on a manually-created quote, the agent-generated path must trigger the same approval workflow — no exception for AI-originated documents. Routing around existing approval hierarchies because "the agent drafted it" is a control gap that shows up in the first audit.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sales first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sales when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Step</th><th>Owner</th></tr>
+  <tr><td>Parse customer intent from unstructured text</td><td>LLM</td></tr>
+  <tr><td>Resolve ambiguous references</td><td>LLM query + human confirmation</td></tr>
+  <tr><td>Compute pricing</td><td>Acumatica pricing engine, never the LLM</td></tr>
+  <tr><td>Approval routing</td><td>Existing Acumatica workflow, unchanged</td></tr>
+  <tr><td>Send to customer</td><td>Human, always</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for sales quoting in acumatica. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A sales quoting agent works when it sticks to what LLMs are good at — turning messy customer language into structured intent — and defers entirely to Acumatica's own pricing engine and approval workflow for anything involving actual numbers. Land every quote as a draft, resolve ambiguity by asking rather than guessing, and track what reps correct so the extraction gets better over time instead of staying a fixed guess.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

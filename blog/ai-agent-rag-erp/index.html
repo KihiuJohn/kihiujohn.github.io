@@ -93,98 +93,44 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Safety, guardrails, and observability is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_rag(query: str) -> str:
-    """List rag matching the query."""
-    response = requests.get(
-        f"https://api.example.com/rag",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="rag", func=list_rag, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>In the work I have done on rag for erp data — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-rag">Latency and cost tradeoffs for rag</h2>
-<p>When the work moves from design to production, the questions change. The rag is not the question; the failure mode of the erp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-erp">Prompt patterns that work for erp</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Retrieval-augmented generation over ERP data is a different problem than RAG over documents, and treating it the same way is the most common mistake. Acumatica records are structured, relational, and access-controlled at a granularity most vector-search tutorials never mention. Naively embedding rows and chunks and stuffing the top-k into a prompt gets you a demo that looks impressive and a production system that leaks data across branches or answers with stale numbers.</p>
+<h2 id="structured-data-is-not-a-document-chunking-problem">Structured data is not a document-chunking problem</h2>
+<p>A vendor bill isn't prose — it's a header, a set of line items, a GL distribution, and a status. Chunking it into 500-token blocks and embedding each chunk throws away the relational structure that makes the record meaningful in the first place. For anything with a clear schema (invoices, POs, GL transactions), skip the embedding step entirely and let the agent query the data directly through Acumatica's OData or contract-based REST endpoints, scoped by explicit filters. Reserve vector search for genuinely unstructured content: attached PDFs, email correspondence, free-text notes fields, knowledge-base articles.</p>
+<h2 id="two-retrieval-paths-not-one">Two retrieval paths, not one</h2>
+<p>The practical architecture has a router in front of two distinct retrieval mechanisms: structured queries against the live database for anything answerable by filtering and aggregation ("open AR balance for customer X"), and vector search over an indexed corpus of unstructured text for anything requiring semantic matching ("find correspondence mentioning a pricing dispute"). Trying to force both cases through embeddings means either bad aggregate answers (an LLM summing numbers from retrieved chunks, badly) or bad semantic search (SQL LIKE queries missing paraphrased matches).</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Never let the model compute totals from retrieved chunks</strong>
+  <p>If a question needs a sum, count, or balance, route it to a real query against PMBudget, ARBalances, or the relevant table — not to an LLM adding up numbers it read out of retrieved text fragments. That's where silent, confident wrong answers come from.</p>
 </div>
-<h2 id="how-to-evaluate-rag-in-production">How to evaluate rag in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="access-control-has-to-live-below-the-retriever">Access control has to live below the retriever</h2>
+<p>Acumatica enforces row-level and branch-level security through its own access rights engine. A RAG layer that queries a replicated database or a search index without re-applying those same restrictions will happily surface another branch's AR data to a user who couldn't see it in the actual application. Retrieval must run as the requesting user, with the same restriction groups applied, not as a service account with blanket access. This is the single most common security gap in ERP-RAG builds, and it doesn't show up in testing unless someone specifically tests it with a restricted user.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The performance of erp in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-role-of-erp-in-the-agent-loop">The role of erp in the agent loop</h2>
-<p>Production erp looks different from development erp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · SCOPED RETRIEVAL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def query_ar_balance(customer_id: str, requesting_user: str) -> dict:
+    # Re-apply Acumatica's own restriction groups, not a service-account bypass
+    allowed_branches = get_user_branch_access(requesting_user)
+    if not allowed_branches:
+        raise PermissionError("No branch access for this user")
 
-def list_rag(query: str) -> str:
-    """List rag matching the query."""
-    response = requests.get(
-        f"https://api.example.com/rag",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="rag", func=list_rag, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    return odata_client.get(
+        "ARBalances",
+        filters={"CustomerID": customer_id, "BranchID": {"$in": allowed_branches}},
+        auth=impersonate(requesting_user),
+    )</code></pre>
 </div>
+<h2 id="freshness-beats-recall-for-financial-data">Freshness beats recall for financial data</h2>
+<p>A vector index of ERP records is a snapshot the moment it's built, and financial data changes constantly — a stale cached balance is worse than no answer at all. For anything time-sensitive, query live rather than serving from an index, even if it's slower. Reserve indexing for content that changes slowly: item descriptions, historical closed transactions, policy documents. If you do index transactional data for semantic search, put a visible timestamp on every retrieved fact and re-index on a schedule tight enough that staleness can't silently produce a wrong answer.</p>
+<h2 id="citations-that-actually-point-somewhere">Citations that actually point somewhere</h2>
+<p>Every answer synthesized from retrieved ERP data should carry a reference back to the source record — a document number and screen link the user can click to verify, not a vague "based on your records." This does double duty: it lets users catch mistakes before acting on them, and it forces the retrieval layer to track provenance instead of blending numbers from multiple documents into an unverifiable sentence.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring erp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add rag on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with erp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Data type</th><th>Retrieval approach</th></tr>
+  <tr><td>Structured transactions (AP, AR, GL)</td><td>Direct OData/REST query, scoped to user access</td></tr>
+  <tr><td>Free-text notes, attachments, email</td><td>Vector search over indexed corpus</td></tr>
+  <tr><td>Aggregates and totals</td><td>Computed by the database, never by the LLM</td></tr>
+  <tr><td>Time-sensitive balances</td><td>Live query, not a cached index</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on rag for erp data — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>RAG over ERP data works when you stop treating every record as a document to embed and start treating structured data as a query problem and unstructured data as a search problem. Route by data type, re-apply Acumatica's own access control at retrieval time, keep financial aggregates out of the model's hands, and always cite back to the source record so a user can verify before they trust the answer.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

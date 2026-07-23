@@ -93,89 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="performance-and-observability-for-alerting">Performance and observability for alerting</h2>
-<p>Performance and observability for alerting is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AlertingBestExt : PXGraphExtension<AlertingEntry>
-{
-    [PXOverride]
-    public virtual void Best(Alerting doc)
-    {
-        // Custom best logic for alerting best practices
-        if (doc?.Best == null) return;
-        Base.Best(doc);
-    }
-}</code></pre>
+    <p>Most alerting systems fail the same way: too many alerts that don't require action, so the ones that do get ignored. Good alerting is less about detection coverage and more about a small set of rules people actually trust enough to wake up for. The practices below are the ones that hold up once a system has been on-call for a year, not the ones that look good in a demo.</p>
+<h2 id="alert-on-symptoms-not-causes">Alert on symptoms, not causes</h2>
+<p>The most durable rule in alerting design: page on user-visible symptoms (error rate, latency, availability), not on every possible internal cause. A disk filling up, a queue backing up, a cache miss rate spiking — these are diagnostic signals, not paging conditions, unless they're a leading indicator of imminent symptom-level failure. Google's SRE book calls this out explicitly: alert on SLO burn rate, and let the dashboards and logs carry the causal investigation once someone is already engaged.</p>
+<div class="callout">
+  <strong>The two-alert rule of thumb</strong>
+  <p>If a system generates more than a couple of distinct paging alerts for the same underlying incident, the alerts are cause-based rather than symptom-based. Consolidate: one alert for "the SLO is burning too fast," with the cause-level detail available in the linked dashboard, not as a separate page.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on alerting best practices — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="multi-window-burn-rate-alerts">Multi-window, multi-burn-rate alerts</h2>
+<p>A single threshold alert ("error rate over 5% for 5 minutes") either fires too late for fast, severe outages or too early for slow, tolerable degradations. The pattern that fixes both is a multi-window burn-rate alert: pair a short window (5m) with a long window (1h) at a high burn-rate threshold for fast-burn pages, and a longer pair (6h/3d) at a lower threshold for slow-burn tickets. This is the approach documented in Google's SRE workbook and it's now standard in most Prometheus/Grafana SLO tooling.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · PROMETHEUS BURN-RATE RULE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>groups:
+  - name: slo-fast-burn
+    rules:
+      - alert: ErrorBudgetFastBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m]))
+          ) > (14.4 * 0.001)
+          and
+          (
+            sum(rate(http_requests_total{status=~"5.."}[1h]))
+            / sum(rate(http_requests_total[1h]))
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Error budget burning 14.4x too fast — pages on-call"</code></pre>
+</div>
+<h2 id="every-page-needs-a-runbook-link">Every page needs a runbook link</h2>
+<p>An alert without a linked runbook is a puzzle handed to whoever is unlucky enough to be on call. The annotation on the alert itself should carry a direct link to a runbook that states what the alert means, what's already been ruled out, and the first three diagnostic steps. If a responder has to search Slack history to remember what an alert means, the alert is undocumented technical debt, not a safety mechanism.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Stale runbooks are worse than none</strong>
+  <p>A runbook that references a decommissioned service or an outdated dashboard link actively costs time during an incident, because the responder trusts it before discovering it's wrong. Review runbooks whenever the alert they're attached to changes, not on a separate schedule that inevitably drifts.</p>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The alerting is not the question; the failure mode of the best is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for alerting
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-best-edge-cases-i-have-shipped">The best edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-alerting-changes">Migration path when alerting changes</h2>
-<p>The performance of best in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-best-in-production">How to debug best in production</h2>
-<p>Production best looks different from development best. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AlertingBestExt : PXGraphExtension<AlertingEntry>
-{
-    [PXOverride]
-    public virtual void Best(Alerting doc)
-    {
-        // Custom best logic for alerting best practices
-        if (doc?.Best == null) return;
-        Base.Best(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="routing-and-escalation">Routing and escalation without alert storms</h2>
+<p>Dependent failures cascade: a database going down triggers alerts on every service that depends on it. Alert grouping and inhibition rules (Alertmanager's <code>group_by</code> and <code>inhibit_rules</code>, or the equivalent in PagerDuty/Opsgenie) collapse a storm of 40 correlated alerts into one incident with 40 linked signals, instead of paging the same person 40 times in two minutes. Get this configured before the first real incident — retrofitting inhibition rules during a live outage is how storms turn into missed pages.</p>
+<h2 id="reviewing-alert-quality-over-time">Reviewing alert quality over time</h2>
+<p>Track a precision metric for every paging alert: of the last N times it fired, how many led to an action versus an acknowledge-and-ignore. An alert with a low action rate should be demoted to a ticket, tuned, or deleted — not left in place because someone might theoretically need it. Teams that review this monthly keep their on-call load flat as the system grows; teams that don't accumulate alert fatigue until people start missing the alerts that matter.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring best first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add alerting on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with best when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal type</th><th>Route to</th></tr>
+  <tr><td>SLO burn rate, fast window</td><td>Page immediately</td></tr>
+  <tr><td>SLO burn rate, slow window</td><td>Ticket, review next business day</td></tr>
+  <tr><td>Internal resource metric (disk, queue depth)</td><td>Dashboard only, unless it predicts imminent SLO breach</td></tr>
+  <tr><td>Known noisy alert, low action rate</td><td>Demote, tune threshold, or delete</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on alerting best practices — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Good alerting is a discipline of subtraction more than addition: fewer, symptom-based, well-routed alerts beat comprehensive coverage of every internal metric. Pair each page with a runbook, group correlated failures so one incident doesn't become forty pages, and review action rates regularly so the alert set stays trustworthy instead of just large.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

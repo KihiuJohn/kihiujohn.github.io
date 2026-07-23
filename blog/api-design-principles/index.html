@@ -93,83 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design is a discipline, not a protocol. this is one of the parts of the discipline. The pattern that works is to push the API towards being a contract, the contract towards being a test, and the test towards being the source of truth. This article is the discipline.</p>
-<h2 id="why-api-is-not-rest-anymore">Why api is not REST anymore</h2>
-<p>Why api is not REST anymore is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Good API design is mostly about picking conventions once and applying them everywhere, so a consumer who's learned one endpoint can guess the shape of the next one. The principles below aren't novel — they're the ones that show up, in some form, in every API that's still pleasant to integrate against five years after launch.</p>
+<h2 id="resources-and-nouns-not-actions">Model resources as nouns, not RPC-style actions</h2>
+<p>A REST-shaped API names endpoints after the things it manages (<code>/orders</code>, <code>/orders/{id}/line-items</code>) and expresses actions through HTTP methods, not verbs in the URL. <code>POST /orders/{id}/cancel</code> is a common and reasonable exception for actions that don't map cleanly to CRUD — but <code>/getOrderById</code> or <code>/updateOrderStatus</code> as separate endpoints signals the API is really RPC wearing REST's clothing, which is fine as a deliberate choice (gRPC, tRPC) but confusing as an accident.</p>
+<h2 id="idempotency-keys-for-unsafe-writes">Idempotency keys make retries safe</h2>
+<p>Network failures mean a client can never be certain whether a POST request that timed out actually succeeded server-side. An <code>Idempotency-Key</code> header (a client-generated UUID, per request) lets the server recognize a retried request and return the original result instead of creating a duplicate — this is the pattern Stripe popularized and it's now close to expected on any payment or order-creation endpoint. Without it, "just retry on timeout" is not a safe instruction to give API consumers.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/apis/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await apiService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">HTTP · IDEMPOTENT POST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>POST /v1/charges HTTP/1.1
+Idempotency-Key: 7d8f2a91-4c3e-4b1a-9e5d-2f8c1a6b3d4e
+Content-Type: application/json
+
+{"amount": 2000, "currency": "usd", "customer": "cus_9s6XKzkNRiz8i3"}
+
+# A retried request with the same key returns the original
+# response (same status, same body) instead of double-charging.</code></pre>
 </div>
-<h2 id="idempotency-in-design">Idempotency in design</h2>
-<p>In the work I have done on api design principles — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="pagination-and-partial-responses">Cursor pagination over offset for anything that grows</h2>
+<p>Offset-based pagination (<code>?page=3&limit=20</code>) breaks under concurrent writes — an insert or delete between page fetches shifts every subsequent page's contents, causing skipped or duplicated records. Cursor-based pagination (<code>?after=eyJpZCI6MTIzfQ</code>, an opaque token derived from the last item's sort key) stays consistent regardless of concurrent writes and is what every high-traffic API — Stripe, GitHub, Slack — settled on for exactly this reason.</p>
+<div class="callout">
+  <strong>Always return the next cursor, never make clients construct one</strong>
+  <p>The pagination response should include the exact cursor value for the next page (<code>"next_cursor": "eyJpZCI6MTQz..."</code>) rather than expecting the client to derive it from the last item. Treating the cursor as opaque lets you change its internal encoding later without breaking every client that reverse-engineered its structure.</p>
+</div>
+<h2 id="error-responses-as-a-contract">Error responses need the same design rigor as success responses</h2>
+<p>A consistent error shape — machine-readable error code, human-readable message, and where relevant a field-level breakdown for validation errors — turns error handling from special-cased guesswork into something a client can branch on programmatically. RFC 9457 (Problem Details for HTTP APIs) standardizes this shape (<code>type</code>, <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>) specifically so clients don't need bespoke parsing logic per API.</p>
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>Don't overload HTTP status codes to carry business logic</strong>
+  <p>Returning 200 with an <code>{"success": false}</code> body, or conversely inventing non-standard status codes for business rule violations, forces every client to special-case your API instead of relying on standard HTTP semantics. Use the status code for what actually happened at the protocol level (404 for not found, 422 for validation failure, 409 for conflict) and put business detail in the body.</p>
 </div>
-<h2 id="contract-testing-for-api">Contract testing for api</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the design is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /apis/{id}:
-    get:
-      operationId: getApi
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="observability-tracing-design">Observability: tracing design</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="sdk-generation-for-api">SDK generation for api</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type ApiResponse = {
-    id: string;
-    design: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="what-api-design-principles-a-field-guide-gives-you">What API Design Principles — A Field Guide gives you</h2>
-<p>The performance of design in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>Production design looks different from development design. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/apis/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await apiService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+<h2 id="backward-compatible-evolution">Design for additive change from day one</h2>
+<p>Clients that ignore unknown JSON fields (the common, recommended default) let you add fields without a version bump. The discipline this requires: never repurpose an existing field's meaning, never remove a field without a formal deprecation cycle, and default new optional fields to a value that preserves old behavior. APIs that get this right rarely need a v2; APIs that don't end up maintaining parallel major versions far sooner than planned.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring design first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with design when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Principle</th><th>Why it matters</th></tr>
+  <tr><td>Nouns for resources, HTTP methods for actions</td><td>Predictable endpoint shape across the whole API</td></tr>
+  <tr><td>Idempotency keys on unsafe writes</td><td>Makes client-side retry safe by default</td></tr>
+  <tr><td>Cursor pagination</td><td>Correct under concurrent writes, unlike offset</td></tr>
+  <tr><td>RFC 9457 error shape</td><td>One error-parsing code path for every client</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api design principles — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of these principles are exotic — idempotency keys, cursor pagination, and structured errors are all well-documented, widely adopted patterns. The value is in applying them consistently across an entire API surface rather than case by case, so a consumer's mental model built from one endpoint transfers cleanly to the next.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

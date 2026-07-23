@@ -93,98 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM applications that work in production look different from LLM applications in a notebook. The gap is the wrapper: the tools, the memory, the guardrails, the observability. this is one of the parts of the wrapper. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>An AI agent that answers questions from a knowledge base is a retrieval system wearing a chat interface. The LLM part — reading retrieved passages and composing an answer — is the easy 20%. The 80% is getting the right passages into the context window in the first place: chunking documents sensibly, embedding them well, retrieving with enough precision that the model isn't drowning in irrelevant text, and being honest when nothing relevant exists.</p>
+
+<h2 id="chunking-is-where-quality-is-won-or-lost">Chunking is where quality is won or lost</h2>
+<p>Fixed-size chunking (split every 500 tokens) is the easiest thing to ship and the first thing that quietly caps your answer quality. It slices sentences in half, separates a heading from the paragraph it introduces, and splits a table from its caption. The fix that pays for itself immediately is structure-aware chunking: split on markdown headings, HTML sections, or paragraph boundaries first, and only fall back to a token-count split for oversized sections. Keep a healthy overlap (10-15% of chunk length) between adjacent chunks so a sentence that references "the previous paragraph" doesn't lose its antecedent. For anything with real hierarchy — a manual with sections and subsections — store the heading path alongside each chunk ("Setup > Prerequisites > Database") and prepend it to the chunk text before embedding; it gives the embedding model context it wouldn't otherwise have and gives the LLM a citation-worthy label later.</p>
+
+<h2 id="embeddings-and-hybrid-retrieval">Embeddings alone are not enough — go hybrid</h2>
+<p>Pure vector similarity search misses exact matches: a part number, an error code, an acronym. Embedding models are trained for semantic similarity, and "ERR_4092" doesn't have a semantically similar neighbor, it just needs to be found verbatim. Production retrieval that actually holds up combines dense vector search with a keyword/BM25 index (Postgres full-text search, Elasticsearch, or a vector DB with built-in hybrid search like Pinecone or Weaviate both support this now) and merges the two result sets, typically with reciprocal rank fusion. This single change fixes more retrieval complaints than swapping embedding models does.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · HYBRID RETRIEVAL WITH RRF</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def reciprocal_rank_fusion(vector_results, keyword_results, k=60):
+    scores = {}
+    for rank, doc_id in enumerate(vector_results):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+    for rank, doc_id in enumerate(keyword_results):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+    return sorted(scores, key=scores.get, reverse=True)
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
+def retrieve(query, top_k=8):
+    vector_hits = vector_index.search(embed(query), top_k=20)
+    keyword_hits = bm25_index.search(query, top_k=20)
+    fused = reciprocal_rank_fusion(
+        [h.id for h in vector_hits],
+        [h.id for h in keyword_hits],
     )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+    return [chunk_store[doc_id] for doc_id in fused[:top_k]]</code></pre>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on ai agent for internal knowledge base, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+
+<h2 id="reranking-before-the-context-window">Rerank before the context window, not after</h2>
+<p>Retrieving 20 candidates and stuffing all 20 into the prompt is how context windows fill up with noise and answer quality drops — models get measurably worse at using information buried in the middle of a long context ("lost in the middle"). Retrieve broad (top 20-30), then rerank with a cross-encoder (Cohere Rerank, or a local model) that scores query-passage pairs directly rather than via cosine similarity, and pass only the top 5-8 reranked chunks to the LLM. Cross-encoders are slower per-pair but you're only running them on the retrieval shortlist, not the whole corpus, so the added latency is small relative to the quality gain.</p>
+<div class="callout">
+  <strong>Citations are not optional</strong>
+  <p>Every answer generated from retrieved context should carry a pointer back to the source chunk — document name, section, page. This isn't just UX polish: it's your fastest way to catch retrieval failures in production, because users (and you, reviewing logs) can tell at a glance whether the cited source actually supports the claim.</p>
+</div>
+
+<h2 id="knowing-when-there-is-no-answer">Knowing when there's no good answer</h2>
+<p>The default failure mode of a RAG agent isn't returning the wrong document — it's confidently answering from documents that don't actually address the question, because retrieval always returns <em>something</em>, even when nothing in the corpus is relevant. Set a similarity/rerank-score floor below which you tell the model explicitly "no relevant context was found, say so rather than guessing," and instruct the model in the system prompt to answer only from the provided context and to say when it can't. This is a prompt instruction that's worth having even though prompt instructions generally aren't security boundaries — here the downside of the model ignoring it is a bad answer, not a compromised system, and instruction-following on "don't answer outside the given context" is one of the things current frontier models are reasonably good at when asked directly.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Stale indexes are a silent failure</strong>
+  <p>A knowledge base agent answering from a six-month-old snapshot of your docs will sound exactly as confident as one answering from today's docs. Wire re-indexing into whatever pipeline updates the source documents (a doc merge, a wiki edit, a ticket resolution) rather than relying on a nightly batch job discovered only when someone notices stale answers.</p>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the internal is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-internal">Prompt patterns that work for internal</h2>
-<p>The performance of internal in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>Production internal looks different from development internal. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="evaluating-retrieval-quality">Evaluating retrieval quality separately from generation quality</h2>
+<p>Bad final answers can come from two different failures — retrieval brought back the wrong chunks, or generation misused the right chunks — and conflating them makes debugging slow. Keep a small hand-labeled eval set (50-200 query/expected-source pairs is enough to start) and measure retrieval recall (is the right chunk in the top-k?) independently from answer faithfulness (does the generated answer actually follow from what was retrieved?). Run both on every meaningful change to chunking, embedding model, or reranker before shipping it — retrieval regressions are easy to introduce and easy to miss without a standing eval.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring internal first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with internal when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for internal knowledge base. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Most of the effort in a knowledge-base agent belongs in the retrieval pipeline, not the prompt. Chunk with document structure in mind, combine vector and keyword search, rerank before you fill the context window, and give the model an explicit escape hatch for "not in the corpus." Keep retrieval and generation evaluated separately so a bad answer tells you which half of the system actually broke.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

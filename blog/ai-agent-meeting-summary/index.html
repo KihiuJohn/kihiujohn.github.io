@@ -93,98 +93,75 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>A meeting summarization agent looks simple until you've shipped one: transcribe, summarize, done. In practice the transcript is the easy input and the hard part is turning an hour of overlapping speech into action items a project manager will actually trust and act on without re-listening to check. The pipeline that holds up in production has distinct stages — diarization, transcription, extraction, and structured output — each with its own failure mode.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on ai agent for meeting summarisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="diarization-before-summarization">Diarization comes before summarization, not after</h2>
+<p>Speaker diarization — labeling "who said what" — has to happen at the audio-processing stage, not as something you ask the LLM to infer from a wall of undifferentiated text. Whisper's transcription and diarization are separate problems: OpenAI's Whisper API gives you accurate text but no speaker labels, so most pipelines pair it with a dedicated diarization model (pyannote.audio is the common open-source choice) that segments the audio by speaker turn before transcription is aligned to it. Skipping this step and asking the LLM to guess speaker boundaries from text alone produces summaries that misattribute commitments — "I'll own the migration" assigned to the wrong person is the kind of error nobody catches until the wrong person gets chased for it.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Misattributed action items erode trust fast</strong>
+  <p>The single fastest way to kill adoption of a meeting-summary agent is one bad speaker attribution in front of the room. Budget for diarization accuracy specifically — not just transcription word-error-rate — and surface a confidence signal or the raw timestamp so a reviewer can verify before an action item gets assigned and sent.</p>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the meeting is.</p>
+
+<h2 id="transcript-to-structured-summary">From transcript to structured summary</h2>
+<p>Once you have a speaker-labeled transcript, the summarization call should return structured output, not prose you then re-parse. Use JSON schema mode (OpenAI's <code>response_format</code> or Anthropic's forced tool call) to get a fixed shape back: a short overview, a list of decisions made, a list of action items each with an owner and due-date-if-mentioned, and open questions. This makes the output directly usable by downstream systems — a task tracker, a CRM note, a Slack digest — without another parsing step that can silently drop information.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
+  <div class="code-header"><span class="code-lang">PYTHON · STRUCTURED MEETING SUMMARY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>summary_schema = {
+    "name": "summarize_meeting",
+    "description": "Produce a structured summary from a diarized transcript",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "overview": {"type": "string"},
+            "decisions": {"type": "array", "items": {"type": "string"}},
+            "action_items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string"},
+                        "owner": {"type": "string"},
+                        "due_date": {"type": ["string", "null"]},
+                        "source_quote": {"type": "string"}
+                    },
+                    "required": ["task", "owner", "source_quote"]
+                }
+            },
+            "open_questions": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["overview", "decisions", "action_items"]
+    }
+}
+
+resp = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=2048,
+    tools=[summary_schema],
+    tool_choice={"type": "tool", "name": "summarize_meeting"},
+    messages=[{"role": "user", "content": diarized_transcript}]
 )</code></pre>
 </div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-meeting">Prompt patterns that work for meeting</h2>
-<p>The performance of meeting in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>Production meeting looks different from development meeting. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+<p>The <code>source_quote</code> field matters more than it looks — it's what lets a reviewer trace an extracted action item back to the exact line in the transcript instead of taking the model's word for it.</p>
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="long-transcripts-and-context-limits">Long transcripts and context limits</h2>
+<p>An hour-long meeting can run 8,000-12,000 words of transcript, which fits comfortably in a single call on current frontier models with 200K+ token context windows — you generally don't need to chunk a single meeting. Where chunking does matter is multi-hour workshops or when you're summarizing across a series of related meetings: run per-meeting extraction first, then a second pass that synthesizes across the structured outputs rather than re-feeding raw transcripts. Map-reduce over raw text tends to lose cross-meeting continuity ("this is the third time this blocker came up") that a synthesis pass over structured summaries preserves.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="human-review-before-action-items-go-out">Human review before action items leave the building</h2>
+<p>Don't auto-send extracted action items straight into a task tracker or a follow-up email. Route the structured summary to the meeting organizer for a quick approve/edit pass first — this is the cheapest guardrail against diarization errors, hallucinated deadlines, or a decision the model inferred that was actually still under discussion. A five-second review click is a small tax against the cost of a wrong commitment landing in someone's inbox with an assigned name attached.</p>
+
+<h2 id="evaluating-summary-quality">Evaluating summary quality over time</h2>
+<p>Word-error-rate on transcription is measurable and stable; summary quality is not, and it drifts as meeting formats and topics change. Keep a small set of meetings with human-written "gold" summaries and action-item lists, and periodically score new model outputs against them — an LLM-as-judge rubric checking whether each gold action item was captured, and whether any hallucinated items appeared, catches regressions faster than eyeballing transcripts. Re-run this eval whenever you change the summarization prompt, the schema, or the underlying model.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring meeting first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with meeting when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Stage</th><th>Tool/technique</th><th>Failure mode if skipped</th></tr>
+  <tr><td>Diarization</td><td>pyannote.audio or provider diarization</td><td>Action items misattributed to wrong speaker</td></tr>
+  <tr><td>Transcription</td><td>Whisper or provider ASR</td><td>Garbled input degrades everything downstream</td></tr>
+  <tr><td>Extraction</td><td>Structured output / forced tool call</td><td>Unparseable or inconsistent summary shape</td></tr>
+  <tr><td>Review</td><td>Human approve/edit step</td><td>Wrong commitments sent out automatically</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for meeting summarisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>A meeting-summary agent is only as good as its weakest stage, and that's usually diarization, not the LLM call everyone focuses on. Get speaker attribution right, force structured output with source quotes for traceability, and keep a human in the loop before action items leave the meeting room — the summarization itself is the part frontier models already handle well.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

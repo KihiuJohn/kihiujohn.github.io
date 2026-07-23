@@ -93,98 +93,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="what-ai-agent-orchestration-patterns-actually-does">What AI Agent Orchestration Patterns actually does</h2>
-<p>What AI Agent Orchestration Patterns actually does is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Orchestration is the part of an agent system that decides what happens next: which tool to call, whether to retry, when to stop and ask a human. It sounds abstract until the agent gets stuck in a loop calling the same failing tool five times, or stops one step short of finishing a task, and you realize there was no explicit control flow — just an LLM improvising the next step every time with no bounds on how long it could keep going.</p>
+<h2 id="the-loop-underneath-every-agent-framework">The loop underneath every agent framework</h2>
+<p>Strip away the framework branding and every agent orchestration pattern is a loop: call the model, inspect whether it wants to call a tool, execute the tool if so, feed the result back, repeat until the model produces a final answer or you hit a stop condition. That loop, written directly, is maybe 30 lines of code. Frameworks add retry policies, parallel tool execution, and state persistence around that loop — genuinely useful once you need them, but the loop itself doesn't require a dependency to understand or debug.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · THE LOOP, EXPLICIT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def run_agent(user_message: str, max_steps: int = 8) -> str:
+    messages = [{"role": "user", "content": user_message}]
+    for step in range(max_steps):
+        response = call_model(messages, tools=TOOL_SCHEMAS)
+        if not response.tool_calls:
+            return response.content  # model is done, no more tools needed
+        for call in response.tool_calls:
+            result = execute_tool(call.name, call.arguments)  # validated, logged
+            messages.append(tool_result_message(call.id, result))
+    return "Reached max steps without a final answer — escalating to a human."</code></pre>
 </div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>In the work I have done on ai agent orchestration patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="bounding-the-loop-is-not-optional">Bounding the loop is not optional</h2>
+<p>Every production agent needs a hard step limit and a hard time limit, enforced in code, not requested in the prompt. An LLM that decides to double-check the same fact three different ways will happily burn your entire latency and cost budget doing it if nothing stops it. When the limit is hit, the fallback should be a clear "I couldn't complete this, here's what I tried" handed to a human — not a silent failure and not an infinite retry.</p>
+<h2 id="sequential-vs-parallel-steps">Sequential vs parallel steps</h2>
+<p>Not every tool call needs to wait for the previous one. If a task needs the customer's credit status and their open order count, and neither depends on the other, fetch both concurrently rather than serially — it's a straightforward asyncio.gather, not a reason to adopt a graph-based orchestration framework. Reserve genuine sequential dependency (fetch the order, then validate against its actual line items) for cases where step 2 truly needs step 1's output.</p>
+<div class="callout-warn">
+  <strong>Retries need a cap and a different strategy per failure type</strong>
+  <p>A tool call that failed because of a transient network error should retry with backoff. A tool call that failed because the model passed an invalid parameter should not retry blindly — it should go back to the model with the error message so it can correct the argument, capped at one or two correction attempts before giving up. Treating both failure types the same way either wastes retries or gives up too early.</p>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the orchestration is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>The performance of orchestration in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>Production orchestration looks different from development orchestration. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="state-that-survives-a-restart">State that survives a restart</h2>
+<p>For anything that runs longer than a single request-response cycle — a multi-step approval workflow, a batch job processing hundreds of records — persist the loop's state (which step it's on, what's been done, what's pending) somewhere durable, not just in memory. If the process restarts mid-task, you want to resume from the last completed step, not silently lose a half-finished workflow or, worse, restart it and duplicate the tool calls that already ran.</p>
+<h2 id="when-a-framework-earns-its-place">When a framework earns its place</h2>
+<p>Reach for LangGraph, a durable-execution engine, or similar once you need: state that survives process restarts across long-running workflows, complex branching that a plain loop makes hard to read, or a team standard so multiple engineers write orchestration the same way. None of that is required for the common case of "user asks something, agent calls a couple of tools, agent answers" — that case is the 30-line loop above with a step cap and a timeout, and adding a framework for it just adds a debugging layer between you and what actually happened.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring orchestration first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with orchestration when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Situation</th><th>Right tool</th></tr>
+  <tr><td>Single request, a few tool calls, done</td><td>Plain loop with step/time limits</td></tr>
+  <tr><td>Independent lookups</td><td>Concurrent calls (asyncio.gather), not sequential</td></tr>
+  <tr><td>Multi-day workflow, needs to survive restarts</td><td>Durable execution engine or persisted state machine</td></tr>
+  <tr><td>Complex conditional branching, multiple engineers</td><td>Graph-based framework, for the shared vocabulary</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent orchestration patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Orchestration is control flow with an LLM in the loop — treat it with the same discipline you'd apply to any retry logic: hard bounds, explicit failure paths, and state that survives a crash when the task is long-running. Start with the plain loop, add a framework only when you can name the specific capability (durable state, complex branching, team standardization) it gives you that the loop doesn't.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

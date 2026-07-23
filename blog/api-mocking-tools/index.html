@@ -93,89 +93,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Mocking an API means your frontend team stops waiting on your backend team, and your integration tests stop depending on a third-party sandbox that's down half the time. The three tools that cover almost every mocking scenario worth naming — Prism, WireMock, and Mock Service Worker — target different layers of the stack, and most teams that mock seriously end up using more than one.</p>
+<h2 id="prism-mocking-straight-from-openapi">Prism: mocking straight from an OpenAPI spec</h2>
+<p>Prism (from Stoplight) generates a working mock server directly from an OpenAPI or Swagger document — no separate mock configuration to maintain, because the spec <em>is</em> the mock. It returns example responses defined in the spec, or generates plausible fake data from the schema when no example is given, and it can also run in validation-proxy mode, sitting in front of a real API and flagging requests or responses that don't match the contract. Prism's strength is that the mock can never drift from the spec, because there's only one artifact. Its limit is the flip side of that: if your spec is thin or missing realistic examples, the generated mock data is often not useful for testing anything beyond happy-path shape.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiMockingExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Mocking(Api doc)
-    {
-        // Custom mocking logic for api mocking tools
-        if (doc?.Mocking == null) return;
-        Base.Mocking(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · RUNNING PRISM AGAINST AN OPENAPI SPEC</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>npx @stoplight/prism-cli mock ./openapi.yaml --port 4010
+
+curl http://localhost:4010/v1/orders/4521
+# Returns the example response defined for this
+# operation in openapi.yaml, or a schema-generated
+# fake if no example is present</code></pre>
 </div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on api mocking tools — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="wiremock-stateful-http-level-mocking">WireMock: stateful, HTTP-level mocking for tests</h2>
+<p>WireMock runs as a standalone server (JVM-based, though it has ports for other ecosystems) and is built for stubbing HTTP dependencies in integration tests — you define request matchers and canned responses, including fault injection (delays, connection resets, malformed responses) to test how your code handles a flaky upstream. Where Prism is driven by a spec, WireMock is driven by explicit stub definitions, which makes it more work to set up but gives you precise control over scenarios a spec can't express: "return a 429 on the third request, then succeed," or "simulate a 5-second timeout." It's the tool of choice when you're testing resilience code — retries, circuit breakers, backoff — rather than just verifying your client parses responses correctly.</p>
+<div class="callout">
+  <strong>Prism validates the contract, WireMock exercises failure paths</strong>
+  <p>These aren't competing tools so much as different layers: Prism keeps your mock honest against the spec, WireMock lets you rehearse the failure scenarios a spec was never designed to describe.</p>
+</div>
+<h2 id="msw-mocking-inside-the-browser-and-node">MSW: mocking at the network layer, inside your JS runtime</h2>
+<p>Mock Service Worker takes a different approach entirely — it intercepts requests at the network level (via the Service Worker API in browsers, or a request interception layer in Node) rather than running a separate server your app points at. This means the same mock handlers work in your component tests, your Storybook stories, and your local dev environment without changing a base URL or spinning up a process. For frontend teams, this is usually the deciding factor: no separate mock server to keep running, and the app's fetch/axios code runs completely unmodified against intercepted requests.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · MSW REQUEST HANDLER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { http, HttpResponse } from 'msw'
+
+export const handlers = [
+  http.get('/api/orders/:id', ({ params }) => {
+    return HttpResponse.json({
+      id: params.id,
+      status: 'shipped',
+      total: 4200
+    })
+  }),
+]</code></pre>
+</div>
+<h2 id="choosing-based-on-where-the-mock-runs">Choosing based on where the mock needs to run</h2>
+<p>The decision usually isn't "which is the best mocking tool" but "which layer am I mocking at." If you're building a spec-first API and want frontend and backend teams working in parallel against a shared contract, start with Prism generating the mock straight from the spec everyone already agreed on. If you're writing backend integration tests against a third-party API and need to simulate specific failure conditions, WireMock's explicit stubbing and fault injection is the better fit. If you're a frontend team that wants tests, Storybook, and local dev all sharing one set of mocks without running a separate server, MSW is purpose-built for that.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>A mock that never fails teaches you nothing about resilience</strong>
+  <p>It's tempting to only stub the 200 response. Budget time to mock 4xx, 5xx, timeouts, and malformed payloads too — that's where the bugs your retry logic is supposed to catch actually live.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the mocking is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for api
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-mocking-edge-cases-i-have-shipped">The mocking edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="migration-path-when-api-changes">Migration path when api changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-mocking-in-production">How to debug mocking in production</h2>
-<p>The performance of mocking in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-api-that-works">The version of api that works</h2>
-<p>Production mocking looks different from development mocking. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiMockingExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Mocking(Api doc)
-    {
-        // Custom mocking logic for api mocking tools
-        if (doc?.Mocking == null) return;
-        Base.Mocking(doc);
-    }
-}</code></pre>
-</div>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mocking first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mocking when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Tool</th><th>Runs as</th><th>Best for</th></tr>
+  <tr><td>Prism</td><td>Standalone mock server from OpenAPI spec</td><td>Contract-first parallel development</td></tr>
+  <tr><td>WireMock</td><td>Standalone HTTP stub server</td><td>Integration tests, fault injection</td></tr>
+  <tr><td>MSW</td><td>Network-layer interception, in-process</td><td>Frontend tests, Storybook, local dev</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api mocking tools — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>None of these tools replace testing against the real API before shipping — they replace waiting on it. Pick the one that mocks at the layer you're actually working in, and don't be surprised if a mature project ends up running two of the three for different purposes.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

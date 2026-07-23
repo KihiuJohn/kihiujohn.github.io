@@ -93,98 +93,67 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The LLM is the easy part. this is one of the parts of the wrapper that makes the LLM useful in production. The pattern that survives 18 months of operation is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM, with a deterministic layer between the LLM and the production system.</p>
-<h2 id="how-to-evaluate-token-in-production">How to evaluate token in production</h2>
-<p>How to evaluate token in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Token cost in a production LLM application is a function of four decisions: how much context you send, which model you send it to, how much output you ask for, and how often you can avoid re-sending the same thing. None of these require exotic tooling — they're mostly design discipline applied before the first API call goes out, and they compound. A system that gets all four right can run at a fraction of the spend of one that gets none of them right, for the same user-facing quality.</p>
 
-def list_token(query: str) -> str:
-    """List token matching the query."""
-    response = requests.get(
-        f"https://api.example.com/token",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="token", func=list_token, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on token optimisation for llm apps, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-optimisation-in-the-agent-loop">The role of optimisation in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The token is not the question; the failure mode of the optimisation is.</p>
+<h2 id="prompt-caching-stop-paying-for-the-same-context-twice">Prompt caching: stop paying for the same context twice</h2>
+<p>Most production prompts have a large stable part — a system prompt, a tool schema, a set of few-shot examples, a document being repeatedly queried — and a small part that changes per request. Prompt caching lets the provider reuse the processed representation of that stable prefix across calls instead of reprocessing it every time. The practical effect is that a long system prompt or a reference document you query repeatedly stops being charged at full price on every request; you pay to write it into the cache once, then pay a much smaller amount to read it on each subsequent call within the cache's lifetime.</p>
+<p>The catch is that caching only helps if the prefix is genuinely stable and appears in the same position on every call. If you interpolate a timestamp or a user ID into the middle of your system prompt, you invalidate the cache on every request and get none of the benefit. The fix is mechanical: put anything that changes — user input, retrieved context, session state — after the stable block, never before or inside it.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+  <div class="code-header"><span class="code-lang">PYTHON · PROMPT CACHING</span><button class="copy-btn" type="button">Copy</button></div>
 <pre><code>from anthropic import Anthropic
+
 client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="what-token-optimisation-for-llm-apps-actually-does">What Token Optimisation for LLM Apps actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
+
+# Stable block goes first and is marked cacheable.
+# Per-request content goes after it, never interpolated inside.
+response = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=500,
+    system=[
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT,          # long, unchanging
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": TOOL_DOCS,              # also unchanging
+            "cache_control": {"type": "ephemeral"},
+        },
     ],
-    tools=[{"type": "function", "function": {...}}]
+    messages=[{"role": "user", "content": user_query}],
 )</code></pre>
 </div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of optimisation in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+
+<h2 id="right-size-the-model-to-the-task">Right-size the model to the task</h2>
+<p>Not every step in a pipeline needs the strongest model you have access to. Classification, extraction, routing, and simple reformatting are tasks a smaller, cheaper model handles reliably — the failure mode is usually ambiguity in the prompt, not a lack of reasoning capability. Reserve the larger model for the steps that actually require multi-step reasoning, synthesis across conflicting sources, or judgment calls with real consequences.</p>
+<p>A common production shape is a cascade: a cheap model classifies or extracts first, and only ambiguous or high-stakes cases get escalated to the expensive model. This is more work to build than calling one model for everything, but it's also the single biggest lever most teams have, because model tier differences in cost are large while the task mix in a real pipeline is usually skewed toward the simple end.</p>
 <div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
+  <strong>Measure before you downgrade</strong>
+  <p>Don't swap models based on a vibe. Run the cheaper model against a held-out set of real production inputs, score the outputs against the current model's outputs, and only ship the downgrade for the task categories where quality holds. Some tasks tolerate a smaller model fine; others silently degrade in ways that don't show up until a user complains.</p>
 </div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production optimisation looks different from development optimisation. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_token(query: str) -> str:
-    """List token matching the query."""
-    response = requests.get(
-        f"https://api.example.com/token",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="trim-context-retrieve-dont-stuff">Trim context: retrieve, don't stuff</h2>
+<p>The laziest way to give a model context is to paste the whole document, the whole conversation history, or the whole database row into the prompt. It works, and it is usually the most expensive possible way to solve the problem, because you're paying input-token rates on content the model never needed for that particular query. Retrieval — fetching only the passages relevant to the current request, via embeddings search, keyword search, or plain structured lookups — keeps the per-call context proportional to what the task actually requires.</p>
+<p>The same applies to conversation history in multi-turn agents: summarising or truncating older turns instead of replaying the full transcript on every call keeps a long-running session from growing its per-message cost linearly for the whole conversation. A rolling summary of what happened more than N turns ago is usually enough context to keep the agent coherent, and it's far cheaper than re-sending every prior message verbatim.</p>
 
-tools = [Tool(name="token", func=list_token, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="control-output-length-not-just-input">Control output length, not just input</h2>
+<p>Input tokens get most of the attention because context windows are the visible constraint, but output tokens are billed too, and free-form prose is an expensive way to get a small amount of information out of a model. If the downstream consumer of a response is code — a database write, a UI field, another API call — ask for structured output (JSON with a fixed schema, or a short enumerated answer) rather than a paragraph the code then has to parse. This cuts output tokens directly and removes a parsing failure mode at the same time.</p>
+<p>Setting an explicit max-tokens ceiling and a system-prompt instruction to be concise both help, but they're a backstop, not a substitute for asking a well-scoped question. A model asked "summarise this in one sentence" reliably produces a shorter, cheaper answer than one asked "tell me about this" and then truncated after the fact.</p>
+
+<h2 id="batch-and-decouple-non-interactive-work">Batch and decouple non-interactive work</h2>
+<p>Anything that doesn't need a response within the same request-response cycle a user is waiting on — nightly categorisation jobs, bulk document summarisation, backfilling embeddings — should not be run through the same interactive, low-latency path as a chat interface. Providers that offer batch or asynchronous processing for non-interactive workloads typically price it lower than synchronous calls, in exchange for turnaround measured in minutes or hours instead of seconds. If a job runs on a schedule and nobody is watching a spinner, there's no reason to pay the premium for immediate responses.</p>
+<p>This also decouples your cost from your peak concurrency. A synchronous pipeline that fires a burst of LLM calls whenever a batch job kicks off competes for the same rate limits and latency budget as your live user traffic; queuing that work and processing it asynchronously removes the contention entirely.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring optimisation first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add token on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with optimisation when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Model tier</th><th>Good fit</th><th>Relative cost</th></tr>
+  <tr><td>Small / fast model</td><td>Classification, extraction, routing, formatting</td><td>Lowest</td></tr>
+  <tr><td>Mid-size model</td><td>Summarisation, drafting, moderate reasoning</td><td>Moderate</td></tr>
+  <tr><td>Frontier model</td><td>Multi-step reasoning, synthesis, high-stakes judgment</td><td>Highest</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on token optimisation for llm apps. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Token spend is rarely one big inefficiency — it's the compounding effect of sending more context than needed, choosing a stronger model than the task requires, asking for more output than the task requires, and reprocessing the same stable content on every call. Fix those four in order of effort: caching and output control are usually a config change, model right-sizing needs an evaluation pass, and context trimming needs retrieval infrastructure if you don't already have it. None of it is exotic; it's the same discipline as trimming an over-fetching database query, applied to a different kind of API.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

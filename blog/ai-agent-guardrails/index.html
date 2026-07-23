@@ -93,98 +93,42 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Safety, guardrails, and observability is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>In the work I have done on ai agent guardrails — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Guardrails are the part of an agent system that never shows up in the demo. A demo has one happy path and a friendly user; production has adversarial input, malformed tool calls, and a support rep pasting an email that contains an instruction telling the model to ignore its system prompt. Guardrails are what stand between "the model did something reasonable" and "the model did something reasonable to an attacker's input."</p>
+<h2 id="input-validation-before-the-model-sees-it">Input validation before the model ever sees it</h2>
+<p>The cheapest guardrail is the one that runs before a token reaches the model: length caps, encoding checks, and stripping or flagging content that looks like an injected instruction (patterns like "ignore previous instructions," "you are now," system-prompt-shaped text embedded in what should be plain data). None of this is bulletproof — a determined attacker rephrases around a blocklist — but it removes the low-effort attempts cheaply and keeps your prompt-injection classifier's workload smaller. If the agent ingests untrusted content (scraped pages, emails, uploaded documents), treat that content as data, not instructions, by wrapping it in clearly delimited tags and telling the system prompt explicitly that text inside those tags is never to be treated as a command.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>The instruction/data boundary is the whole problem</strong>
+  <p>Prompt injection exists because LLMs don't have a hard architectural separation between "instructions from the developer" and "data the agent is processing." Anthropic's and OpenAI's system-prompt hierarchies help but don't eliminate this. Assume any untrusted text your agent reads could contain an attempted instruction, and design tool permissions so that even a successful injection can't do damage.</p>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the guardrails is.</p>
+<h2 id="output-validation-and-schema-enforcement">Output validation and schema enforcement</h2>
+<p>Never let a model's raw text output reach a system that acts on it. Force structured output — JSON mode, Anthropic's tool-forcing, or a Pydantic/Zod schema validated after generation — so a malformed or unexpected response fails loudly instead of getting silently interpreted. Validate enums strictly: if a field is supposed to be one of five action types, reject anything outside that set rather than trying to coerce it. This single practice eliminates a large share of "the agent did something weird" incidents, because most of them trace back to unstructured text being parsed with a brittle regex somewhere downstream.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-guardrails">Prompt patterns that work for guardrails</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The performance of guardrails in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-role-of-guardrails-in-the-agent-loop">The role of guardrails in the agent loop</h2>
-<p>Production guardrails looks different from development guardrails. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · OUTPUT VALIDATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from pydantic import BaseModel, ValidationError
+from typing import Literal
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+class AgentAction(BaseModel):
+    action: Literal["reply", "escalate", "close_ticket", "no_action"]
+    confidence: float
+    reasoning: str
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def validate_agent_output(raw_json: str) -> AgentAction | None:
+    try:
+        result = AgentAction.model_validate_json(raw_json)
+    except ValidationError:
+        return None  # fail closed — route to human review
+    if result.confidence < 0.6:
+        return None  # low confidence, don't auto-execute
+    return result</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring guardrails first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with guardrails when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="scope-limiting-what-the-agent-can-touch">Scope limiting: what the agent can actually touch</h2>
+<p>The strongest guardrail isn't a filter, it's permissions. An agent that can only call a narrow set of read-only tools plus one tightly scoped write tool (with its own server-side validation) can't cause much damage even if it's fully compromised by a prompt injection. Give the agent the minimum tool surface the task requires, put irreversible or high-value actions (refunds, deletions, financial transactions) behind a human-approval step regardless of the model's confidence, and never give an agent a generic "run this SQL" or "execute this shell command" tool — that collapses every other guardrail into one bypass.</p>
+<h2 id="content-filtering-and-provider-level-safety">Content filtering and provider-level safety</h2>
+<p>Both OpenAI's moderation endpoint and Anthropic's and Google's built-in safety classifiers catch the obvious categories — hate speech, self-harm, explicit content — but they're tuned for general harm, not your domain. A guardrail layer specific to your use case (a medical agent that shouldn't give dosing advice, a financial agent that shouldn't recommend a specific trade) has to be built separately, usually as a second, cheaper model call that classifies the primary model's draft response before it's shown to the user. Keep that classifier fast and narrow — one job, one label — rather than trying to fold it into the same call that generated the response.</p>
+<h2 id="observability-so-you-know-guardrails-are-working">Observability: knowing the guardrails are actually working</h2>
+<p>Log every blocked input, every failed schema validation, and every human override, with enough context to reconstruct why. Without that log, you can't tell the difference between a guardrail that's silent because nothing bad ever happens and one that's silently failing to catch anything. Review the block log weekly in the first month after launch — it's the fastest way to find both false positives (legitimate requests getting blocked) and gaps (attack patterns your filters didn't anticipate).</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent guardrails — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Guardrails aren't one feature, they're four separate ones: validate input before the model sees it, force and validate structured output, scope tool permissions to the minimum the task needs, and keep a human in the loop on anything irreversible. Skip the permission scoping and the other three become a false sense of security — a narrow enough tool surface is worth more than a clever prompt.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,93 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Standard APM tells you a request took 800ms and returned 200. For an LLM-backed agent that's almost useless — the request could have taken eight LLM calls, picked the wrong tool twice, and produced a confidently wrong answer, all while looking healthy on a normal dashboard. Observability for LLM apps means instrumenting the things that are specific to this kind of system: the prompt, the tool calls, the token spend, and the reasoning steps in between, not just the HTTP envelope around them.</p>
+<h2 id="traces-not-just-logs">Traces, not just logs</h2>
+<p>A single user request to an agent can trigger multiple LLM calls, tool invocations, and retries. Log lines scattered across that sequence are hard to reconstruct after the fact. What you actually want is a trace: one request ID that threads through every LLM call and tool call in the chain, each recorded as a span with its own duration, token count, and result. Standard distributed tracing (OpenTelemetry works fine here) applies directly — an LLM call is just a span with unusual attributes: prompt tokens, completion tokens, model name, and the tool calls it triggered.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Observability
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · SPAN PER LLM CALL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from opentelemetry import trace
+
+tracer = trace.get_tracer("agent.llm")
+
+def call_model(messages, tools):
+    with tracer.start_as_current_span("llm.call") as span:
+        response = client.messages.create(model=MODEL, messages=messages, tools=tools)
+        span.set_attribute("llm.model", MODEL)
+        span.set_attribute("llm.input_tokens", response.usage.input_tokens)
+        span.set_attribute("llm.output_tokens", response.usage.output_tokens)
+        span.set_attribute("llm.tool_calls", len(response.tool_calls or []))
+        return response</code></pre>
 </div>
-<h2 id="why-observability-is-the-on-call-s-best-friend">Why observability is the on-call's best friend</h2>
-<p>In the work I have done on observability for llm apps, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="gitops-for-llm">GitOps for llm</h2>
-<p>When the work moves from design to production, the questions change. The observability is not the question; the failure mode of the llm is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "observability_llm" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-deployment-pipeline-for-observability">The deployment pipeline for observability</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-four-numbers-worth-a-dashboard">The four numbers worth a dashboard</h2>
+<p>Token spend per request (cost has a direct line to your bill, and a regression here is often the first sign something changed upstream), tool-call success rate (a tool returning an error the agent has to reason around is a hidden tax on every subsequent call), steps-to-completion (a jump from 2 average tool calls to 6 for the same task class means the agent started looping or second-guessing), and end-to-end latency broken down by span, not just totalled. The total latency number tells you something is slow; the span breakdown tells you whether it's the model, the tool, or the network — three completely different fixes.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Log the prompt, not just the response</strong>
+  <p>When something goes wrong, the response alone rarely explains why. Store the exact prompt (system + user + injected context) alongside the response, with a retention period that matches your privacy obligations. Reproducing a bad answer without the prompt that produced it is guesswork.</p>
 </div>
-<h2 id="slos-and-error-budgets-for-llm">SLOs and error budgets for llm</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: observability
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: observability
-  template:
-    metadata:
-      labels:
-        app: observability</code></pre>
-</div>
-<h2 id="incident-response-for-observability">Incident response for observability</h2>
-<p>The performance of llm in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="what-observability-for-llm-apps-gives-you">What Observability for LLM Apps gives you</h2>
-<p>Production llm looks different from development llm. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Observability
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<h2 id="sampling-what-you-store">Sampling what you store</h2>
+<p>Storing full prompts and responses for every request gets expensive and raises privacy questions fast, especially if customer or employee data flows through the prompt. A workable default: store full traces for a sampled percentage of traffic, plus 100% of traces that ended in an error, a low-confidence tool result, or a human escalation. That combination catches the interesting cases — failures and edge cases — without paying to store every routine success in full detail.</p>
+<h2 id="alerting-on-agent-specific-signals">Alerting on agent-specific signals</h2>
+<p>Standard alerts (error rate, p99 latency) still matter, but add two that are specific to agents: a spike in tool-call error rate (often means an upstream API — Acumatica, a payment gateway — changed shape or started rate-limiting) and a spike in "agent gave up / asked for human help" rate (often the earliest signal of a prompt regression or a model version change, well before it shows up in a satisfaction survey). Both are cheap to compute from the same trace data you're already collecting.</p>
+<h2 id="connecting-observability-to-the-runbook">Connecting observability to the runbook</h2>
+<p>A trace that shows the fifth tool call returned a 429 from Acumatica's API is only useful if someone on call knows what to do with a 429 from Acumatica's API. Attach a short runbook link to each alert type — "tool error rate spike" points to "check API gateway rate limits and the retry/backoff config," not to a generic "investigate" ticket. The instrumentation earns its cost only when it shortens the path from alert to fix.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring llm first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add observability on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with llm when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Signal</th><th>What it catches</th></tr>
+  <tr><td>Tokens per request</td><td>Cost regressions, runaway context growth</td></tr>
+  <tr><td>Tool success rate</td><td>Upstream API changes, bad tool schemas</td></tr>
+  <tr><td>Steps to completion</td><td>Looping, indecisive reasoning</td></tr>
+  <tr><td>Escalation / give-up rate</td><td>Prompt or model regressions</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on observability for llm apps. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Treat each LLM call and tool call as a traced span with token, cost, and outcome attributes, not just a log line. Sample full detail for routine traffic and keep everything for failures. The dashboards only pay for themselves if every alert routes to a runbook someone can actually execute at 3am — instrumentation without that link is just a more expensive way to notice the problem after the fact.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

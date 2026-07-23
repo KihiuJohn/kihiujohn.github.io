@@ -93,89 +93,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-version-of-api-that-works">The version of api that works</h2>
-<p>The version of api that works is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiGatewayExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Gateway(Api doc)
-    {
-        // Custom gateway logic for api gateway service
-        if (doc?.Gateway == null) return;
-        Base.Gateway(doc);
-    }
-}</code></pre>
+    <p>API gateways and service meshes both sit in the request path and both handle things like routing, retries, and observability — which is why teams keep asking whether they need one, the other, or both. The short answer: they solve different traffic problems, and most systems past a certain size end up running both, each scoped to the traffic it's actually good at.</p>
+<h2 id="north-south-vs-east-west-traffic">North-south vs. east-west traffic</h2>
+<p>An API gateway sits at the edge, handling north-south traffic — requests coming in from clients outside your cluster: mobile apps, browsers, partner integrations. A service mesh (Istio, Linkerd, Consul Connect) sits inside the cluster, handling east-west traffic — the calls services make to each other. This is the cleanest way to draw the line: if the caller is outside your trust boundary, it's gateway territory; if both caller and callee are your own services, it's mesh territory. Routing all internal service-to-service calls back out through the edge gateway to get its features works, but it adds a network hop and makes the gateway a bottleneck for traffic volumes it wasn't sized for.</p>
+<h2 id="how-a-mesh-actually-works">How a mesh actually works: the sidecar model</h2>
+<p>A service mesh works by injecting a sidecar proxy (Envoy, in Istio's case) next to every service instance. All traffic in and out of the service passes through its sidecar, which handles mTLS, retries, timeouts, and traffic shaping — without the service's own code knowing any of it is happening. This is the mesh's core value proposition: uniform network policy across every service, enforced by infrastructure, with zero application code changes. The cost is operational: you're now running and upgrading a proxy per instance, and debugging a request means understanding two hops (app to sidecar, sidecar to sidecar) instead of one.</p>
+<div class="callout">
+  <strong>mTLS everywhere is the mesh's killer feature</strong>
+  <p>Getting mutual TLS between every service pair right by hand — certificate issuance, rotation, verification — is real work most teams under-invest in. A mesh gives you it by default across the whole cluster, which is often the single strongest argument for adopting one.</p>
 </div>
-<h2 id="why-api-gateway-vs-service-mesh-matters-in-production">Why API Gateway vs Service Mesh matters in production</h2>
-<p>In the work I have done on api gateway vs service mesh, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="feature-overlap-and-where-it-ends">Feature overlap, and where it actually ends</h2>
+<p>Both gateway and mesh do retries, timeouts, circuit breaking, and telemetry, which is where the confusion comes from. But a gateway's routing decisions are typically coarse — which service owns this path — while a mesh's routing can do fine-grained traffic splitting for canary releases, A/B tests, and per-request load balancing between service versions. A gateway generally doesn't know or care about your internal service topology; a mesh is built entirely around it.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · ISTIO VIRTUALSERVICE (CANARY SPLIT)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: payments
+spec:
+  hosts: ["payments.internal"]
+  http:
+    - route:
+        - destination:
+            host: payments.internal
+            subset: v1
+          weight: 90
+        - destination:
+            host: payments.internal
+            subset: v2
+          weight: 10</code></pre>
+</div>
+<h2 id="operational-cost-of-a-mesh">The operational cost a mesh adds</h2>
+<p>A mesh is not a free upgrade. Every pod gains a sidecar container, adding memory overhead and startup latency across the whole cluster. Debugging becomes harder because a failed request could be failing in your code, the sidecar, or the control plane pushing config to the sidecar. Teams below roughly a few dozen services rarely have enough east-west traffic complexity to justify this cost — a gateway plus straightforward client-side retry logic in each service covers most of what they need, and the mesh becomes worth it once you have enough services that manually keeping mTLS and retry policy consistent across all of them stops being realistic.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Don't adopt a mesh to get one feature</strong>
+  <p>If the only thing you want is mTLS or uniform retries, evaluate whether a shared library or a simpler proxy pattern gets you there before taking on an entire mesh control plane and its upgrade cadence.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the gateway is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for api
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="api-implementation-walkthrough">Api implementation walkthrough</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="performance-and-observability-for-api">Performance and observability for api</h2>
-<p>The performance of gateway in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Production gateway looks different from development gateway. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class ApiGatewayExt : PXGraphExtension<ApiEntry>
-{
-    [PXOverride]
-    public virtual void Gateway(Api doc)
-    {
-        // Custom gateway logic for api gateway service
-        if (doc?.Gateway == null) return;
-        Base.Gateway(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="running-both-together">Running both together</h2>
+<p>In practice, larger systems run a gateway at the edge for client-facing concerns (auth, rate limiting, external API versioning) and a mesh internally for service-to-service concerns (mTLS, fine-grained routing, resilience policy). The gateway typically terminates at the mesh's ingress gateway component, which is itself mesh-managed — so the two aren't really competing, they're stacked, each doing the job it's actually built for.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring gateway first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with gateway when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concern</th><th>Gateway</th><th>Service mesh</th></tr>
+  <tr><td>Traffic direction</td><td>North-south (client to cluster)</td><td>East-west (service to service)</td></tr>
+  <tr><td>mTLS between services</td><td>Not its job</td><td>Core feature</td></tr>
+  <tr><td>Canary/traffic splitting</td><td>Coarse, path-based</td><td>Fine-grained, per-service</td></tr>
+  <tr><td>Operational overhead</td><td>One component to run</td><td>Sidecar per pod, control plane</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api gateway vs service mesh. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Pick based on traffic direction, not feature checklists: gateway for what crosses your trust boundary, mesh for what happens between your own services once that complexity earns its operational cost. Most systems don't need a mesh on day one, and plenty never will.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

@@ -93,82 +93,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough fiscalisation projects to know the patterns that work. They share a few traits: the device stores its private key in a vault, the offline buffer is sized for the worst case, and the audit trail is the source of truth. This article is the patterns.</p>
-<h2 id="what-api-strangler-fig-pattern-is-for">What API Strangler Fig Pattern is for</h2>
-<p>What API Strangler Fig Pattern is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The strangler fig pattern is named after the vine that grows around a host tree, gradually taking over its structural role until the original tree can be removed and the vine stands on its own. Applied to APIs, it means routing traffic to a new implementation incrementally — endpoint by endpoint, or route by route — behind a facade, rather than attempting a big-bang cutover. It's the pattern of choice for migrating a legacy API without a multi-month freeze on new features.</p>
+<h2 id="the-facade-is-the-whole-pattern">The facade is the whole pattern</h2>
+<p>The mechanism is a routing facade — usually the API gateway itself — that sits in front of both the legacy system and the new one, and decides per-request which backend handles it. Clients keep calling the same base URL throughout the migration; they have no visibility into which system actually served the request. This is what makes the pattern low-risk compared to a rewrite-and-cutover: at every point in the migration, the system is in a valid, fully-functioning state, just with an evolving split of traffic between old and new.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · GATEWAY ROUTING DURING MIGRATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>routes:
+  - path: /api/v1/invoices/*
+    upstream: legacy-monolith     # not yet migrated
+  - path: /api/v1/customers/*
+    upstream: customers-service   # migrated, new implementation
+  - path: /api/v1/orders/*
+    upstream: orders-service
+    canary:
+      legacy-monolith: 90%        # in-flight migration
+      orders-service: 10%</code></pre>
 </div>
-<h2 id="the-regulatory-context">The regulatory context</h2>
-<p>In the work I have done on api strangler fig pattern, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="picking-the-first-slice-to-migrate">Picking the first slice to migrate</h2>
+<p>The migration order matters more than the migration mechanics. Start with a route that's low-risk but real — enough traffic to prove the new implementation under genuine load, but not the endpoint that processes payments. A common mistake is migrating the easiest code first regardless of risk profile, which proves the pattern works but doesn't retire any of the complexity that made the legacy system painful in the first place. The better heuristic: migrate the pieces that are both frequently changed and well-isolated, since those are where the legacy system is costing you the most in velocity.</p>
+<div class="callout">
+  <strong>Migrate by capability, not by convenience</strong>
+  <p>Order the migration by which parts of the legacy system generate the most change requests and bug reports, not by which are easiest to extract. The whole point is to stop paying the legacy tax on the code that hurts most, as early as possible.</p>
+</div>
+<h2 id="dual-writes-and-data-consistency">Dual writes and the data consistency problem</h2>
+<p>The part of a strangler migration that goes wrong most often isn't the routing — it's data. If the new service needs its own data store, you either dual-write to both systems during the transition (with all the consistency risk that implies if one write succeeds and the other fails) or have the new service read from the legacy database until its own store is proven out. Dual writes need a reconciliation job checking the two stores agree, because "eventually consistent, we hope" is not a real consistency guarantee — it's an unmonitored assumption.</p>
 <div class="callout callout-warn">
-  <strong>The device is the trust boundary</strong>
-  <p>The fiscal device signs every receipt. If the device is compromised, the taxpayer is liable. The right pattern is to store the private key in a vault.</p>
+  <strong>Never delete legacy data access until reconciliation is silent for a full cycle</strong>
+  <p>Cutting the legacy write path the moment the new service looks like it's working removes your fallback and your ability to detect silent divergence. Keep both paths live and monitored until the discrepancy count has been zero for at least one full business cycle.</p>
 </div>
-<h2 id="the-implementation-architecture">The implementation architecture</h2>
-<p>When the work moves from design to production, the questions change. The api is not the question; the failure mode of the strangler is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Credit note
-var creditNote = new FiscalCreditNote {
-    OriginalReceiptNbr = "RC001",
-    Amount = -50.00m,
-    Reason = "RETURN"
-};</code></pre>
-</div>
-<h2 id="device-registration-and-certificate-management">Device registration and certificate management</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The certificate has a shelf life</strong>
-  <p>Certificates have a validity period. The renewal must be scheduled. The right pattern is to alert 30 days before expiry.</p>
-</div>
-<h2 id="offline-mode-and-buffering">Offline mode and buffering</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Receipt submission
-var receipt = new FiscalReceipt {
-    ReceiptNbr = "RC001",
-    Date = DateTime.Now,
-    Amount = 100.00m,
-    VatAmount = 16.00m
-};
-var signature = rsa.Sign(receipt);</code></pre>
-</div>
-<h2 id="reconciliation-and-audit-trail">Reconciliation and audit trail</h2>
-<p>The performance of strangler in tax / fiscal is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The audit trail is mandatory</strong>
-  <p>Every receipt has a fiscal number. Every credit note references the original. The audit trail is not optional; it is the law.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production strangler looks different from development strangler. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Device registration
-var device = new FiscalDevice {
-    Tin = "P051234567X",
-    SerialNbr = "DEV001",
-    PublicKey = rsa.ExportPublicKey()
-};
-var response = api.RegisterDevice(device);</code></pre>
-</div>
+<h2 id="knowing-when-to-stop-and-decommission">Knowing when to stop, and actually decommissioning</h2>
+<p>The strangler pattern has a natural endpoint — the day traffic to the legacy system hits zero — but teams routinely stop short of it, leaving the legacy system running "just in case" indefinitely. That's not a completed migration, it's two systems in permanent parallel, doubling your operational surface. Set an explicit decommission date tied to a traffic threshold (e.g., zero requests for 30 consecutive days) and treat removing the legacy code path as part of the migration's definition of done, not an optional cleanup task for later.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring strangler first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add api on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with strangler when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Phase</th><th>Risk</th><th>What to watch</th></tr>
+  <tr><td>First slice migrated</td><td>Low, if chosen well</td><td>New service under real load</td></tr>
+  <tr><td>Dual writes active</td><td>Highest — data can diverge silently</td><td>Reconciliation job results</td></tr>
+  <tr><td>Traffic fully cut over</td><td>Low</td><td>Legacy system truly idle, not just quiet</td></tr>
+  <tr><td>Legacy decommissioned</td><td>None, if done last</td><td>Nothing — this is the finish line</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on api strangler fig pattern. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>The strangler pattern trades migration speed for migration safety — every stage leaves you with a working system, which is exactly why it's the default choice over a rewrite for anything customers depend on. The discipline it demands is in the data layer and in actually finishing: reconcile before you cut over, and decommission the legacy path on purpose rather than letting it linger.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

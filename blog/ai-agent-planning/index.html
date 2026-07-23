@@ -92,98 +92,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When to use it (and when not to) is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Planning is the difference between an agent that reacts one tool call at a time and one that decides up front what a multi-step task actually requires. For simple lookups you don't need it — call a tool, get an answer, done. For anything that requires gathering information from several places before acting, an explicit planning step usually beats letting the model improvise its way there one call at a time.</p>
+<h2 id="react-plan-as-you-go">ReAct: plan as you go</h2>
+<p>The ReAct pattern (Reason, Act, Observe) interleaves reasoning and action: the model thinks about what to do next, takes one action, observes the result, and reasons again before the next action. It's the default behind most function-calling agent loops because it's simple and it adapts naturally when a tool result changes what's actually needed. The weakness shows up on longer tasks — with no forward plan, the model can wander, repeat a step it already did, or lose track of the overall goal by step six.</p>
+<h2 id="plan-and-execute-decide-first-then-act">Plan-and-execute: decide first, then act</h2>
+<p>Plan-and-execute splits the work into two phases: first the model produces an explicit ordered plan (a list of steps, each naming what needs to happen), then a separate execution loop works through that plan, calling tools per step. This costs one extra LLM call up front but produces a plan you can log, show to a human before execution starts, and validate against business rules — "step 3 wants to release a payment over the auto-approval limit" is something you can catch before any tool actually runs, which ReAct's step-at-a-time model doesn't give you as cleanly.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_planning(query: str) -> str:
-    """List planning matching the query."""
-    response = requests.get(
-        f"https://api.example.com/planning",
-        params={"q": query}
+  <div class="code-header"><span class="code-lang">PYTHON · PLAN-AND-EXECUTE SKELETON</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def plan(task: str) -> list[dict]:
+    response = call_model(
+        f"Break this task into ordered steps, each naming a tool to call: {task}",
+        response_format={"type": "json_schema", "schema": PLAN_SCHEMA},
     )
-    return response.json()
+    return response.parsed["steps"]
 
-tools = [Tool(name="planning", func=list_planning, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def execute_plan(steps: list[dict]) -> list[dict]:
+    results = []
+    for step in steps:
+        if requires_approval(step):
+            approve_or_reject(step)  # human gate before execution
+        results.append(execute_tool(step["tool"], step["arguments"]))
+    return results</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-planning">Latency and cost tradeoffs for planning</h2>
-<p>In the work I have done on planning in ai agents — react, plan-and-execute, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-agents">Prompt patterns that work for agents</h2>
-<p>When the work moves from design to production, the questions change. The planning is not the question; the failure mode of the agents is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-planning-in-production">How to evaluate planning in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-real-tradeoff-is-visibility-vs-adaptability">The real tradeoff is visibility vs adaptability</h2>
+<p>ReAct adapts well when tool results change what's needed mid-task — it naturally re-reasons after every observation. Plan-and-execute gives you a reviewable, loggable artifact before anything executes, at the cost of being slower to adapt when step 2's result invalidates the plan for step 4. A practical middle ground: plan up front, but re-plan (not just improvise) when an executed step's result materially contradicts an assumption the plan was built on, rather than silently pushing forward with a now-wrong plan.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>A plan is worth writing down even when you don't formalize it</strong>
+  <p>Even in a ReAct loop, prompting the model to state its overall goal and expected remaining steps before each action — not as a separate phase, just as part of its reasoning — measurably reduces the "wandered off task" failure mode, and it gives you something readable in the trace when you're debugging why the agent did what it did.</p>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-role-of-agents-in-the-agent-loop">The role of agents in the agent loop</h2>
-<p>The performance of agents in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="what-planning-in-ai-agents-react-plan-and-execute-actually-does">What Planning in AI Agents — ReAct, Plan-and-Execute actually does</h2>
-<p>Production agents looks different from development agents. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_planning(query: str) -> str:
-    """List planning matching the query."""
-    response = requests.get(
-        f"https://api.example.com/planning",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="planning", func=list_planning, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="bounding-plans-the-same-way-you-bound-loops">Bounding plans the same way you bound loops</h2>
+<p>A generated plan can be wrong — too many steps, a step that doesn't map to any real tool, a step that contradicts an earlier one. Validate the plan structurally before executing it: every step's tool name exists in your registry, the plan has a sane step count (reject and re-plan if the model proposes 40 steps for a 3-step task), and any step touching a write action is flagged for the approval gate discussed in the oversight article on this blog. Don't execute a plan you haven't validated just because it parsed as valid JSON.</p>
+<h2 id="when-neither-pattern-is-worth-it">When neither pattern is worth it</h2>
+<p>Most single-tool-call tasks — "what's the status of order SO004821" — don't benefit from either pattern; the overhead of a planning phase adds latency for a task that never had ambiguity about what to do next. Reserve explicit planning for tasks that genuinely span multiple data sources or multiple write actions where the ordering and dependencies matter. If you can enumerate every possible plan for a task class in advance, you don't need the model to generate one at all — a deterministic workflow is more reliable and cheaper.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring agents first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add planning on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with agents when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Task shape</th><th>Pattern</th></tr>
+  <tr><td>Single lookup, no ambiguity</td><td>Direct tool call, no planning</td></tr>
+  <tr><td>Multi-step, adapts based on results</td><td>ReAct</td></tr>
+  <tr><td>Multi-step, needs review before execution</td><td>Plan-and-execute</td></tr>
+  <tr><td>Fixed, enumerable sequence</td><td>Deterministic workflow, no LLM planning needed</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on planning in ai agents — react, plan-and-execute. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Use ReAct for adaptive multi-step tasks where you're comfortable letting the agent reason as it goes, and plan-and-execute when you need a reviewable artifact before anything with real consequences executes. Validate any generated plan structurally before running it, and don't reach for either pattern on tasks simple enough for a single, unambiguous tool call.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

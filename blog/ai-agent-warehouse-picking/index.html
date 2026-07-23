@@ -93,98 +93,73 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>Memory, context, and state management is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Pick path optimisation is a routing problem, not a language problem — so before reaching for an "AI agent," it's worth being precise about what actually needs solving. The sequencing math (which aisle order minimises travel distance) is a classic combinatorial optimisation problem that deterministic algorithms handle well and LLMs handle badly. The place an agent genuinely earns its keep is one layer up: reasoning about exceptions, re-prioritising on the fly, and orchestrating the optimiser rather than replacing it.</p>
+
+<h2 id="picking-strategies-in-brief">Picking strategies, briefly</h2>
+<p>Three picking models cover most warehouse operations, and they set the context for where optimisation applies. <strong>Discrete (single-order) picking</strong> sends one picker after one order, simple but travel-heavy. <strong>Batch picking</strong> groups several orders into one pick run so a picker collects multiple SKUs for multiple orders in a single pass, cutting travel at the cost of a sortation step afterward. <strong>Zone picking</strong> assigns pickers to fixed areas of the warehouse and passes totes between zones (or picks in parallel and consolidates). <strong>Wave picking</strong> is an orchestration layer on top of any of these — releasing batches of orders together, usually timed to a shipping cutoff or carrier pickup.</p>
+<p>In Acumatica's Warehouse Management edition, pick lists are generated from Shipments and can be configured for wave, batch, or zone strategies depending on warehouse setup. None of that configuration involves an LLM — it's rules and thresholds. The optimisation question that's left over, for any of these strategies, is: given a set of pick locations, what order minimises travel time?
+
+</p>
+<h2 id="why-routing-is-an-algorithm-problem">Why routing is an algorithm problem, not a prompting problem</h2>
+<p>Sequencing N pick locations to minimise travel distance is a variant of the travelling salesman problem. It has known, cheap, well-understood solutions: for single-block layouts, an S-shape (serpentine) heuristic that walks each aisle in a snake pattern beats naive nearest-neighbour in most cases; nearest-neighbour with a 2-opt local-search pass gets close to optimal for irregular layouts; for multi-block or multi-zone layouts, dynamic programming over aisle-crossing points works well at the scale of a typical pick list (10-40 lines).</p>
+<p>An LLM asked to sequence twenty bin locations will produce a plausible-looking ordering that is not verified against actual distances, has no guarantee of even being a valid permutation of the input, and cannot be trusted to beat a five-line heuristic. This isn't a prompting problem that better instructions fix — arithmetic and combinatorial search are outside what a language model is built to do reliably. If a pick-path feature description mentions "the AI figures out the optimal route," that's the tell to ask what deterministic algorithm sits underneath it, because something has to.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">PYTHON · NEAREST-NEIGHBOUR + 2-OPT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def nearest_neighbour_route(start, stops, distance):
+    route = [start]
+    remaining = set(stops)
+    current = start
+    while remaining:
+        nxt = min(remaining, key=lambda s: distance(current, s))
+        route.append(nxt)
+        remaining.remove(nxt)
+        current = nxt
+    return route
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+def two_opt(route, distance):
+    improved = True
+    while improved:
+        improved = False
+        for i in range(1, len(route) - 2):
+            for j in range(i + 1, len(route) - 1):
+                a, b, c, d = route[i-1], route[i], route[j], route[j+1]
+                if distance(a, c) + distance(b, d) < distance(a, b) + distance(c, d):
+                    route[i:j+1] = reversed(route[i:j+1])
+                    improved = True
+    return route
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+# route = two_opt(nearest_neighbour_route(dock, pick_locations, warehouse_distance), warehouse_distance)</code></pre>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>In the work I have done on ai agent for warehouse picking optimisation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>That's the whole "optimiser." It runs in milliseconds for a pick list of realistic size and produces a route that's easy to explain to a warehouse supervisor: it's just distances.</p>
+
+<h2 id="where-an-agent-actually-helps">Where an agent actually helps</h2>
+<p>The optimiser above assumes a static problem: fixed stops, fixed distances, solve once. Real warehouses are not static — a picker hits a stockout mid-route, an aisle is blocked by a forklift, a rush order lands after the wave already released, a second picker in the same zone creates congestion. This is where a lightweight agent layer is worth building, not because it computes better routes, but because it decides <em>when to recompute</em> and <em>what changed</em>.</p>
+<p>Concretely: an agent watching pick-confirmation events and location-status signals can detect a stockout the moment a picker scans "not found," pull the next-best bin from cycle-count data, splice it into the remaining route, and re-run the same 2-opt pass on the shortened stop list — instead of leaving the picker to walk back and ask a supervisor. It can re-rank an in-flight wave when a rush shipment lands, deciding whether to interrupt the current pick run or queue the order for the next wave, based on cutoff times and picker load. None of that is arithmetic the LLM is doing — the distance calculation still goes to the same deterministic function. What the agent contributes is judgment about exceptions and timing that would otherwise be hardcoded rules or a person on the radio.</p>
+<div class="callout">
+  <strong>The agent orchestrates; it doesn't route</strong>
+  <p>A workable split: the optimiser owns "given these stops, what's the shortest path" and stays a pure function you can unit test. The agent owns "which stops are still valid, has anything changed, should this wave interrupt that one" — and calls the optimiser again when the answer is yes.</p>
+</div>
+
+<h2 id="a-natural-language-layer-on-top">A natural-language layer on top</h2>
+<p>The other place an agent fits is the interface, not the algorithm. Pickers and supervisors asking "why is bin A-14-3 not in today's route" or "show me every pick list touching zone B that's behind schedule" is a query-answering problem over structured pick data — well suited to an LLM with read access to the pick list and location tables, badly suited to writing a new report screen for every question someone thinks of. Acumatica's generic inquiry and reporting screens already cover the fixed questions; an agent with tool access to the same data covers the ad hoc ones, and it should have no write access to route sequencing at all — it explains the route, it doesn't set it.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>Don't let the agent touch the sequence</strong>
+  <p>If an LLM-backed assistant has a tool that lets it directly reorder pick lines, you've reintroduced the exact failure mode you were avoiding — an unverified permutation replacing a distance-checked one. Keep the write path to "flag for re-optimisation" and let the deterministic pass own the actual ordering.</p>
 </div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the warehouse is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-warehouse">Prompt patterns that work for warehouse</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>The performance of warehouse in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>Production warehouse looks different from development warehouse. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
 
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="measuring-whether-it-helped">Measuring whether it helped</h2>
+<p>Before adding any agent layer, get a baseline from the deterministic optimiser alone: average travel distance per pick list, picks per hour, and how often a route goes stale mid-pick (stockout, blocked aisle, priority interrupt). The agent layer is only worth the added complexity if it measurably reduces the second number — how often a picker is stuck with a route that's now wrong — or reduces the time-to-resolution when it happens. If your warehouse rarely has mid-route exceptions, the payoff is small and a simpler "flag and notify a supervisor" rule may cover it without any agent at all.</p>
 
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring warehouse first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with warehouse when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>Owns</th><th>Right tool</th></tr>
+  <tr><td>Pick sequencing</td><td>Given N stops, shortest order</td><td>S-shape / nearest-neighbour + 2-opt</td></tr>
+  <tr><td>Wave/batch/zone rules</td><td>How orders group into pick runs</td><td>Configuration in the WMS, not AI</td></tr>
+  <tr><td>Exception handling</td><td>Stockouts, blocked locations, congestion</td><td>Agent that re-triggers the optimiser</td></tr>
+  <tr><td>Priority re-ranking</td><td>Rush orders vs. in-flight waves</td><td>Agent reasoning over cutoffs and load</td></tr>
+  <tr><td>Ad hoc queries</td><td>"Why," "show me," "what's behind"</td><td>Agent with read-only tool access</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for warehouse picking optimisation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p>The pattern that holds up: keep the routing math boring, deterministic, and testable, and spend the "AI" budget on the parts of the problem that are actually about judgment under changing conditions — not on asking a language model to do arithmetic it was never good at.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

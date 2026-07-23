@@ -93,98 +93,62 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="how-to-evaluate-incident-in-production">How to evaluate incident in production</h2>
-<p>How to evaluate incident in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+    <p>Bolting an LLM onto an on-call rotation sounds appealing right up until it pages the wrong team at 3am with a confident, plausible-sounding root cause that's wrong. Incident response is one of the higher-leverage places to use an agent — there's a firehose of alerts, logs, and runbooks that a human triages by pattern-matching, which is exactly what a model with good tool access can accelerate — but it's also one of the least forgiving places to get the guardrails wrong, because a bad automated action during an incident makes the incident worse.</p>
 
-def list_incident(query: str) -> str:
-    """List incident matching the query."""
-    response = requests.get(
-        f"https://api.example.com/incident",
-        params={"q": query}
-    )
-    return response.json()
+<h2 id="what-the-agent-should-and-should-not-do">What the agent should and should not do</h2>
+<p>Split the job into three stages: correlation, triage, and remediation. Correlation — pulling related alerts, recent deploys, and relevant logs into one timeline — is safe to fully automate; it's read-only and the worst outcome is a noisy summary. Triage — proposing a likely root cause and severity — should be agent-assisted but human-confirmed, because a wrong severity assignment either wakes people up for nothing or under-pages a real outage. Remediation — restarting a service, rolling back a deploy, scaling a pool — is where you want the agent proposing a specific, reversible action from a fixed runbook menu, not improvising a fix from first principles. An LLM that writes and executes arbitrary remediation commands during a live incident is a second incident waiting to happen.</p>
 
-tools = [Tool(name="incident", func=list_incident, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>In the work I have done on incident response for llm apps, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="the-role-of-response-in-the-agent-loop">The role of response in the agent loop</h2>
-<p>When the work moves from design to production, the questions change. The incident is not the question; the failure mode of the response is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="what-incident-response-for-llm-apps-actually-does">What Incident Response for LLM Apps actually does</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="the-architecture-how-the-pieces-fit-together">The architecture: how the pieces fit together</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="implementation-from-prompt-to-production">Implementation: from prompt to production</h2>
-<p>The performance of response in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>Production response looks different from development response. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+<h2 id="alert-correlation-with-tool-use">Alert correlation is a retrieval problem, not a generation problem</h2>
+<p>The most reliable part of an incident agent is the part that does the least "thinking." Give it tool access to your alerting system, log aggregator, and deploy history, and have it assemble a timeline: what fired, in what order, what changed in the window before the first alert. This is standard function-calling — the model decides which tools to call and in what order, the orchestration layer executes them and returns structured results, and the model synthesizes a summary. Keep the summary grounded by requiring the model to cite the alert ID or log line for every claim it makes; an incident summary with unverifiable claims is worse than a shorter one you can trust.</p>
 
-def list_incident(query: str) -> str:
-    """List incident matching the query."""
-    response = requests.get(
-        f"https://api.example.com/incident",
-        params={"q": query}
-    )
-    return response.json()
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PYTHON · TOOL-USE LOOP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>tools = [
+    {"name": "get_active_alerts", "description": "Fetch alerts firing in the last N minutes"},
+    {"name": "get_recent_deploys", "description": "List deploys to a service in a time window"},
+    {"name": "query_logs", "description": "Run a scoped log query against a service"},
+    {"name": "get_runbook", "description": "Fetch the runbook for a known alert type"},
+]
 
-tools = [Tool(name="incident", func=list_incident, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+response = client.messages.create(
+    model="claude-opus-4-6",
+    max_tokens=2048,
+    tools=tools,
+    system=(
+        "You are triaging a production incident. Correlate alerts, deploys, "
+        "and logs into a timeline. Every claim must cite an alert ID or log line. "
+        "Propose a severity and likely cause, but do not execute remediation — "
+        "hand remediation options to the on-call engineer for approval."
+    ),
+    messages=[{"role": "user", "content": incident_context}],
+)
+# Loop: execute any tool_use blocks, feed tool_result back, repeat until
+# the model returns a final triage summary with no further tool calls.</code></pre>
 </div>
+
+<h2 id="runbook-execution-needs-a-fixed-menu">Runbook execution needs a fixed menu, not a free-form shell</h2>
+<p>If the agent is allowed to take remediation actions, constrain it to a small, pre-approved set of parameterized operations — restart this service, roll back to the last known-good deploy, scale this pool to N instances — each implemented as a tool with strict argument validation, not a general "run this command" tool. The model should never be one prompt injection away from running arbitrary shell. Every remediation tool call should also be reversible or at minimum idempotent, and logged with the reasoning that led to it before it executes, so the retro afterward has a clear record of what the agent decided and why.</p>
+<div class="callout-warn">
+  <strong>Don't let the agent close its own loop</strong>
+  <p>A tempting design is to let the agent execute a fix, watch metrics recover, and mark the incident resolved. Don't. Confirmation bias in an LLM looks the same as confirmation bias in a tired human — it will find a plausible reason the graph looks better. Resolution should require an explicit human sign-off, even if the agent proposed and executed the fix under approval.</p>
+</div>
+
+<h2 id="observability-for-the-agent-itself">The agent needs its own observability</h2>
+<p>Log every tool call, every model response, and every escalation decision with a trace ID tied to the incident. When the postmortem asks "why did the agent think this was a database issue," you need the actual transcript, not a reconstruction. Track false-positive and false-negative triage rates over time per alert type — an agent that's accurate on API latency alerts but consistently wrong on database connection pool exhaustion is telling you it needs better tool access or a more specific runbook for that class of alert, not that the whole system is unreliable.</p>
+
+<h2 id="escalation-when-the-agent-is-unsure">Escalate on disagreement, not just on low confidence</h2>
+<p>Rather than trusting a single self-reported confidence score, run correlation twice — once against the alerting data alone, once with the added context of recent deploys — and escalate to a human immediately if the two triages disagree on severity or likely cause. Disagreement between independent passes is a far more honest signal that something is ambiguous than asking the model to grade its own certainty, and it costs one extra API call, which is cheap compared to a wrong page.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring response first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add incident on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with response when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Stage</th><th>Automation level</th><th>Failure cost if wrong</th></tr>
+  <tr><td>Alert correlation</td><td>Fully automated</td><td>Low — noisy summary</td></tr>
+  <tr><td>Root cause / severity</td><td>Agent-assisted, human-confirmed</td><td>Medium — mispage or under-page</td></tr>
+  <tr><td>Remediation (fixed menu)</td><td>Agent-proposed, human-approved</td><td>High — can worsen the outage</td></tr>
+  <tr><td>Incident resolution</td><td>Human-only sign-off</td><td>High — false all-clear</td></tr>
 </table>
+
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on incident response for llm apps. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Incident-response agents earn their keep on correlation and triage assistance, where the cost of a wrong answer is a few wasted minutes. Keep remediation on a fixed, parameterized runbook menu instead of free-form execution, require human sign-off on resolution, and escalate on disagreement between independent triage passes rather than trusting a single confidence score. The goal isn't a fully autonomous on-call replacement — it's cutting the time between "something's wrong" and "a human with full context is looking at it."</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

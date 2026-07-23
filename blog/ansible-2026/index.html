@@ -93,89 +93,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="migration-path-when-ansible-changes">Migration path when ansible changes</h2>
-<p>Migration path when ansible changes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Ansible remains the default choice for configuration management and lightweight orchestration precisely because it hasn't changed its core model: SSH (or WinRM) plus Python, no agent to install, YAML playbooks that read close to plain English. What has changed by 2026 is the tooling around it — execution environments, the collection ecosystem, and how it fits into a GitOps-driven pipeline rather than being run ad hoc from a laptop.</p>
+<h2 id="execution-environments-replace-ad-hoc-python">Execution environments replace ad hoc Python setups</h2>
+<p>The old failure mode — "works on my machine" because of a locally installed collection or a Python library version mismatch — is what <strong>execution environments</strong> (container images built with <code>ansible-builder</code>, bundling Ansible core, a defined set of collections, and their Python dependencies) are designed to eliminate. Running playbooks through <code>ansible-navigator</code> against an execution environment means the automation runs identically whether it's triggered from a developer's laptop, a CI runner, or AWX/Ansible Automation Platform.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AnsibleXExt : PXGraphExtension<AnsibleEntry>
-{
-    [PXOverride]
-    public virtual void X(Ansible doc)
-    {
-        // Custom  logic for ansible 2026
-        if (doc?.X == null) return;
-        Base.X(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · EXECUTION ENVIRONMENT DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>version: 3
+images:
+  base_image:
+    name: quay.io/ansible/ansible-runner:latest
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+# requirements.yml
+collections:
+  - name: community.general
+    version: ">=8.0.0"
+  - name: amazon.aws
+    version: ">=7.0.0"</code></pre>
 </div>
-<h2 id="how-to-debug-in-production">How to debug  in production</h2>
-<p>In the work I have done on ansible in 2026 — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="collections-not-monolithic-core">Collections, not a monolithic core</h2>
+<p>Since the 2.10 split, Ansible ships as a thin core plus independently versioned collections (<code>community.general</code>, <code>ansible.posix</code>, cloud-vendor collections like <code>amazon.aws</code>). Pin collection versions in <code>requirements.yml</code> the same way you'd pin a package.json dependency — an unpinned <code>ansible-galaxy collection install</code> pulling the latest version of a cloud collection is a common source of a playbook that worked last month silently breaking this month.</p>
+<div class="callout">
+  <strong>ansible-lint catches what code review misses</strong>
+  <p>Run <code>ansible-lint</code> in CI against every playbook change. It catches the class of bugs that are easy to miss by eye — missing <code>become: true</code>, unquoted Jinja expressions, tasks without a <code>name</code>, and use of deprecated module arguments — before they reach a target host.</p>
+</div>
+<h2 id="idempotency-is-still-the-whole-point">Idempotency is still the design contract, not a nice-to-have</h2>
+<p>A playbook re-run against a host that's already in the desired state should report zero changes. This is what separates Ansible modules from a raw shell script and is the property that makes drift detection and safe re-runs possible. The most common way teams break it is reaching for <code>ansible.builtin.shell</code> or <code>command</code> where a proper module exists — a shell command has no built-in concept of "already done," so it runs and reports "changed" every time regardless of actual state.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Use creates/removes as an escape hatch, not a habit</strong>
+  <p>When a shell or command task is genuinely unavoidable, the <code>creates:</code> or <code>removes:</code> argument gives you a cheap idempotency check by testing for a file's existence. It's not a substitute for a real module, but it's better than a task that reports "changed" on every run regardless of actual system state.</p>
 </div>
-<h2 id="the-version-of-ansible-that-works">The version of ansible that works</h2>
-<p>When the work moves from design to production, the questions change. The ansible is not the question; the failure mode of the  is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for ansible
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="why-ansible-in-2026-a-field-guide-matters-in-production">Why Ansible in 2026 — A Field Guide matters in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="ansible-implementation-walkthrough">Ansible implementation walkthrough</h2>
-<p>The performance of  in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Production  looks different from development . The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class AnsibleXExt : PXGraphExtension<AnsibleEntry>
-{
-    [PXOverride]
-    public virtual void X(Ansible doc)
-    {
-        // Custom  logic for ansible 2026
-        if (doc?.X == null) return;
-        Base.X(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="ansible-in-a-gitops-pipeline">Ansible inside a GitOps pipeline</h2>
+<p>The 2026-era pattern is less "run ansible-playbook from a laptop" and more "a merge to main triggers a pipeline that runs the playbook against a defined inventory, with the run's output posted back to the PR." Ansible Automation Platform's job templates, or a plain CI runner invoking <code>ansible-playbook</code> inside the execution environment container, both fit this model — the important shift is that inventory and playbook changes go through the same review process as application code, not an out-of-band change.</p>
+<h2 id="dynamic-inventory-over-static-files">Dynamic inventory over static files</h2>
+<p>Static <code>hosts.ini</code> files rot the moment infrastructure becomes elastic. Cloud inventory plugins (<code>amazon.aws.aws_ec2</code>, <code>azure.azcollection.azure_rm</code>) query the provider's API at run time and group hosts by tags automatically, so a playbook targeting <code>tag_Environment_production</code> stays correct as instances are created and terminated, with no inventory file to maintain by hand.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring 2026 first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add ansible on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with 2026 when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Old habit</th><th>2026 practice</th></tr>
+  <tr><td>Local pip install of ansible + collections</td><td>Execution environment container, versioned</td></tr>
+  <tr><td>Unpinned <code>ansible-galaxy install</code></td><td>Pinned versions in requirements.yml</td></tr>
+  <tr><td>Static hosts.ini</td><td>Dynamic cloud inventory plugin</td></tr>
+  <tr><td>Playbook run from a laptop</td><td>Triggered from CI/CD against reviewed changes</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ansible in 2026 — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Ansible's core value proposition — agentless, idempotent, readable — hasn't moved. What's matured is the packaging around it: execution environments for reproducibility, pinned collections instead of a moving-target core, and running playbooks through the same review and CI gates as any other code change. Skip the execution environment step at your peril; it's the fix for the single most common "worked yesterday" bug report in Ansible-managed infrastructure.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>

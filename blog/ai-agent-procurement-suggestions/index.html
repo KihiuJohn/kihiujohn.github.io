@@ -93,98 +93,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>LLM ops is a discipline, not a feature. this is one of the parts of the discipline. The pattern is to treat the LLM as an untrusted component, the tools as a contract, and the production system as a deterministic wrapper around both. This article is the discipline.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"What should we reorder this week" is a question Acumatica's MRP and reorder-point logic already answers deterministically from lead times, safety stock, and demand history — that part doesn't need an LLM. Where an agent earns its place is layering judgment on top of that deterministic output: explaining the reasoning in plain language, flagging anomalies the reorder-point math won't catch on its own, and drafting the PO for a human to review rather than requiring a buyer to reconstruct the "why" from raw numbers every time.</p>
+<h2 id="dont-let-the-model-compute-reorder-quantities">Don't let the model compute reorder quantities</h2>
+<p>Reorder point, economic order quantity, and safety stock are formulas, not judgment calls — they belong in deterministic code (or in Acumatica's own MRP engine) that produces the same answer every time given the same inputs. The agent's job is to call that calculation, not re-derive it via reasoning over a prompt. An LLM asked to "figure out how much to reorder" from raw sales history will produce a plausible-sounding number that may not match what your actual safety-stock policy would compute — and a plausible wrong number is more dangerous here than an obviously wrong one, because a buyer is more likely to trust it.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · AGENT CALLS THE CALCULATION, DOESN'T REPLACE IT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def suggest_reorder(item_id: str) -> dict:
+    stock = get_current_stock(item_id)
+    reorder_point = get_reorder_point(item_id)  # from Acumatica item settings
+    if stock["qty_available"] > reorder_point:
+        return {"item_id": item_id, "action": "none"}
+    suggested_qty = calculate_eoq(item_id)  # deterministic formula, not LLM
+    vendor = get_preferred_vendor(item_id)
+    return {
+        "item_id": item_id, "action": "reorder",
+        "suggested_qty": suggested_qty, "vendor": vendor,
+        "reason": f"Stock {stock['qty_available']} below reorder point {reorder_point}",
+    }</code></pre>
 </div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on ai agent for procurement suggestions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="where-the-agent-adds-real-value">Where the agent adds real value</h2>
+<p>Reorder-point logic is blind to context a buyer would catch instantly: a vendor with a recent history of late deliveries, a demand spike that looks like a one-off promotional order rather than a new baseline, or two items that are usually ordered together showing wildly different suggested timing. An agent with access to vendor performance history, recent order patterns, and lead-time variance can flag "this suggestion looks routine" versus "this one is worth a second look" — turning a flat list of SKUs into a prioritized review queue, which is the actual bottleneck for a busy buyer.</p>
+<h2 id="draft-not-submit">Draft, not submit</h2>
+<p>Procurement suggestions should produce a draft PO a buyer approves, not an auto-submitted purchase order — this is squarely in the "hard to reverse, moves money" tier from the oversight patterns discussed elsewhere on this blog. Have the agent populate the PO with vendor, quantities, and pricing pulled from real Acumatica data, plus a short explanation of why, and stop there. The buyer's approval is not friction to engineer around; it's the control that catches the cases the deterministic logic and the agent's judgment both missed.</p>
+<div class="callout-warn">
+  <strong>Vendor selection needs the same validation as quantity</strong>
+  <p>If the agent suggests a vendor based on "who we usually order this from," validate that vendor is still active and not on hold in Acumatica before drafting the PO. A stale vendor reference in a suggestion is an easy mistake for a busy buyer to wave through without checking.</p>
 </div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The agent is not the question; the failure mode of the procurement is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="latency-and-cost-tradeoffs-for-agent">Latency and cost tradeoffs for agent</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-procurement">Prompt patterns that work for procurement</h2>
-<p>The performance of procurement in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-agent-in-production">How to evaluate agent in production</h2>
-<p>Production procurement looks different from development procurement. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_agent(query: str) -> str:
-    """List agent matching the query."""
-    response = requests.get(
-        f"https://api.example.com/agent",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="agent", func=list_agent, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
+<h2 id="explaining-the-suggestion-in-terms-a-buyer-trusts">Explaining the suggestion in terms a buyer trusts</h2>
+<p>"Reorder 200 units" is an instruction. "Stock at 40 units, below the 75-unit reorder point, average lead time from this vendor is 12 days, and demand has been steady at 15/week for the last quarter" is something a buyer can evaluate and either trust or override with their own knowledge. Always surface the inputs the suggestion is based on, not just the conclusion — it's what turns the agent into something a buyer relies on instead of something they learn to ignore after the first bad suggestion.</p>
+<h2 id="seasonal-and-promotional-demand-need-a-human-signal">Seasonal and promotional demand need a human signal</h2>
+<p>A pure historical-demand model will systematically under-order ahead of a known seasonal peak or promotion the data hasn't seen yet, because it has no way to know the promotion is coming. Give the agent (or the underlying forecast it calls) an input for known future events — a promotion calendar, a seasonal flag — rather than expecting it to infer future demand purely from past patterns it has no visibility into.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring procurement first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add agent on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with procurement when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Layer</th><th>Owned by</th></tr>
+  <tr><td>Reorder point, EOQ, safety stock</td><td>Deterministic formula / Acumatica MRP</td></tr>
+  <tr><td>Vendor performance flagging</td><td>Agent, from historical delivery data</td></tr>
+  <tr><td>Anomaly / priority flagging</td><td>Agent, surfaced as review priority</td></tr>
+  <tr><td>Final PO submission</td><td>Human buyer, always</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on ai agent for procurement suggestions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<p>Keep the actual reorder math deterministic and let the agent add the layer that math can't: explanation, anomaly flagging, and prioritization for a buyer's review queue. Draft, never auto-submit, and always show the numbers behind a suggestion rather than just the conclusion — that's what earns the buyer's trust enough that they actually use the tool instead of working around it.</p>
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
