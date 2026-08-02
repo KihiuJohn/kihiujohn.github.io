@@ -272,7 +272,7 @@
   <div class="wa-window">
     <div class="wa-header">
       <button class="wa-back" id="waBack" aria-label="Close chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
-       <div class="wa-avatar">${isHome ? '<img src="/profile.jpg" alt="" aria-hidden="true" onerror="this.style.display=\'none\'">' : ''}</div>
+       <div class="wa-avatar" aria-hidden="true"></div>
       <div class="wa-contact">
         <div class="wa-contact-name" id="waName">John Kihiu</div>
         <div class="wa-contact-status">online</div>
