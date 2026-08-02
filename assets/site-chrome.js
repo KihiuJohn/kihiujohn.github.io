@@ -145,7 +145,9 @@
   .wa-avatar img { width: 100%; height: 100%; object-fit: cover; }
   .wa-contact { flex: 1; line-height: 1.2; }
   .wa-contact-name { font-size: 0.95rem; font-weight: 600; }
-  .wa-contact-status { font-size: 0.72rem; opacity: 0.88; display: flex; align-items: center; gap: 0.35rem; margin-top: 0.1rem; }
+   .wa-contact-status { font-size: 0.72rem; opacity: 0.88; display: flex; align-items: center; gap: 0.35rem; margin-top: 0.1rem; }
+   .wa-call-link { display: inline-flex; align-items: center; gap: .35rem; margin: .5rem 0 0; color: #047857; font-size: .82rem; font-weight: 600; text-decoration: none; }
+   .wa-call-link:hover { text-decoration: underline; }
   .wa-contact-status::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #4ADE80; }
   .wa-body { flex: 1; padding: 0.85rem 0.85rem 0.5rem; overflow-y: auto; background-color: #efeae2; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23dad4cc' stroke-width='0.6' opacity='0.9'%3E%3Ccircle cx='30' cy='30' r='8'/%3E%3Cpath d='M70 50 q10 -10 20 0 t20 0'/%3E%3Crect x='130' y='25' width='14' height='14' rx='2'/%3E%3Cpath d='M20 90 l8 -8 l8 8 l-8 8 z'/%3E%3Ccircle cx='100' cy='100' r='4'/%3E%3Cpath d='M150 80 l10 0 l-5 8 z'/%3E%3Cpath d='M30 150 q10 5 20 0 q10 -5 20 0'/%3E%3Ccircle cx='160' cy='160' r='6'/%3E%3Cpath d='M80 170 l4 -4 l4 4 l-4 4 z'/%3E%3C/g%3E%3C/svg%3E"); display: flex; flex-direction: column; gap: 0.5rem; }
   .wa-msg { max-width: 80%; padding: 0.5rem 0.65rem 0.65rem; border-radius: var(--chrome-radius-md); font-size: 0.88rem; line-height: 1.4; color: #111B21; position: relative; box-shadow: 0 1px 1px rgba(0,0,0,0.08); word-wrap: break-word; }
@@ -250,7 +252,7 @@
       </div>
       <div class="ft-col">
         <h4>Connect</h4>
-        <a href="mailto:kihiujohn12@gmail.com">kihiujohn12@gmail.com</a><a href="https://wa.me/254115169705" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.linkedin.com/in/john-kihiu-3481b8232/" target="_blank" rel="noopener">LinkedIn</a><a href="https://github.com/KihiuJohn" target="_blank" rel="noopener">GitHub</a>
+         <a href="mailto:kihiujohn12@gmail.com">kihiujohn12@gmail.com</a><a href="tel:+254115169705">Tap to call +254 115 169 705</a><a href="https://wa.me/254115169705" target="_blank" rel="noopener">WhatsApp</a><a href="https://www.linkedin.com/in/john-kihiu-3481b8232/" target="_blank" rel="noopener">LinkedIn</a><a href="https://github.com/KihiuJohn" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
     <div class="ft-bottom">
@@ -282,7 +284,8 @@
     <div class="wa-body" id="waBody">
       <div class="wa-day">TODAY</div>
       <div class="wa-msg in">👋 Hey, thanks for stopping by! I'm John.<time id="waT1"></time></div>
-      <div class="wa-msg in">How can I help — Acumatica work, a Laravel app, an integration, or something else?<time id="waT2"></time></div>
+       <div class="wa-msg in">How can I help — Acumatica work, a Laravel app, an integration, or something else?<time id="waT2"></time></div>
+       <a class="wa-call-link" href="tel:+254115169705">Tap to call +254 115 169 705</a>
       <div class="wa-quick" id="waQuick">
         <button data-q="Hi John, I'd like to discuss an Acumatica customisation project.">Acumatica project</button>
         <button data-q="Hi John, I'm looking for help with a Laravel app / backend.">Laravel work</button>
