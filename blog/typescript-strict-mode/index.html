@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TypeScript Strict Mode — A Field Guide | John Kihiu</title>
-<meta name="description" content="TypeScript Strict Mode — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
+<meta name="description" content="What tsconfig.json's strict: true flag actually turns on — strictNullChecks, noImplicitAny, strictFunctionTypes and the rest — and a practical, incremental path for migrating an existing codebase to it without a big-bang rewrite.">
 <meta name="keywords" content="Acumatica typescript, Acumatica strict, Acumatica quality, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/typescript-strict-mode/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="TypeScript Strict Mode — A Field Guide">
-<meta property="og:description" content="TypeScript Strict Mode — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/typescript-strict-mode.svg">
+<meta property="og:description" content="What tsconfig.json's strict: true flag actually turns on — strictNullChecks, noImplicitAny, strictFunctionTypes and the rest — and a practical, incremental path for migrating an existing codebase to it without a big-bang rewrite.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/typescript-strict-mode/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="quality">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"TypeScript Strict Mode — A Field Guide","description":"TypeScript Strict Mode — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.","image":"https://kihiujohn.github.io/assets/og/typescript-strict-mode.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/typescript-strict-mode/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"TypeScript Strict Mode — A Field Guide","description":"What tsconfig.json's strict: true flag actually turns on — strictNullChecks, noImplicitAny, strictFunctionTypes and the rest — and a practical, incremental path for migrating an existing codebase to it without a big-bang rewrite.","image":"https://kihiujohn.github.io/assets/og/typescript-strict-mode.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/typescript-strict-mode/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"TypeScript Strict Mode — A Field Guide","item":"https://kihiujohn.github.io/blog/typescript-strict-mode/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,96 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">TypeScript Strict Mode — A Field Guide</span></nav>
     <span class="tag">Modern Web · Typescript</span>
     <h1>TypeScript Strict Mode — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">TypeScript Strict Mode — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">What tsconfig.json's strict: true flag actually turns on — strictNullChecks, noImplicitAny, strictFunctionTypes and the rest — and a practical, incremental path for migrating an existing codebase to it without a big-bang rewrite.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-20">Jun 20, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The modern web stack in 2026 has stabilised. The framework matters less than the architecture; the architecture is what makes the app scale. this is one of the patterns that the architecture has to get right. This article is the architecture.</p>
-<h2 id="how-strict-interacts-with-server-components">How strict interacts with server components</h2>
-<p>How strict interacts with server components is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Turning on <code>strict: true</code> in <code>tsconfig.json</code> is not one setting — it is a bundle of eight separate flags, and on a codebase that grew up without them, flipping the switch can produce thousands of errors on the first compile. I've done this migration on a few different codebases now, and the pattern that works is always the same: understand what each flag actually checks, then migrate flag-by-flag instead of all at once. This is the guide I wish I'd had the first time.</p>
+<h2 id="what-strict-true-actually-turns-on">What strict: true actually turns on</h2>
+<p><code>strict</code> is not a real compiler check by itself — it's shorthand that enables a fixed set of individual flags. If any of them are explicitly set to <code>false</code> in your config, that override wins even with <code>strict: true</code>, which is exactly the mechanism the incremental migration below relies on. The bundle is:</p>
+<ul>
+<li><strong>strictNullChecks</strong> — <code>null</code> and <code>undefined</code> stop being silently assignable to every type. Without it, a value typed <code>string</code> can secretly be <code>null</code> at runtime and TypeScript won't warn you. This is almost always the highest-impact flag and the one that produces the most errors on an existing codebase, because it forces you to handle every place a value might not exist.</li>
+<li><strong>noImplicitAny</strong> — parameters, variables, and return types that TypeScript can't infer must be annotated, instead of silently falling back to <code>any</code>. This is usually the second-biggest source of errors, especially in older code with untyped function parameters.</li>
+<li><strong>strictFunctionTypes</strong> — checks function parameters contravariantly instead of bivariantly. In practice: a function expecting <code>(x: Animal) =&gt; void</code> can no longer be assigned a function typed <code>(x: Dog) =&gt; void</code>, because that would be unsound if the caller passes a Cat. This one mostly matters for callback-heavy APIs and rarely trips up application code.</li>
+<li><strong>strictBindCallApply</strong> — <code>Function.prototype.bind</code>, <code>call</code>, and <code>apply</code> get checked against the actual signature of the function they're called on, instead of returning <code>any</code>.</li>
+<li><strong>strictPropertyInitialization</strong> — class properties must be assigned in the constructor (or have a default value, or be marked <code>?</code> or <code>!</code>). This one only fires when <code>strictNullChecks</code> is also on, and it's the flag most likely to produce noisy errors in codebases that assign fields inside a separate <code>init()</code> method rather than the constructor.</li>
+<li><strong>noImplicitThis</strong> — <code>this</code> inside a function must have a type that TypeScript can determine; it can no longer silently be <code>any</code>.</li>
+<li><strong>alwaysStrict</strong> — emits <code>"use strict"</code> in the output and parses files in ECMAScript strict mode. This is the one flag in the bundle that's about JavaScript semantics rather than the type checker, and it almost never causes migration pain.</li>
+<li><strong>useUnknownInCatchVariables</strong> — a caught exception is typed <code>unknown</code> instead of <code>any</code>, so you can't call methods on <code>err</code> without narrowing it first (usually with <code>instanceof Error</code>).</li>
+</ul>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<h2 id="typescript-patterns-for-typescript">TypeScript patterns for typescript</h2>
-<p>In the work I have done on typescript strict mode — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="when-typescript-is-the-wrong-tool">When typescript is the wrong tool</h2>
-<p>When the work moves from design to production, the questions change. The typescript is not the question; the failure mode of the strict is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useTypescript(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">JSON · tsconfig.json</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "compilerOptions": {
+    "strict": true,
+    /* equivalent to explicitly setting all of:
+       strictNullChecks, noImplicitAny, strictFunctionTypes,
+       strictBindCallApply, strictPropertyInitialization,
+       noImplicitThis, alwaysStrict, useUnknownInCatchVariables */
+    "target": "ES2022",
+    "module": "ESNext",
+    "skipLibCheck": true
+  }
 }</code></pre>
 </div>
-<h2 id="build-vs-buy-for-strict">Build vs buy for strict</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-all-at-once-migration-fails">Why the all-at-once migration fails</h2>
+<p>The naive move is to add <code>"strict": true</code> and start fixing errors top to bottom. On a small project this works fine. On anything with a few years of history, it produces an error count in the thousands, most of them <code>strictNullChecks</code> violations cascading through the same handful of shared utility functions. Nobody can land that in one PR, so it sits on a branch, drifts out of date as `main` moves on, and eventually gets abandoned. The fix isn't more willpower — it's migrating one flag at a time, in the order that isolates the pain.</p>
+<h2 id="migrate-flag-by-flag">Migrating flag by flag</h2>
+<p>Instead of enabling <code>strict</code> directly, enable the individual flags in <code>compilerOptions</code> one at a time and land each as its own PR. A reasonable order:</p>
+<ol>
+<li><strong>noImplicitThis</strong> and <strong>alwaysStrict</strong> first — low error counts, almost no design decisions involved, good for building momentum.</li>
+<li><strong>noImplicitAny</strong> next — every error is "add a type annotation here." Tedious but mechanical; you can often let the TypeScript language service auto-insert the inferred type.</li>
+<li><strong>strictNullChecks</strong> — do this on its own, after the above two are clean. This is where the real design decisions live: is this property actually optional, or did we just never initialize it? Budget the most time here.</li>
+<li><strong>strictFunctionTypes</strong>, <strong>strictBindCallApply</strong>, <strong>strictPropertyInitialization</strong>, and <strong>useUnknownInCatchVariables</strong> last — by this point <code>strictNullChecks</code> has usually already forced most of the fixes these flags would otherwise catch, so they tend to close out with far fewer surprises.</li>
+</ol>
+<p>Once every individual flag is enabled explicitly, you can delete them all and replace them with <code>"strict": true</code> — at that point it's a no-op, and you've locked in that future flags added to the <code>strict</code> bundle (TypeScript does add new ones in major versions) get picked up automatically.</p>
 <div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
+  <strong>Let tsc do the counting</strong>
+  <p>Before starting, run <code>tsc --noEmit --strict 2&gt;&amp;1 | wc -l</code> (or pipe through <code>grep -c "error TS"</code>) to get a real error count per flag. Toggling one flag at a time and re-running gives you an honest sense of scope before you commit to an order or a timeline.</p>
 </div>
-<h2 id="testing-typescript-in-isolation">Testing typescript in isolation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="firewalling-unmigrated-code">Firewalling unmigrated code with @ts-expect-error</h2>
+<p>For files you can't fix immediately — a vendored module, a file owned by another team, code scheduled for deletion — <code>// @ts-expect-error</code> is the right tool, not <code>// @ts-ignore</code>. The difference matters: <code>@ts-ignore</code> silently suppresses whatever error is on the next line, even after the underlying code changes and a new, different error appears. <code>@ts-expect-error</code> does the same suppression, but it also errors if the line it's attached to stops producing an error — which means if someone fixes the type properly later, the now-useless suppression comment gets flagged and can be deleted, instead of rotting in the codebase forever.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
+  <div class="code-header"><span class="code-lang">TypeScript</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>class UserSession {
+  // strictPropertyInitialization would flag this without
+  // a default, a constructor assignment, or a "!" assertion
+  private userId!: string;
+
+  init(id: string) {
+    this.userId = id;
+  }
+}
+
+function getConfigValue(key: string): string {
+  const value = process.env[key];
+  // @ts-expect-error - legacy call site still assumes env vars
+  // always exist; TODO(migration): audit and add null handling
+  return value.trim();
+}
+
+try {
+  riskyParse(input);
+} catch (err) {
+  // useUnknownInCatchVariables means err is `unknown`, not `any`
+  if (err instanceof Error) {
+    console.error(err.message);
+  } else {
+    console.error("Unknown error", err);
+  }
+}</code></pre>
 </div>
-<h2 id="the-state-of-typescript-strict-mode-a-field-guide-in-2026">The state of TypeScript Strict Mode — A Field Guide in 2026</h2>
-<p>The performance of strict in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
+<p>A per-directory escape hatch works the same way at scale: keep a short list of files still under migration (a lint rule or a simple script checking for a marker comment works fine), and fail CI if a file not on that list contains an unexplained suppression comment. That keeps the debt visible and shrinking instead of quietly growing.</p>
+<div class="callout callout-warn">
+  <strong>Don't let noImplicitAny hide behind any[]</strong>
+  <p>A common escape valve during migration is typing everything troublesome as <code>any</code> to make the error go away. That defeats the purpose — <code>any</code> disables checking for that value everywhere it flows, not just at the declaration site. If you need an honest "I don't know this type yet" placeholder, prefer <code>unknown</code> and narrow it at the point of use; it forces a decision instead of deferring one indefinitely.</p>
 </div>
-<h2 id="why-the-modern-approach-beats-the-old-way">Why the modern approach beats the old way</h2>
-<p>Production strict looks different from development strict. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring strict first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add typescript on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with strict when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on typescript strict mode — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p><code>strict: true</code> is eight flags wearing one name, and treating it as a single on/off switch is what makes migrations feel impossible. Split it back into its parts, land <code>noImplicitAny</code> and the small flags first, spend your real budget on <code>strictNullChecks</code>, and use <code>@ts-expect-error</code> with a paper trail — not <code>@ts-ignore</code> — to firewall what's left. The codebase ends up fully strict without ever needing a single PR that touches everything at once.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/react-19-strict-mode/">React 19 Strict Mode Patterns</a></li>
@@ -178,7 +186,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

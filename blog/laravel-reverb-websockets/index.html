@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Reverb WebSockets — A Complete Guide | John Kihiu</title>
-<meta name="description" content="Laravel Reverb WebSockets — A Complete Guide is the kind of work that pays for itself the first time you ship.">
+<meta name="description" content="How Laravel Reverb's first-party WebSocket server replaces third-party broadcasting services, what it costs to self-host at scale, and where horizontal scaling still needs Redis.">
 <meta name="keywords" content="Acumatica laravel, Acumatica reverb, Acumatica websockets, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-reverb-websockets/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Reverb WebSockets — A Complete Guide">
-<meta property="og:description" content="Laravel Reverb WebSockets — A Complete Guide is the kind of work that pays for itself the first time you ship.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-reverb-websockets.svg">
+<meta property="og:description" content="How Laravel Reverb's first-party WebSocket server replaces third-party broadcasting services, what it costs to self-host at scale, and where horizontal scaling still needs Redis.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-reverb-websockets/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="websockets">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Reverb WebSockets — A Complete Guide","description":"Laravel Reverb WebSockets — A Complete Guide is the kind of work that pays for itself the first time you ship.","image":"https://kihiujohn.github.io/assets/og/laravel-reverb-websockets.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-reverb-websockets/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Reverb WebSockets — A Complete Guide","description":"How Laravel Reverb's first-party WebSocket server replaces third-party broadcasting services, what it costs to self-host at scale, and where horizontal scaling still needs Redis.","image":"https://kihiujohn.github.io/assets/og/laravel-reverb-websockets.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-reverb-websockets/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Reverb WebSockets — A Complete Guide","item":"https://kihiujohn.github.io/blog/laravel-reverb-websockets/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,49 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Reverb WebSockets — A Complete Guide</span></nav>
     <span class="tag">Laravel · Laravel</span>
     <h1>Laravel Reverb WebSockets — A Complete Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Laravel Reverb WebSockets — A Complete Guide is the kind of work that pays for itself the first time you ship.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Laravel Reverb's first-party WebSocket server replaces third-party broadcasting services, what it costs to self-host at scale, and where horizontal scaling still needs Redis.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>On Laravel projects that need to last, this is rarely the question. The question is the failure mode: what happens when the upstream API times out, when the database connection drops, when the queue is backed up. This article is about making this work in the version of Laravel that you actually have deployed, with the failure modes that the docs don't cover.</p>
-<h2 id="what-to-avoid-in-2026">What to avoid in 2026</h2>
-<p>What to avoid in 2026 is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Reverb is Laravel's first-party WebSocket server — a `php artisan reverb:start` process that speaks the same Pusher-protocol broadcasting API Laravel already had, which means most apps that were previously paying for Pusher or running a separate Soketi/Socket.io process can swap the broadcaster driver and keep the exact same `broadcast(new OrderShipped($order))` code. The pitch is simple: self-hosted, first-party, no per-connection billing. The trade-off is that "self-hosted" means you now own the scaling problem a managed service used to handle for you.</p>
+<h2 id="reverb-speaks-the-pusher-protocol-on-purpose">Reverb speaks the Pusher protocol on purpose</h2>
+<p>Reverb didn't invent a new client protocol — it implements the same channel, event, and presence-channel semantics Pusher's JS client already expects, which is why migrating from Pusher is mostly a config change (`BROADCAST_CONNECTION=reverb`, point the Echo client at your Reverb host) rather than a rewrite of every `Echo.channel()` call in the frontend. Private channels still authenticate through your existing `routes/channels.php` authorization callbacks; presence channels still carry member metadata the same way. If your app already used Laravel Echo correctly, Reverb is close to a drop-in swap.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(ReverbRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PHP · BROADCASTING WITH REVERB</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// .env
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=local
+REVERB_APP_KEY=local-key
+REVERB_APP_SECRET=local-secret
+REVERB_HOST="127.0.0.1"
+REVERB_PORT=8080
+
+// routes/channels.php — unchanged from Pusher-based setups
+Broadcast::channel('orders.{orderId}', function ($user, $orderId) {
+    return $user->can('view', Order::findOrFail($orderId));
+});
+
+// Running the server (behind a reverse proxy in production)
+// php artisan reverb:start --host=0.0.0.0 --port=8080</code></pre>
 </div>
-<h2 id="alternatives-and-when-to-reach-for-them">Alternatives and when to reach for them</h2>
-<p>In the work I have done on laravel reverb websockets — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="a-single-reverb-process-does-not-scale-past-one-box">A single Reverb process does not scale past one box</h2>
+<p>Out of the box, `reverb:start` runs one process holding every open WebSocket connection in memory on that machine. That's genuinely fine until you need more connections than one server can hold, or need redundancy so a server restart doesn't drop every connected client at once. Reverb supports horizontal scaling via Redis as a pub/sub backplane — multiple Reverb instances behind a load balancer, all subscribed to the same Redis channels, so a broadcast from any app server reaches every connected client regardless of which Reverb node they're attached to.</p>
+<div class="callout">
+  <strong>Sticky sessions matter for WebSockets, load balancing does not work the normal way</strong>
+  <p>A WebSocket connection is long-lived and stateful — once a client connects to a specific Reverb instance, it needs to stay connected to that instance (or reconnect cleanly if it drops). Round-robin load balancing that could route a single client's traffic across multiple backend instances mid-connection will break things. Configure your load balancer for sticky sessions or connection-based routing, not the round-robin-per-request model that works fine for HTTP.</p>
+</div>
+<h2 id="scaling-cost-vs-a-managed-service">Scaling cost vs. a managed service</h2>
+<p>The appeal of self-hosting is avoiding Pusher's per-connection, per-message pricing, but that cost doesn't disappear — it moves to infrastructure and operational burden. Running Reverb at scale means provisioning enough memory for peak concurrent connections, running Redis for the pub/sub backplane, monitoring connection counts and message throughput yourself, and handling failover when a Reverb node dies. For a small-to-mid app, this is a clear win. For a consumer app with unpredictable connection spikes, the operational cost of getting horizontal scaling right can eat into the savings faster than the pricing calculator suggests.</p>
 <div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
+  <strong>Reverb behind Nginx needs explicit WebSocket upgrade handling</strong>
+  <p>A reverse proxy in front of Reverb must explicitly pass through the <code>Upgrade</code> and <code>Connection</code> headers for the WebSocket handshake to succeed — a default Nginx proxy config written for plain HTTP will silently fail the upgrade and leave clients falling back to polling or failing to connect entirely. This is the single most common "it works locally, not behind our proxy" Reverb issue.</p>
 </div>
-<h2 id="why-laravel-matters-for-a-laravel-codebase">Why laravel matters for a Laravel codebase</h2>
-<p>When the work moves from design to production, the questions change. The laravel is not the question; the failure mode of the reverb is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('laravels', LaravelController::class);
-});</code></pre>
-</div>
-<h2 id="migrating-reverb-from-a-package-to-a-custom-solution">Migrating reverb from a package to a custom solution</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
-</div>
-<h2 id="the-laravel-native-way-to-do-laravel">The Laravel-native way to do laravel</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (LaravelJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
-</div>
-<h2 id="pitfalls-when-reverb-is-not-the-bottleneck">Pitfalls when reverb is not the bottleneck</h2>
-<p>The performance of reverb in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="production-telemetry-for-laravel">Production telemetry for laravel</h2>
-<p>Production reverb looks different from development reverb. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(ReverbRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring reverb first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add laravel on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with reverb when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on laravel reverb websockets — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Reverb is a solid default for real-time features in a Laravel app precisely because it reuses broadcasting code and the Pusher protocol you may already know — the migration cost from an existing Echo-based setup is low. The scaling story is real but not free: plan for Redis-backed horizontal scaling and sticky-session load balancing before you need them, and go in accepting that self-hosting trades subscription cost for infrastructure ownership, not for free capacity.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-11-new-features/">Laravel 11 New Features — A Complete Guide</a></li>
@@ -185,7 +139,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

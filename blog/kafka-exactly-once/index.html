@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kafka Exactly-Once Semantics | John Kihiu</title>
-<meta name="description" content="Kafka Exactly-Once Semantics is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
+<meta name="description" content="How Kafka's exactly-once semantics actually work under the hood: idempotent producers, transactional writes across partitions, and why exactly-once is really about the whole read-process-write pipeline, not just the producer.">
 <meta name="keywords" content="Acumatica kafka, Acumatica exactly-once, Acumatica semantics, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kafka-exactly-once/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kafka Exactly-Once Semantics">
-<meta property="og:description" content="Kafka Exactly-Once Semantics is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kafka-exactly-once.svg">
+<meta property="og:description" content="How Kafka's exactly-once semantics actually work under the hood: idempotent producers, transactional writes across partitions, and why exactly-once is really about the whole read-process-write pipeline, not just the producer.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kafka-exactly-once/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="semantics">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kafka Exactly-Once Semantics","description":"Kafka Exactly-Once Semantics is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in every.","image":"https://kihiujohn.github.io/assets/og/kafka-exactly-once.svg","datePublished":"2026-06-26","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kafka-exactly-once/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kafka Exactly-Once Semantics","description":"How Kafka's exactly-once semantics actually work under the hood: idempotent producers, transactional writes across partitions, and why exactly-once is really about the whole read-process-write pipeline, not just the producer.","image":"https://kihiujohn.github.io/assets/og/kafka-exactly-once.svg","datePublished":"2026-06-26","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kafka-exactly-once/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kafka Exactly-Once Semantics","item":"https://kihiujohn.github.io/blog/kafka-exactly-once/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,61 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kafka Exactly-Once Semantics</span></nav>
     <span class="tag">Data / ML · Kafka</span>
     <h1>Kafka Exactly-Once Semantics</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kafka Exactly-Once Semantics is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Kafka's exactly-once semantics actually work under the hood: idempotent producers, transactional writes across partitions, and why exactly-once is really about the whole read-process-write pipeline, not just the producer.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-26">Jun 26, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The data stack in 2026 is more capable than it was in 2020. dbt, lakehouses, vector databases, streaming. this is one of the parts of the modern stack. This article is the part.</p>
-<h2 id="why-kafka-in-the-warehouse-beats-in-the-lake">Why kafka in the warehouse beats in the lake</h2>
-<p>Why kafka in the warehouse beats in the lake is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Exactly-once" is one of the most overloaded terms in distributed systems, and Kafka's marketing hasn't always helped: at the network level, a message can still be sent twice if a producer retries after an ack is lost. What Kafka actually guarantees, when configured correctly, is exactly-once processing semantics for the read-process-write pattern — consume from a topic, do some work, produce to another topic — not a magic guarantee that spans arbitrary external side effects.</p>
+<h2 id="idempotent-producers-solve-duplicate-sends">Idempotent producers solve duplicate sends</h2>
+<p>The most common source of duplicates pre-idempotence was retries: a producer sends a message, the broker writes it and acks, the ack is lost in the network, the producer times out and retries, and now the message is written twice. Setting <code>enable.idempotence=true</code> (default since Kafka 3.0 when acks=all) fixes this at the producer level: each producer gets a unique producer ID, and every message carries a sequence number per partition. The broker tracks the last sequence number it wrote for each producer/partition pair and rejects a duplicate with a matching sequence number instead of writing it again — so retries are safe without any application-level dedup logic.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM kafka
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">PROPERTIES · IDEMPOTENT PRODUCER CONFIG</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>enable.idempotence=true
+acks=all
+max.in.flight.requests.per.connection=5
+retries=2147483647
+delivery.timeout.ms=120000</code></pre>
 </div>
-<h2 id="schema-evolution-for-exactly">Schema evolution for exactly</h2>
-<p>In the work I have done on kafka exactly-once semantics, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="cost-optimisation-for-kafka">Cost optimisation for kafka</h2>
-<p>When the work moves from design to production, the questions change. The kafka is not the question; the failure mode of the exactly is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.kafka > 0).groupBy("exactly").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-exactly">The testing pyramid for exactly</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Idempotence alone doesn't cover multi-partition atomicity</strong>
+  <p>An idempotent producer guarantees no duplicates within a single partition. It does not guarantee that a batch of writes across multiple partitions — or a read-then-write spanning a consumer offset commit and a producer send — happens atomically as a single unit. That's what transactions add on top.</p>
 </div>
-<h2 id="backfills-and-rollbacks-for-kafka">Backfills and rollbacks for kafka</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="transactions-make-multi-partition-writes-atomic">Transactions make multi-partition writes atomic</h2>
+<p>Kafka transactions let a producer write to multiple partitions (and topics) and have those writes become visible to consumers all at once or not at all, using a transaction coordinator and a two-phase-commit-like protocol. This is what makes the "consume, transform, produce" pattern exactly-once end to end: the consumer's offset commit (marking the input message as processed) and the producer's output writes are wrapped in the same transaction, so a crash between processing and committing the offset doesn't result in either a lost update or a duplicate reprocessing on restart.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_kafka') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+  <div class="code-header"><span class="code-lang">JAVA · TRANSACTIONAL READ-PROCESS-WRITE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>producer.initTransactions();
+
+try {
+    producer.beginTransaction();
+
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+    for (ConsumerRecord<String, String> record : records) {
+        String transformed = transform(record.value());
+        producer.send(new ProducerRecord<>("output-topic", record.key(), transformed));
+    }
+
+    producer.sendOffsetsToTransaction(
+        currentOffsets(records), consumer.groupMetadata());
+    producer.commitTransaction();
+} catch (Exception e) {
+    producer.abortTransaction();
+}</code></pre>
 </div>
-<h2 id="what-kafka-exactly-once-semantics-is-for">What Kafka Exactly-Once Semantics is for</h2>
-<p>The performance of exactly in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
+<h2 id="consumer-isolation-level-matters-too">Consumers need read_committed to see the guarantee</h2>
+<p>Transactional writes are only exactly-once from a consumer's perspective if that consumer sets <code>isolation.level=read_committed</code>. With the default <code>read_uncommitted</code>, a consumer sees every message written to a partition, including ones from transactions that were later aborted — which defeats the purpose. Every downstream consumer in an exactly-once pipeline needs this setting; missing it on even one hop reintroduces exactly the duplicate/inconsistent reads the transactional producer was meant to prevent.</p>
+<h2 id="where-exactly-once-still-doesnt-reach">Where the guarantee stops: external side effects</h2>
+<p>Kafka's transactions cover Kafka-to-Kafka writes. The moment your consumer's processing has a side effect outside Kafka — an HTTP call to another service, a write to a non-transactional external database, sending an email — Kafka's exactly-once guarantee doesn't extend to that side effect. A crash after the external call succeeds but before the Kafka offset commits will cause a reprocessing that repeats the external call. For those cases you still need the external system to be idempotent (an idempotency key on the API call, an upsert instead of an insert) or you need that external write to participate in a genuinely distributed transaction, which Kafka alone can't give you.</p>
+<div class="callout-warn callout">
+  <strong>Kafka Streams gets exactly-once "for free" within the topology</strong>
+  <p>Setting <code>processing.guarantee=exactly_once_v2</code> in a Kafka Streams application wires up the idempotent producer, transactions, and read_committed consumption automatically for you across the whole topology. It's the easiest way to get this right if your pipeline is expressible as a Streams application rather than raw producer/consumer code.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>Production exactly looks different from development exactly. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM kafka
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring exactly first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kafka on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with exactly when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kafka exactly-once semantics. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Kafka's exactly-once semantics are real but scoped: idempotent producers stop duplicate sends from retries, transactions make multi-partition read-process-write atomic, and <code>read_committed</code> consumers are required to actually observe that atomicity. None of it extends automatically to side effects outside Kafka — those still need their own idempotency strategy. Understanding that boundary is most of what separates "we turned on exactly-once and it still duplicated things" from a pipeline that actually behaves the way the name promises.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.apache.org/" target="_blank" rel="noopener noreferrer">Apache data project documentation</a></li><li><a href="https://docs.getdbt.com/" target="_blank" rel="noopener noreferrer">dbt documentation</a></li><li><a href="https://www.nist.gov/privacy-framework" target="_blank" rel="noopener noreferrer">NIST Privacy Framework</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/kafka-erp-integration/">Kafka + ERP Integration — A Field Guide</a></li>
@@ -179,7 +151,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

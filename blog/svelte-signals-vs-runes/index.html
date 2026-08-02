@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Svelte Signals vs Runes — A Field Guide | John Kihiu</title>
-<meta name="description" content="Svelte Signals vs Runes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
+<meta name="description" content="How Svelte 5's runes ($state, $derived, $effect) compare to the explicit signal primitives in Solid.js and Preact, and what actually changes when you migrate off Svelte 4's $: reactivity.">
 <meta name="keywords" content="Acumatica svelte, Acumatica signals, Acumatica runes, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/svelte-signals-vs-runes/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Svelte Signals vs Runes — A Field Guide">
-<meta property="og:description" content="Svelte Signals vs Runes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/svelte-signals-vs-runes.svg">
+<meta property="og:description" content="How Svelte 5's runes ($state, $derived, $effect) compare to the explicit signal primitives in Solid.js and Preact, and what actually changes when you migrate off Svelte 4's $: reactivity.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/svelte-signals-vs-runes/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="runes">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Svelte Signals vs Runes — A Field Guide","description":"Svelte Signals vs Runes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.","image":"https://kihiujohn.github.io/assets/og/svelte-signals-vs-runes.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/svelte-signals-vs-runes/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Svelte Signals vs Runes — A Field Guide","description":"How Svelte 5's runes ($state, $derived, $effect) compare to the explicit signal primitives in Solid.js and Preact, and what actually changes when you migrate off Svelte 4's $: reactivity.","image":"https://kihiujohn.github.io/assets/og/svelte-signals-vs-runes.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/svelte-signals-vs-runes/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Svelte Signals vs Runes — A Field Guide","item":"https://kihiujohn.github.io/blog/svelte-signals-vs-runes/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,87 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Svelte Signals vs Runes — A Field Guide</span></nav>
     <span class="tag">Modern Web · Svelte</span>
     <h1>Svelte Signals vs Runes — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Svelte Signals vs Runes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Svelte 5's runes ($state, $derived, $effect) compare to the explicit signal primitives in Solid.js and Preact, and what actually changes when you migrate off Svelte 4's $: reactivity.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The modern web stack in 2026 has stabilised. The framework matters less than the architecture; the architecture is what makes the app scale. this is one of the patterns that the architecture has to get right. This article is the architecture.</p>
-<h2 id="when-svelte-is-the-wrong-tool">When svelte is the wrong tool</h2>
-<p>When svelte is the wrong tool is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Svelte 4's reactivity was compiler magic that worked until it didn't: <code>$:</code> statements re-ran based on static dependency analysis of the assignment on the right-hand side, which meant reactivity broke in ways that were hard to explain to a newcomer — destructuring a reactive value, mutating an array in place, or moving a computation into a function all had subtly different rules. Svelte 5's runes replace that with something more explicit and, in my experience porting three mid-sized apps, considerably easier to reason about. They also finally put Svelte in the same conceptual family as Solid.js and Preact Signals, though the implementation underneath is quite different.</p>
+<h2 id="what-runes-actually-are">What runes actually are</h2>
+<p><code>$state</code>, <code>$derived</code>, and <code>$effect</code> are not functions in the normal sense — they're compiler intrinsics that the Svelte compiler recognizes and transforms at build time. Write <code>let count = $state(0)</code> and the compiler rewrites reads and writes of <code>count</code> into calls against a reactive signal under the hood. You still write <code>count++</code>, not <code>count.set(count.get() + 1)</code>. That's the core design bet of runes: keep the ergonomics of plain variable assignment, but make the dependency tracking explicit and runtime-based instead of relying on the compiler statically guessing what a <code>$:</code> block depends on.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
+  <div class="code-header"><span class="code-lang">Svelte · Component.svelte</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;script&gt;
+  let count = $state(0);
+  let doubled = $derived(count * 2);
+
+  $effect(() =&gt; {
+    console.log(`count changed to ${count}`);
+    // cleanup function, runs before next effect or on unmount
+    return () =&gt; console.log('cleaning up previous effect');
+  });
+&lt;/script&gt;
+
+&lt;button onclick={() =&gt; count++}&gt;
+  {count} (doubled: {doubled})
+&lt;/button&gt;</code></pre>
 </div>
-<h2 id="build-vs-buy-for-signals">Build vs buy for signals</h2>
-<p>In the work I have done on svelte signals vs runes — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="signals-the-explicit-primitive">Signals: the explicit primitive Solid and Preact expose</h2>
+<p>Solid.js and Preact Signals take a different stance: the signal itself is a first-class value you pass around, read with a function call, and write with a setter. In Solid, <code>const [count, setCount] = createSignal(0)</code> gives you <code>count()</code> to read and <code>setCount(n)</code> to write — the parentheses are not optional, and forgetting them is a common bug because <code>count</code> without a call is the signal object, not its value. Preact Signals similarly expose a <code>.value</code> accessor. The upside of this explicitness is that signals compose freely outside components — you can create one in a plain module, share it across files, and update it from anywhere without a compiler in the loop. Svelte 5 runes, by contrast, only work inside <code>.svelte</code> and <code>.svelte.js</code>/<code>.svelte.ts</code> files, because the compiler needs to see the rune calls to instrument them.</p>
+<div class="callout">
+  <strong>Runes need the compiler; signals don't</strong>
+  <p>This is the practical dividing line. A Solid or Preact signal is just a JavaScript value — you can put one in a <code>.ts</code> file with zero build-tool awareness. A Svelte rune only becomes reactive inside files the Svelte compiler processes, which is why shared reactive state now lives in <code>.svelte.js</code> files rather than plain <code>.js</code>.</p>
+</div>
+<h2 id="migrating-from-dollar-colon">Migrating from $: to runes</h2>
+<p>The mechanical part of migration is usually straightforward: <code>let x = 5</code> becomes <code>let x = $state(5)</code>, and <code>$: y = x * 2</code> becomes <code>let y = $derived(x * 2)</code>. The part that actually takes time is auditing every place a <code>$:</code> block did something that wasn't a pure derivation — side effects tucked into reactive statements, which need to become <code>$effect</code> instead of <code>$derived</code>, and stores (<code>writable</code>, <code>derived</code> from <code>svelte/store</code>) that can often be deleted entirely once their job is replaced by a rune in a <code>.svelte.js</code> module.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Svelte · before-and-after</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Svelte 4
+&lt;script&gt;
+  export let items = [];
+  let total = 0;
+  $: total = items.reduce((sum, i) =&gt; sum + i.price, 0);
+  $: if (total &gt; 1000) console.log('big cart');
+&lt;/script&gt;
+
+// Svelte 5
+&lt;script&gt;
+  let { items = [] } = $props();
+  let total = $derived(items.reduce((sum, i) =&gt; sum + i.price, 0));
+  $effect(() =&gt; {
+    if (total &gt; 1000) console.log('big cart');
+  });
+&lt;/script&gt;</code></pre>
+</div>
+<p>Note the split: the pure computation (<code>total</code>) becomes <code>$derived</code>, and the side effect (the console log) becomes its own <code>$effect</code>. Svelte 4's <code>$:</code> let you mix both in one reactive statement, which was convenient to write and a common source of confusion when a derivation accidentally triggered a side effect twice.</p>
+<h2 id="cross-file-reactive-state">Cross-file reactive state: the real upgrade</h2>
+<p>The thing runes actually fix, more than the syntax, is sharing reactive state across files. In Svelte 4 that meant reaching for <code>writable()</code> stores and the <code>$store</code> auto-subscription syntax. In Svelte 5, a <code>.svelte.js</code> file can export a rune-backed object directly, and consuming components get the same fine-grained reactivity they'd get from local state — no subscribe/unsubscribe lifecycle to manage.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JavaScript · store.svelte.js</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// store.svelte.js
+export function createCart() {
+  let items = $state([]);
+  let total = $derived(items.reduce((s, i) =&gt; s + i.price, 0));
+
+  return {
+    get items() { return items; },
+    get total() { return total; },
+    add(item) { items.push(item); }
+  };
+}
+
+export const cart = createCart();</code></pre>
+</div>
+<p>This is closer in spirit to how Solid or Preact signals get shared across a module, even though the mechanism (compiler-tracked class-like getters vs. explicit signal objects) is different underneath.</p>
 <div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
+  <strong>$state on objects and arrays is deeply reactive by default</strong>
+  <p><code>$state([])</code> returns a proxy — mutating it with <code>.push()</code> or index assignment triggers reactivity, unlike Svelte 4 where array mutation needed a reassignment trick (<code>items = items</code>) to be picked up. If you need a plain, non-proxied snapshot, use <code>$state.raw()</code> or <code>$state.snapshot(items)</code>.</p>
 </div>
-<h2 id="testing-svelte-in-isolation">Testing svelte in isolation</h2>
-<p>When the work moves from design to production, the questions change. The svelte is not the question; the failure mode of the signals is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useSvelte(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
-}</code></pre>
-</div>
-<h2 id="the-state-of-svelte-signals-vs-runes-a-field-guide-in-2026">The state of Svelte Signals vs Runes — A Field Guide in 2026</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
-</div>
-<h2 id="why-the-modern-approach-beats-the-old-way">Why the modern approach beats the old way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
-</div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The performance of signals in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
-</div>
-<h2 id="how-it-integrates-with-the-rest-of-the-stack">How it integrates with the rest of the stack</h2>
-<p>Production signals looks different from development signals. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring signals first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add svelte on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with signals when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on svelte signals vs runes — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Runes and signals are solving the same problem — fine-grained, push-based reactivity instead of Svelte 4's static compiler analysis or React's re-render-the-whole-component model — but they make different trade-offs about where the magic lives. Signals (Solid, Preact) are explicit values with an API; runes are compiler-recognized syntax that keeps assignment ergonomics but requires the file to go through the Svelte compiler. If you're migrating a Svelte 4 codebase, budget real time for the stores-to-runes conversion, not just the <code>$:</code> conversion — that's where the actual behavior changes live.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/svelte-5-runes/">Svelte 5 Runes — A Complete Guide</a></li>
@@ -178,7 +177,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

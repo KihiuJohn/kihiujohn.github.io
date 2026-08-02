@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Event-Driven APIs 2026 — A Field Guide">
 <meta property="og:description" content="Event-Driven APIs 2026 — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/event-driven-apis-2026.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/event-driven-apis-2026/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,62 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="performance-and-observability-for-event">Performance and observability for event</h2>
-<p>Performance and observability for event is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Request/response REST is a fine default, but it forces the client to poll for state it doesn't yet have, or forces the server to hold a connection open waiting for something to happen. Event-driven APIs flip that: the server pushes a notification when there's something worth knowing, and the client reacts. That shift — webhooks, streaming endpoints, and AsyncAPI as the contract format for describing it all — is now common enough that treating request/response as the only shape an API can take is itself a design smell for a certain class of problem. Here's what actually changes when you design an API around events instead of endpoints.</p>
+
+<h2 id="webhooks-as-the-baseline">Webhooks are the baseline, not the exotic option</h2>
+<p>A webhook is the simplest possible event-driven API: you register a URL, the provider POSTs an event payload to it when something happens, and your server processes it asynchronously instead of blocking a request on it. Stripe, GitHub, and Twilio all built their integration story around webhooks because it removes polling entirely — no client hitting <code>GET /orders?status=updated</code> every 30 seconds hoping something changed. The API design work that's easy to skip and expensive to skip is signature verification and retry semantics: every webhook payload should be signed (HMAC over the raw body with a shared secret) so a receiver can reject forged requests, and the receiver's endpoint needs to be idempotent, because the sender will retry on timeout and you will receive the same event twice.</p>
+<div class="callout-warn">
+  <strong>Webhooks need a receipt, not just a 200</strong>
+  <p>Returning 200 before you've durably queued the event is a common webhook bug — if your process crashes between accepting the request and finishing the work, the event is gone and the sender thinks it was delivered. Write the event to a queue or table inside the same request before returning success.</p>
+</div>
+
+<h2 id="asyncapi-as-the-contract">AsyncAPI: OpenAPI for things that aren't request/response</h2>
+<p>OpenAPI describes endpoints, methods, and request/response schemas — it has no vocabulary for "this service publishes an event called <code>order.shipped</code> to this channel." AsyncAPI fills that gap: it's a specification format, structurally similar to OpenAPI, for describing channels, messages, and the producers/consumers on each side. The payoff is the same one OpenAPI gives REST — codegen for client and server stubs, contract testing, and a document a consuming team can read without asking you what fields are in the payload. It's most valuable once you have more than one team consuming your events, because at that point "here's a Slack message describing the JSON shape" stops scaling.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EventDrivenExt : PXGraphExtension<EventEntry>
-{
-    [PXOverride]
-    public virtual void Driven(Event doc)
-    {
-        // Custom driven logic for event driven apis
-        if (doc?.Driven == null) return;
-        Base.Driven(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · ASYNCAPI CHANNEL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>asyncapi: 3.0.0
+info:
+  title: Orders Event API
+  version: 1.2.0
+channels:
+  orderShipped:
+    address: orders.shipped
+    messages:
+      OrderShipped:
+        payload:
+          type: object
+          required: [order_id, shipped_at, carrier]
+          properties:
+            order_id: { type: string }
+            shipped_at: { type: string, format: date-time }
+            carrier: { type: string, enum: [ups, fedex, dhl] }
+operations:
+  onOrderShipped:
+    action: receive
+    channel:
+      $ref: '#/channels/orderShipped'</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>In the work I have done on event-driven apis 2026 — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When the work moves from design to production, the questions change. The event is not the question; the failure mode of the driven is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for event
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-driven-edge-cases-i-have-shipped">The driven edge cases I have shipped</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-event-changes">Migration path when event changes</h2>
-<p>The performance of driven in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="how-to-debug-driven-in-production">How to debug driven in production</h2>
-<p>Production driven looks different from development driven. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EventDrivenExt : PXGraphExtension<EventEntry>
-{
-    [PXOverride]
-    public virtual void Driven(Event doc)
-    {
-        // Custom driven logic for event driven apis
-        if (doc?.Driven == null) return;
-        Base.Driven(doc);
-    }
-}</code></pre>
-</div>
+
+<h2 id="streaming-vs-webhooks-vs-polling">Streaming, webhooks, and polling — picking the right shape</h2>
+<p>These three aren't interchangeable, even though they all solve "give me updates." Polling is appropriate when updates are infrequent and the client can tolerate delay — it's simple and needs no inbound connectivity from the provider. Webhooks fit when the provider can reach the consumer's network and events are relatively low-frequency and independent of each other. Streaming — Server-Sent Events for one-directional server-to-browser pushes, WebSockets for bidirectional, or a gRPC/Kafka stream for service-to-service — fits high-frequency or ordered event sequences where the client needs to react in near real time and can maintain a persistent connection. A common mistake is reaching for WebSockets for something that's really a handful of webhook events a day; the operational cost of a stateful connection isn't worth it below a certain event rate.</p>
+
+<h2 id="at-least-once-delivery-on-the-client-side">Designing consumers for at-least-once delivery</h2>
+<p>Nearly every event-driven API — webhooks especially — delivers at-least-once, not exactly-once. The provider will retry on a timeout, a 5xx, or a dropped connection, and it cannot tell the difference between "you didn't get it" and "you got it but your ack was lost." That means every consumer needs an idempotency key check: store processed event IDs (Stripe and GitHub both include one in every payload) and short-circuit if you've seen it before. Skipping this is the single most common bug in production webhook handlers — a duplicate "payment succeeded" event that isn't deduplicated will double-fulfill an order.</p>
+
+<h2 id="versioning-event-payloads">Versioning without breaking every subscriber at once</h2>
+<p>REST APIs version the URL or a header; event APIs version the payload, and it's harder to force every consumer to upgrade in lockstep because you often don't control when they redeploy. The safer path is additive-only changes for as long as possible — new optional fields, never removed or repurposed ones — and when a breaking change is unavoidable, publish both the old and new event shape for a deprecation window (a new event type like <code>order.shipped.v2</code>, or a <code>schema_version</code> field consumers branch on) rather than flipping the switch on a single date.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring driven first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add event on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with driven when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Pattern</th><th>Good fit</th><th>Delivery</th></tr>
+  <tr><td>Polling</td><td>Infrequent updates, simple clients</td><td>Client-pulled, no push infra</td></tr>
+  <tr><td>Webhooks</td><td>Low-to-medium frequency, independent events</td><td>At-least-once, needs signing + idempotency</td></tr>
+  <tr><td>SSE</td><td>Server-to-browser live updates</td><td>Persistent, one-directional</td></tr>
+  <tr><td>WebSockets / streaming</td><td>High-frequency, bidirectional, ordered</td><td>Persistent, stateful</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on event-driven apis 2026 — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<p>None of this replaces REST — most APIs are still, correctly, request/response for anything that's a direct query or command. The event-driven pieces earn their place specifically where a client needs to know about something it didn't ask for, and the discipline that makes them reliable is unglamorous: sign your webhooks, version your payloads additively, document channels in AsyncAPI once more than one team depends on them, and assume every event will be delivered more than once.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
@@ -187,7 +158,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

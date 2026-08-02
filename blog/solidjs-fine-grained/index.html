@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SolidJS Fine-Grained Reactivity | John Kihiu</title>
-<meta name="description" content="SolidJS Fine-Grained Reactivity is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta name="description" content="How SolidJS's signals-based fine-grained reactivity works under the hood, why it needs no virtual DOM, and how that changes the mental model compared to React's component re-render cycle.">
 <meta name="keywords" content="Acumatica solidjs, Acumatica reactivity, Acumatica fine-grained, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/solidjs-fine-grained/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="SolidJS Fine-Grained Reactivity">
-<meta property="og:description" content="SolidJS Fine-Grained Reactivity is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/solidjs-fine-grained.svg">
+<meta property="og:description" content="How SolidJS's signals-based fine-grained reactivity works under the hood, why it needs no virtual DOM, and how that changes the mental model compared to React's component re-render cycle.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/solidjs-fine-grained/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="ai">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="fine-grained">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"SolidJS Fine-Grained Reactivity","description":"SolidJS Fine-Grained Reactivity is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/solidjs-fine-grained.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/solidjs-fine-grained/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"SolidJS Fine-Grained Reactivity","description":"How SolidJS's signals-based fine-grained reactivity works under the hood, why it needs no virtual DOM, and how that changes the mental model compared to React's component re-render cycle.","image":"https://kihiujohn.github.io/assets/og/solidjs-fine-grained.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/solidjs-fine-grained/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"SolidJS Fine-Grained Reactivity","item":"https://kihiujohn.github.io/blog/solidjs-fine-grained/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,105 +86,65 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">SolidJS Fine-Grained Reactivity</span></nav>
     <span class="tag">AI Agents · Solidjs</span>
     <h1>SolidJS Fine-Grained Reactivity</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">SolidJS Fine-Grained Reactivity is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How SolidJS's signals-based fine-grained reactivity works under the hood, why it needs no virtual DOM, and how that changes the mental model compared to React's component re-render cycle.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When to use it (and when not to) is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>React re-renders a component function and diffs the result against a virtual DOM to figure out what changed. SolidJS skips both steps: it compiles your JSX into real DOM-manipulation code up front, and wires each piece of dynamic content directly to the signal that produces it. When a signal updates, exactly the DOM nodes that depend on it change — nothing re-runs, nothing gets diffed. That's fine-grained reactivity, and it's a different enough mental model from React that "it's like React but faster" undersells what's actually going on.</p>
+<h2 id="signals-are-the-only-primitive">Signals are the primitive everything else is built on</h2>
+<p>A signal is a getter/setter pair that tracks who reads it. <code>createSignal</code> returns `[get, set]`; calling the getter inside a reactive scope (a JSX expression, an effect, a memo) registers that scope as a dependent. When you call the setter, only the registered dependents re-run — not the whole component function. Unlike React state, calling a signal's setter does not cause the "component" to execute again, because in Solid, component functions only run once, at creation, to build the DOM structure.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">JSX · SOLIDJS SIGNALS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { createSignal, createEffect, createMemo } from "solid-js";
 
-def list_solidjs(query: str) -> str:
-    """List solidjs matching the query."""
-    response = requests.get(
-        f"https://api.example.com/solidjs",
-        params={"q": query}
-    )
-    return response.json()
+function Counter() {
+  const [count, setCount] = createSignal(0);
+  const doubled = createMemo(() => count() * 2);
 
-tools = [Tool(name="solidjs", func=list_solidjs, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+  createEffect(() => {
+    console.log("count changed to", count());
+  });
+
+  return (
+    <button onClick={() => setCount(c => c + 1)}>
+      {count()} (doubled: {doubled()})
+    </button>
+  );
+}</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-solidjs">Latency and cost tradeoffs for solidjs</h2>
-<p>In the work I have done on solidjs fine-grained reactivity, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="prompt-patterns-that-work-for-fine">Prompt patterns that work for fine</h2>
-<p>When the work moves from design to production, the questions change. The solidjs is not the question; the failure mode of the fine is.</p>
+<p>Notice the function body of <code>Counter</code> runs exactly once. The `{count()}` and `{doubled()}` expressions inside the JSX are compiled into small reactive computations tied directly to the `<button>` text node — clicking updates that text node in place, and `Counter` itself never re-executes.</p>
+<h2 id="no-virtual-dom-because-there-is-nothing-to-diff">No virtual DOM, because there's nothing to diff</h2>
+<p>React needs a virtual DOM because a component re-render produces a new tree of React elements that has to be compared against the previous tree to compute a minimal set of real DOM updates — the diffing is the cost of re-running the whole function on every state change. Solid's compiler already knows, at build time, exactly which DOM nodes are static and which are dynamic bindings tied to specific signals. There's no tree to regenerate and nothing to diff, because the "render" only happens once; updates after that are direct, targeted mutations. This is why Solid consistently shows up near the top of framework benchmarks for update performance — it isn't doing a faster version of React's work, it's skipping the category of work entirely.</p>
+<h2 id="createeffect-and-creatememo">createEffect and createMemo: derived and side-effecting reactivity</h2>
+<p><code>createMemo</code> caches a derived computation and only recomputes when its signal dependencies change, similar in spirit to `useMemo` but automatically dependency-tracked — no dependency array to get wrong. <code>createEffect</code> runs a side effect whenever its tracked signals change, and (crucially) runs once immediately on creation to establish its dependencies, unlike `useEffect`'s dependency-array model.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
+  <div class="code-header"><span class="code-lang">JSX · DERIVED STATE AND EFFECTS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const [firstName, setFirstName] = createSignal("Ada");
+const [lastName, setLastName] = createSignal("Lovelace");
+
+// Recomputes only when firstName or lastName changes, never on unrelated updates
+const fullName = createMemo(() => `${firstName()} ${lastName()}`);
+
+createEffect(() => {
+  document.title = fullName();
+});</code></pre>
 </div>
-<h2 id="how-to-evaluate-solidjs-in-production">How to evaluate solidjs in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Reading a signal outside a tracked scope does nothing wrong, but tracks nothing</strong>
+  <p>If you read <code>count()</code> in a plain function that isn't inside JSX, an effect, or a memo, Solid still gives you the current value — it just doesn't register a dependency, so nothing will automatically update when it changes later. This trips up developers moving from React, where reading state is always "safe" in this sense because everything re-renders anyway.</p>
 </div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
+<h2 id="why-this-changes-how-you-write-components">Why this changes how you write components</h2>
+<p>Because component functions run once, patterns that rely on React re-running the function body on every render don't apply the same way in Solid. Destructuring props at the top of a component breaks reactivity, because you've read the signal once outside any tracked context — Solid idioms keep props as accessors (`props.value()` inside JSX, not `const { value } = props`) specifically so the reactive graph can keep tracking them. This is the single most common mistake in React-to-Solid migrations, and it isn't a Solid quirk so much as a direct consequence of there being no re-render to fall back on.</p>
+<div class="callout-warn callout">
+  <strong>Don't destructure props</strong>
+  <p><code>function Greeting({ name }) { return &lt;p&gt;{name}&lt;/p&gt; }</code> captures `name`'s value once and never updates it, because destructuring reads the prop outside a tracked scope. Use <code>function Greeting(props) { return &lt;p&gt;{props.name}&lt;/p&gt; }</code> instead — the JSX expression reads `props.name` inside a tracked context every time it needs to.</p>
 </div>
-<h2 id="the-role-of-fine-in-the-agent-loop">The role of fine in the agent loop</h2>
-<p>The performance of fine in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="what-solidjs-fine-grained-reactivity-actually-does">What SolidJS Fine-Grained Reactivity actually does</h2>
-<p>Production fine looks different from development fine. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_solidjs(query: str) -> str:
-    """List solidjs matching the query."""
-    response = requests.get(
-        f"https://api.example.com/solidjs",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="solidjs", func=list_solidjs, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring fine first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add solidjs on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with fine when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on solidjs fine-grained reactivity. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>React's model — re-render the component, diff the output, patch the DOM — trades some runtime cost for a very simple mental rule: state changes, function reruns, UI reflects the latest render. Solid trades that simplicity for direct wiring between signals and DOM nodes, verified and compiled ahead of time, so updates skip re-rendering and diffing altogether. The performance win is real, but the bigger shift is conceptual: in Solid, the component function is a setup script that runs once, not a template that reruns on every state change, and code that assumes otherwise (like destructured props) is the most common source of bugs when picking it up.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/alpinejs-3/">Alpine.js 3 Patterns — A Field Guide</a></li>
@@ -196,7 +155,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

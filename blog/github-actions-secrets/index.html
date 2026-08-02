@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GitHub Actions Secrets Management">
 <meta property="og:description" content="GitHub Actions Secrets Management is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/github-actions-secrets.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/github-actions-secrets/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>Observability: metrics, logs, traces is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Secrets management in GitHub Actions is mostly about scoping: deciding who can read a value, at what level it's stored, and how the pipeline gets short-lived cloud credentials instead of long-lived ones sitting in a settings page. The masking GitHub gives you for free is not a security boundary by itself — it's a convenience that stops accidental echoes, and it's worth understanding exactly where it does and doesn't help.</p>
+
+<h2 id="where-secrets-can-live">Where secrets can live</h2>
+<p>GitHub Actions secrets can be defined at three levels: repository, environment, and organization. Repository secrets are available to any workflow in that repo. Organization secrets can be shared across many repos, optionally restricted to a chosen subset. Environment secrets are the most useful for anything resembling a real deployment pipeline, because they're only exposed to a job once that job targets the environment (<code>jobs.&lt;id&gt;.environment: production</code>) — and an environment can carry <strong>protection rules</strong>, including required reviewers, so a workflow run pauses for manual approval before it can read the production secrets at all. That's the mechanism that turns "anyone who can push a branch can deploy" into "someone still has to click approve."</p>
+
+<h2 id="oidc-instead-of-long-lived-keys">OIDC federation instead of long-lived cloud keys</h2>
+<p>The biggest single upgrade most pipelines can make is dropping static <code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> pairs entirely. GitHub's OIDC provider lets a workflow request a short-lived token that a cloud provider trusts directly, with no long-lived secret stored anywhere. You add <code>permissions: id-token: write</code> to the job, configure an identity provider and trust policy on the AWS/Azure/GCP side that trusts tokens from your specific repo (and optionally branch or environment), and use an action like <code>aws-actions/configure-aws-credentials</code> to exchange the OIDC token for temporary STS credentials scoped to a role.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
+  <div class="code-header"><span class="code-lang">YAML · OIDC TO AWS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>jobs:
+  deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/gha-deploy
+          aws-region: us-east-1
+      - run: aws s3 sync ./dist s3://my-bucket/</code></pre>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>In the work I have done on github actions secrets management, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+<p>No AWS secret ever sits in GitHub's secret store. The role's trust policy is scoped to the repo and branch, the token is valid for a single job run, and there's nothing to rotate because there's nothing long-lived to rotate.</p>
+
+<h2 id="masking-and-where-it-fails">Masking behavior — and where it still leaks</h2>
+<p>GitHub automatically redacts any registered secret value it sees in step logs, replacing it with <code>***</code>. That masking is a literal string match on the raw secret value, which means it has real gaps: it doesn't catch a secret that's been base64-encoded, split across multiple log lines, transformed, or reconstructed by concatenation. <code>echo "${{ secrets.API_KEY }}"</code> gets masked; a script that reads the key from the environment and prints <code>Bearer ${key:0:4}...</code> or logs it after a transformation might not be. Treat masking as a safety net for accidental slip-ups, not a guarantee — the actual control is not printing secrets in the first place, and not passing them to steps that don't need them.</p>
+<div class="callout-warn">
+  <strong>GITHUB_TOKEN is a secret too</strong>
+  <p>The automatic <code>GITHUB_TOKEN</code> is scoped to the triggering repo and expires at the end of the job, but its default permissions can be broad. Set an explicit least-privilege <code>permissions:</code> block at the workflow or job level (e.g. <code>contents: read</code>, and only add <code>pull-requests: write</code> or similar if a step actually needs it) rather than relying on the repository-wide default.</p>
 </div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>When the work moves from design to production, the questions change. The github is not the question; the failure mode of the actions is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "github_actions" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="why-github-is-the-on-call-s-best-friend">Why github is the on-call's best friend</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: github
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: github
-  template:
-    metadata:
-      labels:
-        app: github</code></pre>
-</div>
-<h2 id="gitops-for-actions">GitOps for actions</h2>
-<p>The performance of actions in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="the-deployment-pipeline-for-github">The deployment pipeline for github</h2>
-<p>Production actions looks different from development actions. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+
+<h2 id="third-party-secret-managers">Pulling secrets from Vault or AWS Secrets Manager</h2>
+<p>For organizations that already centralize secrets outside GitHub, actions like <code>hashicorp/vault-action</code> or the AWS Secrets Manager CLI/SDK let a workflow authenticate (often via the same OIDC flow) and fetch secrets at run time instead of duplicating them into GitHub's secret store. This keeps one source of truth and one audit trail for who accessed what, and it means rotating a secret in Vault doesn't require also updating it in every repo or org secret that referenced a copy.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring actions first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add github on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with actions when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Scope</th><th>Who can read it</th></tr>
+  <tr><td>Repository secret</td><td>Any workflow run in that repo</td></tr>
+  <tr><td>Environment secret</td><td>Jobs targeting that environment, gated by required reviewers if configured</td></tr>
+  <tr><td>Organization secret</td><td>Repos it's shared with, org admin controls the list</td></tr>
+  <tr><td>OIDC-issued cloud credential</td><td>Nobody stores it — it's minted per run and expires</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on github actions secrets management. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<p>The pattern that holds up under audit is: environment secrets with required reviewers for anything that touches production, OIDC instead of static cloud keys wherever the provider supports it, an explicit least-privilege <code>permissions:</code> block on every workflow, and no secret value ever deliberately printed to a log — masking is the backstop, not the plan.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/github-actions-caching/">GitHub Actions Caching — A Field Guide</a></li>
@@ -191,7 +148,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

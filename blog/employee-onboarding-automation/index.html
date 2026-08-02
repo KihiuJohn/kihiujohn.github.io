@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Employee Onboarding Automation">
 <meta property="og:description" content="Employee Onboarding Automation is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/employee-onboarding-automation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/employee-onboarding-automation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,79 +92,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough vertical SaaS projects to know the patterns that work. They share a few traits: lean on the horizontal platform, multi-tenant from day one, and feature flags per tenant. This article is the patterns.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>New-hire onboarding fails in the gap between systems, not inside any one of them. HR enters a hire in the HRIS, and from that single event a laptop needs imaging, a directory account needs provisioning, a dozen SaaS licences need assigning, a badge needs printing, and payroll needs the person on the next run — each owned by a different team, each with its own system of record. Automating onboarding means wiring those systems to a shared trigger and shared identity, not adding another checklist app on top.</p>
+<h2 id="the-hire-event-as-the-trigger">The hire event as the trigger</h2>
+<p>Every reliable onboarding pipeline starts from one authoritative event: a new hire record created or a status change to "active" in the HRIS (Workday, BambooHR, SAP SuccessFactors). That event needs a stable identifier — employee ID, not name — and enough attributes (start date, department, manager, employment type, location) to drive every downstream decision. If IT provisioning is triggered by a spreadsheet or a Slack message instead of the HRIS event, you get race conditions: accounts created before the offer is signed, or contractors granted the same access as full-time employees because nobody encoded the distinction.</p>
+<p>The HRIS should own "who is this person and when do they start." Everything else — identity, access, equipment, training — subscribes to that record rather than maintaining a parallel copy of it.</p>
+<h2 id="identity-provisioning-and-the-idp">Identity provisioning and the identity provider</h2>
+<p>The identity provider (Okta, Entra ID, Google Workspace) is the fan-out point. A SCIM integration between the HRIS and the IdP is the least fragile way to keep this in sync: the HRIS pushes a user object, the IdP creates the account, and group membership derives from attributes like department and job code rather than being set by hand. Manual account creation is where onboarding automation quietly dies — someone is on PTO, the ticket sits for two days, and the new hire's first day is spent unable to log in.</p>
+<div class="callout">
+  <strong>Attribute-driven groups beat manual assignment</strong>
+  <p>Map department and role to IdP groups once, and every new hire in that department inherits the right SaaS licences and channel access automatically. The alternative — an IT admin eyeballing "what did the last person in this role get" — drifts within a quarter and becomes an audit finding.</p>
+</div>
+<h2 id="least-privilege-and-itsm-approval">Least privilege and ITSM approval</h2>
+<p>Not every access request should auto-approve. Baseline access — email, chat, core productivity apps — can provision automatically off the HRIS event. Anything touching finance, source code, or customer data should route through an ITSM workflow (ServiceNow, Jira Service Management) with a named approver, even if that approval happens within minutes. The automation's job is to generate the right request with the right approver pre-filled, not to skip the approval step entirely.</p>
+<div class="callout-warn">
+  <strong>Deprovisioning is the half of this that gets skipped</strong>
+  <p>Teams build elaborate onboarding automation and then delete offboarding accounts by hand, months late. Wire the same HRIS event — termination or status change — to revoke IdP sessions and remove group membership immediately. An orphaned account with standing access is the most common finding in a SOC 2 access review.</p>
+</div>
+<h2 id="equipment-and-physical-provisioning">Equipment and physical provisioning</h2>
+<p>Laptop imaging and shipping is the one leg of onboarding that has real lead time — MDM enrollment profiles (Jamf, Intune) need to be assigned before the device leaves the warehouse, and shipping to a remote hire takes days, not minutes. This is why the trigger has to fire on hire-record creation, not on start date: a five-business-day lead time means IT needs the signal a week before day one, and the automation should compute that lead time from the start date rather than have someone eyeball a calendar.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class EmployeeExt : PXCacheExtension<Onboarding>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  <div class="code-header"><span class="code-lang">JSON · SCIM PROVISIONING EVENT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "event": "worker.hire.created",
+  "employeeId": "E10432",
+  "startDate": "2026-08-03",
+  "department": "Engineering",
+  "manager": "E08221",
+  "employmentType": "full_time",
+  "location": "Nairobi-Remote",
+  "provisioning": {
+    "idp_groups": ["eng-all", "github-org", "vpn-standard"],
+    "itsm_requests": ["prod-db-readonly"],
+    "equipment": {"profile": "engineer-laptop-14", "ship_by": "2026-07-27"}
+  }
 }</code></pre>
 </div>
-<h2 id="why-employee-on-a-horizontal-platform-beats-from-scratch">Why employee on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on employee onboarding automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="channel-partner-programs-for-onboarding">Channel partner programs for onboarding</h2>
-<p>When the work moves from design to production, the questions change. The employee is not the question; the failure mode of the onboarding is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'employee'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="marketplace-listing-for-employee">Marketplace listing for employee</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-onboarding">SOC 2 and ISO 27001 for onboarding</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM employee
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of onboarding in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-employee-onboarding-automation-is-for">What Employee Onboarding Automation is for</h2>
-<p>Production onboarding looks different from development onboarding. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class EmployeeExt : PXCacheExtension<Onboarding>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+<h2 id="training-and-compliance-tracking">Training and compliance tracking</h2>
+<p>Mandatory training (security awareness, code of conduct, region-specific compliance) is easy to automate the assignment of and easy to forget the enforcement of. The LMS should receive the same hire event and auto-enrol the new employee in the right curriculum based on role and jurisdiction, but the useful automation is the escalation: if a course isn't completed by day 14, notify the manager, not just the employee. Completion status feeding back into the HRIS closes the loop so compliance reporting doesn't require someone manually cross-referencing spreadsheets before an audit.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring onboarding first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add employee on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with onboarding when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>System</th><th>Owns</th><th>Triggered by</th></tr>
+  <tr><td>HRIS</td><td>Employee record, start date, org data</td><td>Offer acceptance</td></tr>
+  <tr><td>Identity provider</td><td>Accounts, group membership, SSO</td><td>HRIS event via SCIM</td></tr>
+  <tr><td>ITSM</td><td>Non-standard access approvals</td><td>Provisioning request</td></tr>
+  <tr><td>MDM</td><td>Device enrollment and imaging</td><td>Lead-time offset from start date</td></tr>
+  <tr><td>Payroll</td><td>Compensation, tax setup</td><td>HRIS event, separate SLA</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on employee onboarding automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>None of this requires a unified onboarding platform to replace the HRIS, IdP, or ITSM — it requires picking one system as the source of truth for the hire event and making every other system a subscriber to it. Get that wiring right and the checklist app on top becomes optional; get it wrong and no amount of workflow tooling fixes accounts that were never in sync to begin with.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/customer-onboarding-automation/">Customer Onboarding Automation</a></li>
@@ -176,7 +150,6 @@ public class EmployeeExt : PXCacheExtension<Onboarding>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

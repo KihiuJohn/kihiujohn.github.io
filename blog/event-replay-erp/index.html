@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Event Replay for ERP Recovery">
 <meta property="og:description" content="Event Replay for ERP Recovery is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/event-replay-erp.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/event-replay-erp/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,53 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The Acumatica help portal documents the happy path. It does not document what happens when a screen customisation needs to support a tenant that has 50M AR rows, or when a graph extension runs into a deadlock in a multi-company environment. This article is about those cases — the patterns that survive production, the pitfalls that waste a week, and the testing approach that catches the bugs before they reach the user.</p>
-<h2 id="the-replay-edge-cases-i-have-shipped">The replay edge cases I have shipped</h2>
-<p>The replay edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EventReplayExt : PXGraphExtension<EventEntry>
-{
-    [PXOverride]
-    public virtual void Replay(Event doc)
-    {
-        // Custom replay logic for event replay erp
-        if (doc?.Replay == null) return;
-        Base.Replay(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="migration-path-when-event-changes">Migration path when event changes</h2>
-<p>In the work I have done on event replay for erp recovery, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Event sourcing gets the attention, but the operational payoff is <em>replay</em>: taking a stored log of events and re-running it through the fold logic to produce a state. In an ERP context that mechanism turns into three very concrete capabilities — reconstructing what a ledger looked like at any point in time, rebuilding a corrupted or outdated read model without a special-case migration script, and recovering from an outage by re-deriving state instead of restoring from a backup that's hours stale. This is about the mechanics of replay itself and where it earns its keep in a transactional system.</p>
+<h2 id="what-replay-actually-does">What replay actually does</h2>
+<p>Replay is unglamorous: read a stream (or the whole log) from a starting point, in order, and feed each event through the same fold function that built the state the first time. Nothing about the event handling code needs to know it's being replayed versus processed live — that's the property you're relying on. The moment your event handlers do something replay-unsafe (call an external payment gateway, send a customer email, increment a counter that isn't derived purely from the event's own data) you've broken the ability to safely replay, because replaying now re-triggers side effects that already happened.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Separate the fold from the side effect</strong>
+  <p>State-changing folds (what changes the balance, what changes the status) must be pure functions of the event. Side effects (send an email, call a webhook, post to a bank API) belong in a separate handler that's easy to disable during a replay — usually gated behind a flag like <code>isReplay</code> or by only wiring those handlers to the live subscription, not the historical one.</p>
 </div>
-<h2 id="how-to-debug-replay-in-production">How to debug replay in production</h2>
-<p>When the work moves from design to production, the questions change. The event is not the question; the failure mode of the replay is.</p>
+<h2 id="rebuilding-read-models">Rebuilding read models and projections</h2>
+<p>The most routine use of replay is projection rebuilds. A denormalized "open AR by customer" report table is a projection — it's derived, not authoritative. When you ship a bug in the projection logic, add a new column, or the table gets corrupted by a bad deploy, the fix is the same: truncate the projection, reset its checkpoint to the start of the log, and let it consume the event stream again from zero. No backfill script, no special one-off migration — the same consumer code that built it the first time builds it correctly the second time, because it's just a fold over the same immutable events.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for event
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · REBUILDING A PROJECTION CHECKPOINT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Reset the projection's checkpoint and clear the stale read model
+BEGIN TRANSACTION;
+
+TRUNCATE TABLE ar_open_balance_by_customer;
+
+UPDATE projection_checkpoints
+SET last_processed_position = 0,
+    status = 'rebuilding'
+WHERE projection_name = 'ar_open_balance_by_customer';
+
+COMMIT;
+
+-- The projection worker picks this up, streams the event log from
+-- position 0, and re-applies every ARInvoiceIssued / PaymentApplied /
+-- InvoiceVoided event through the same fold that built it originally.</code></pre>
 </div>
-<h2 id="the-version-of-event-that-works">The version of event that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="point-in-time-reconstruction">Point-in-time reconstruction and audit</h2>
+<p>Replaying only up to a given event, rather than to the end of the log, gives you the state of an account, order, or ledger <em>as of</em> a specific moment. That's the mechanism behind "what did this customer's balance look like at month-end close" or "show me the exact sequence of adjustments that got this invoice from $4,200 to $3,850" — you don't need a separate audit table maintained by hand, because the event log already is the audit trail. This is the single biggest reason finance and audit teams push for event sourcing in ERP: the question "how did we get here" has a deterministic, replayable answer instead of a best-effort reconstruction from timestamps and change logs.</p>
+<h2 id="disaster-recovery-by-replay">Disaster recovery: replay instead of restore</h2>
+<p>A conventional DR strategy restores the last snapshot/backup and accepts the data lost between the backup and the incident (your RPO). If your event log is durably persisted and replicated independently of the derived state stores, DR looks different: restore the event log (which is smaller, append-only, and easier to replicate cheaply), then replay it into fresh read models and aggregate snapshots. Your recovery point becomes "the last durably committed event" rather than "the last nightly backup," which is a materially better RPO for systems where losing a day of transactions is not acceptable.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Replay speed is a capacity-planning number</strong>
+  <p>Know how long a full replay takes before you need it in an incident. If replaying a year of events takes six hours, that's your effective RTO for a from-scratch rebuild — budget snapshots (periodic saved folds) so a targeted replay only has to cover events since the last snapshot, not the entire history.</p>
 </div>
-<h2 id="why-event-replay-for-erp-recovery-matters-in-production">Why Event Replay for ERP Recovery matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of replay in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="event-implementation-walkthrough">Event implementation walkthrough</h2>
-<p>Production replay looks different from development replay. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EventReplayExt : PXGraphExtension<EventEntry>
-{
-    [PXOverride]
-    public virtual void Replay(Event doc)
-    {
-        // Custom replay logic for event replay erp
-        if (doc?.Replay == null) return;
-        Base.Replay(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="debugging-with-replay">Debugging: replay as a diagnostic tool</h2>
+<p>Because replay is deterministic and side-effect free (once you've isolated the pure fold from the side effects, per the callout above), it doubles as a debugging tool. Take a copy of the real event stream for the affected aggregate, run it through the fold in a local environment with a debugger or extra logging attached, and step through exactly the sequence that produced the bad state — no need to reproduce the bug live in production. This is a meaningfully better debugging experience than working backward from a corrupted row and a change log, because you have the literal, ordered inputs that produced the output.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring replay first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add event on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with replay when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Use case</th><th>What gets replayed</th><th>Payoff</th></tr>
+  <tr><td>Projection rebuild</td><td>Full stream, into a fresh read model</td><td>No hand-written backfill scripts</td></tr>
+  <tr><td>Point-in-time audit</td><td>Stream up to a target event/timestamp</td><td>Deterministic "how did we get here"</td></tr>
+  <tr><td>Disaster recovery</td><td>Log since the last durable snapshot</td><td>RPO measured in events, not backup windows</td></tr>
+  <tr><td>Production debugging</td><td>One aggregate's stream, offline</td><td>Reproduce the exact failing sequence</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on event replay for erp recovery. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Replay is what makes the rest of event sourcing pay for itself in an ERP setting — the log isn't just a compliance artifact sitting unused, it's the mechanism you reach for on a bad Tuesday when a projection is wrong, an auditor wants a reconstruction, or a datacenter had a bad night. The discipline it demands in return is keeping every fold pure and every side effect out of the replay path, because the day you need to replay is the worst possible day to discover an email handler fires twice.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/event-driven-architecture-erp/">Event-Driven Architecture for ERP — A Field Guide</a></li>
@@ -187,7 +149,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

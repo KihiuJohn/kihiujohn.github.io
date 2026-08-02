@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL vs REST 2026 — A Comparison">
 <meta property="og:description" content="GraphQL vs REST 2026 — A Comparison is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-vs-rest-2026.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-vs-rest-2026/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production APIs to know the patterns that work. They share a few traits: versioned from day one, idempotent, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>Versioning and deprecation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The "GraphQL vs REST" debate settled into something more useful than a winner a few years ago: they solve different shaped problems, and most API teams now run both, deliberately, rather than picking one as an ideology. REST still wins for simple resource CRUD, caching at the HTTP layer, and public APIs where predictability matters more than flexibility. GraphQL earns its complexity when clients have genuinely different data needs — a mobile app and a dashboard hitting the same backend — or when the number of round trips to assemble a screen would otherwise balloon.</p>
+<h2 id="the-over-fetching-under-fetching-argument-still-holds">The over-fetching/under-fetching argument still holds</h2>
+<p>This is the original pitch for GraphQL and it hasn't aged: a REST endpoint returns a fixed shape, so a mobile client that only needs a user's name and avatar still receives the full profile object, and a dashboard that needs a user plus their last five orders needs two round trips (or a bespoke aggregation endpoint). A GraphQL query asks for exactly the fields needed, in one round trip, regardless of how nested the data is. The cost is that the server now has to defend against clients asking for arbitrarily deep, arbitrarily expensive queries — which REST's fixed endpoints never had to worry about.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">GRAPHQL · QUERY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>query DashboardView($userId: ID!) {
+  user(id: $userId) {
+    name
+    avatarUrl
+    recentOrders(limit: 5) {
+      id
+      total
+      status
+    }
+  }
+}</code></pre>
 </div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>In the work I have done on graphql vs rest 2026 — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+<h2 id="caching-is-rests-real-advantage">Caching is REST's real remaining advantage</h2>
+<p>HTTP caching — CDN edge caching, browser caching, reverse proxy caching — is built around GET requests and URLs, and it works out of the box for REST. GraphQL typically serves everything over POST to a single endpoint, which sidesteps HTTP caching almost entirely; you get response caching back through deliberate engineering (persisted queries turned into cacheable GET requests, Apollo's response cache, or CDN-level GraphQL caching products), not for free. If your API is read-heavy, public, and cacheable at the edge, that's a point solidly in REST's favor.</p>
+<h2 id="operational-complexity-is-not-symmetric">Operational complexity is not symmetric</h2>
+<p>A REST API's operational surface is well understood by every ops team and every piece of infrastructure: status codes map to alerts, rate limiting is per-endpoint, and a slow endpoint is easy to isolate. A GraphQL API funnels every operation through one endpoint, so rate limiting, query cost analysis, and depth/complexity limiting all have to be built deliberately — an unbounded nested query can do the resource-exhaustion work of dozens of REST endpoints in a single request. Teams that ship GraphQL to the public internet without query complexity limits are one crafted query away from a self-inflicted denial of service.</p>
+<div class="callout-warn">
+  <strong>GraphQL without query cost limits is not production-ready</strong>
+  <p>A deeply nested query — friends of friends of friends, each level fetching more — can be exponentially expensive on the server even though it looks small on the wire. Query depth limiting and cost analysis (assigning a cost to each field and rejecting queries over a budget) are not optional hardening for a public GraphQL API; they are table stakes.</p>
 </div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the rest is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="why-graphql-is-not-rest-anymore">Why graphql is not REST anymore</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    rest: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="idempotency-in-rest">Idempotency in rest</h2>
-<p>The performance of rest in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="contract-testing-for-graphql">Contract testing for graphql</h2>
-<p>Production rest looks different from development rest. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+<h2 id="where-each-one-wins-in-practice">Where each one wins in practice</h2>
+<p>REST wins for public, cacheable, resource-oriented APIs — payment processors, webhook receivers, anything where predictable URLs and HTTP semantics (status codes, caching headers, idempotent PUTs) matter more than flexible querying. GraphQL wins for internal APIs backing multiple frontends with divergent data needs, and for backend-for-frontend layers aggregating several services into one client-facing graph. Neither is "the future" that replaced the other — the 2026 reality is that plenty of systems expose a GraphQL layer over an internal set of REST or gRPC services, using each where it's strongest.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rest first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rest when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Dimension</th><th>REST</th><th>GraphQL</th></tr>
+  <tr><td>HTTP caching</td><td>Native, free</td><td>Requires extra engineering</td></tr>
+  <tr><td>Over-fetching</td><td>Common with fixed responses</td><td>Eliminated by design</td></tr>
+  <tr><td>Rate limiting</td><td>Per-endpoint, simple</td><td>Needs query cost analysis</td></tr>
+  <tr><td>Client flexibility</td><td>Low — server decides shape</td><td>High — client decides shape</td></tr>
+  <tr><td>Public API predictability</td><td>High</td><td>Lower without tooling</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql vs rest 2026 — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Choose REST when the API is public, cacheable, and resource-shaped, and choose GraphQL when clients have genuinely divergent data needs that would otherwise require endpoint sprawl or chained round trips. The mature answer in 2026 is rarely "always REST" or "always GraphQL" — it's picking per boundary, and being honest about the operational cost each one adds.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/api-style-decision/">REST vs GraphQL vs gRPC — Decision Guide</a></li>
@@ -181,7 +141,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

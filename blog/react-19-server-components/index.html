@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>React 19 Server Components | John Kihiu</title>
-<meta name="description" content="React 19 Server Components is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta name="description" content="How React Server Components actually work in React 19: rendering only on the server, the use client boundary, why they can't be imported into Client Components, and why this is a framework feature, not a plain-React one.">
 <meta name="keywords" content="Acumatica react, Acumatica rsc, Acumatica server, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/react-19-server-components/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="React 19 Server Components">
-<meta property="og:description" content="React 19 Server Components is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/react-19-server-components.svg">
+<meta property="og:description" content="How React Server Components actually work in React 19: rendering only on the server, the use client boundary, why they can't be imported into Client Components, and why this is a framework feature, not a plain-React one.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/react-19-server-components/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="server">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"React 19 Server Components","description":"React 19 Server Components is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/react-19-server-components.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/react-19-server-components/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"React 19 Server Components","description":"How React Server Components actually work in React 19: rendering only on the server, the use client boundary, why they can't be imported into Client Components, and why this is a framework feature, not a plain-React one.","image":"https://kihiujohn.github.io/assets/og/react-19-server-components.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/react-19-server-components/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"React 19 Server Components","item":"https://kihiujohn.github.io/blog/react-19-server-components/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,59 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">React 19 Server Components</span></nav>
     <span class="tag">Modern Web · React</span>
     <h1>React 19 Server Components</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">React 19 Server Components is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How React Server Components actually work in React 19: rendering only on the server, the use client boundary, why they can't be imported into Client Components, and why this is a framework feature, not a plain-React one.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-24">Jun 24, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Modern web development on this settles into a small set of patterns after the first few projects. The framework matters less than the discipline; the discipline is what makes the framework useful. The pattern that survives 18 months in production is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM.</p>
-<h2 id="common-pitfalls-when-adopting-react">Common pitfalls when adopting react</h2>
-<p>Common pitfalls when adopting react is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The thing that took me longest to internalize about React Server Components is that they aren't a React feature you enable — they're a build-time and routing convention that a framework has to implement, with React's role being the component model both sides share. Understanding where the server/client line actually sits matters more than memorizing the "use client" directive.</p>
+<h2 id="the-mental-model">The mental model: server-only, zero JS shipped</h2>
+<p>A Server Component runs exclusively on the server (or at build time), produces its output as part of the initial response, and never re-renders in the browser — its code, and any dependencies it imports, never end up in the client JS bundle at all. That's what makes it different from server-side rendering a normal component: SSR still ships the component's code to hydrate later, an RSC doesn't ship at all. Because it never runs client-side, a Server Component can do things a Client Component structurally can't: query a database directly, read a filesystem, or use a secret API key, without any of that code being reachable by the browser.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<h2 id="migration-path-from-the-old-approach">Migration path from the old approach</h2>
-<p>In the work I have done on react 19 server components, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="how-server-interacts-with-server-components">How server interacts with server components</h2>
-<p>When the work moves from design to production, the questions change. The react is not the question; the failure mode of the server is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useReact(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">TSX · a server component</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// app/dashboard/page.tsx — no "use client", runs only on the server
+import { db } from '@/lib/db';
+
+export default async function DashboardPage() {
+  const projects = await db.query('select id, name from projects limit 20');
+  return (
+    <ul>
+      {projects.map((p) => (
+        <li key={p.id}>{p.name}</li>
+      ))}
+    </ul>
+  );
 }</code></pre>
 </div>
-<h2 id="typescript-patterns-for-react">TypeScript patterns for react</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
-</div>
-<h2 id="when-react-is-the-wrong-tool">When react is the wrong tool</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="the-use-client-boundary">The "use client" boundary</h2>
+<p>Everything is a Server Component by default in a framework that supports RSC; you opt a file into being a Client Component by adding the <code>"use client"</code> directive at its top. That marks the boundary: from that file downward, the component and everything it imports gets bundled and shipped to the browser, and can use hooks like <code>useState</code> and browser APIs that a Server Component can't.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
+  <div class="code-header"><span class="code-lang">TSX · a client component</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>'use client';
+import { useState } from 'react';
+
+export function LikeButton({ postId }: { postId: string }) {
+  const [liked, setLiked] = useState(false);
+  return <button onClick={() => setLiked(!liked)}>{liked ? 'Liked' : 'Like'}</button>;
+}</code></pre>
 </div>
-<h2 id="build-vs-buy-for-server">Build vs buy for server</h2>
-<p>The performance of server in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<h2 id="composition-rules">Composition: children flow one way</h2>
+<p>The rule that trips people up first: a Client Component cannot import a Server Component. Once you cross into <code>"use client"</code>, everything imported from there is bundled for the browser, and a Server Component's code (database calls, server-only imports) can't safely live in that bundle. The escape hatch is passing Server Components down as <code>children</code> or props — a Client Component can render a Server Component that was handed to it by its parent, it just can't import one directly itself.</p>
 <div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
+  <strong>Composition via children, not imports</strong>
+  <p>A client-side layout or modal wrapper can still show server-rendered content: render the server component higher up the tree and pass it in as `children`, rather than importing it inside the client file.</p>
 </div>
-<h2 id="testing-react-in-isolation">Testing react in isolation</h2>
-<p>Production server looks different from development server. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
+<h2 id="a-framework-level-feature">Why this needs a framework, not just React</h2>
+<p>Server Components depend on a bundler and router that understand the server/client split — deciding which modules get sent to the browser, serializing the server-rendered output into something the client can stitch together, and wiring up the network boundary between the two. Plain React (a Vite SPA, Create React App) has no server runtime and no bundler-level concept of this split, so there's no "just enable RSC" flag to flip. In practice, this means Next.js's App Router today, with other frameworks and bundlers building equivalent support over time.</p>
+<div class="callout callout-warn">
+  <strong>Be honest about what "using React 19" gets you here</strong>
+  <p>Upgrading a plain React app's package.json to React 19 does not give you Server Components. RSC requires the framework layer to actually implement the server/client boundary — the React version is necessary but nowhere near sufficient.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring server first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add react on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with server when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on react 19 server components. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Server Components are best understood as "components that opt out of the client bundle by default," with Client Components as the deliberate exception rather than the norm. The mental flip — start server-first, add "use client" only where you need interactivity or browser APIs — is the real shift, and it only works because a framework like Next.js has built the machinery underneath React to make that boundary real.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/apollo-server-patterns/">Apollo Server Patterns — A Field Guide</a></li>
@@ -178,7 +149,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

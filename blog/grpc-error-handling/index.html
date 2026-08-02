@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="gRPC Error Handling — A Field Guide">
 <meta property="og:description" content="gRPC Error Handling — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/grpc-error-handling.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/grpc-error-handling/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,37 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design is a discipline, not a protocol. this is one of the parts of the discipline. The pattern that works is to push the API towards being a contract, the contract towards being a test, and the test towards being the source of truth. This article is the discipline.</p>
-<h2 id="the-api-design">The API design</h2>
-<p>The API design is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>REST error handling leans on HTTP status codes plus whatever shape of error body a team invents. gRPC standardizes this: every RPC either succeeds with <code>OK</code> or fails with one of a fixed, well-defined set of status codes, each with documented semantics for what it means and, critically, whether a client should retry. Getting this mapping right — and putting the right information in the error detail — is most of what separates a gRPC service that's pleasant to consume from one that leaves every caller guessing.</p>
+<h2 id="the-status-code-vocabulary">The status code vocabulary</h2>
+<p>gRPC defines around seventeen status codes, and a handful cover almost every real case: <code>NOT_FOUND</code> for a missing resource, <code>INVALID_ARGUMENT</code> for a malformed request, <code>ALREADY_EXISTS</code> for a conflicting create, <code>PERMISSION_DENIED</code> and <code>UNAUTHENTICATED</code> for authorization failures, <code>FAILED_PRECONDITION</code> for a valid request that can't run in the current state, <code>UNAVAILABLE</code> for a transient infrastructure failure, and <code>DEADLINE_EXCEEDED</code> for a timeout. Picking the wrong one isn't cosmetic — it changes what a well-behaved client does next, since retry logic is usually written against the code, not the message string.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">PROTOBUF · ERROR DETAIL</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import "google/rpc/error_details.proto";
+
+// Server returns status INVALID_ARGUMENT with a
+// google.rpc.BadRequest detail attached:
+message BadRequest {
+  message FieldViolation {
+    string field = 1;
+    string description = 2;
+  }
+  repeated FieldViolation field_violations = 1;
+}</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>In the work I have done on grpc error handling — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+<h2 id="richer-errors-with-google-rpc-status">Richer errors with google.rpc.Status</h2>
+<p>A bare status code and a string message is often not enough context for a client to act on — which field was invalid, what precondition failed. gRPC's standard error model (<code>google.rpc.Status</code>) lets the server attach structured detail messages to an error: a <code>BadRequest</code> listing exactly which fields failed validation, a <code>RetryInfo</code> telling the client how long to back off, or a <code>QuotaFailure</code> explaining which limit was hit. Clients that bother to unpack these details can show a specific, actionable error instead of a generic "something went wrong" — the same value structured API errors provide in REST via RFC 7807 problem details, just standardized at the protocol level instead of invented per team.</p>
+<h2 id="which-codes-are-safe-to-retry">Which codes are safe to retry</h2>
+<p>The single most consequential decision in gRPC error handling is whether a failure is retryable, and the status code is meant to answer that directly. <code>UNAVAILABLE</code> and, with caveats, <code>DEADLINE_EXCEEDED</code> are generally safe to retry (ideally with exponential backoff and jitter) because they indicate a transient condition. <code>INVALID_ARGUMENT</code>, <code>NOT_FOUND</code>, <code>FAILED_PRECONDITION</code>, and <code>PERMISSION_DENIED</code> are not — retrying an invalid request just produces the same invalid request again. gRPC's built-in retry policies (configured per-method in the service config) can automate this, but only if the server picked the correct code in the first place.</p>
+<div class="callout-warn">
+  <strong>Don't retry non-idempotent unary calls blindly</strong>
+  <p>Automatic retry on <code>UNAVAILABLE</code> is safe for calls that are idempotent — a <code>GetOrder</code> retried twice does nothing extra. A <code>CreateOrder</code> retried after a genuinely-succeeded-but-timed-out call can create a duplicate. Use idempotency keys for mutating RPCs before turning on automatic retries, exactly as you would for a POST in REST.</p>
 </div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>When the work moves from design to production, the questions change. The grpc is not the question; the failure mode of the error is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /grpcs/{id}:
-    get:
-      operationId: getGrpc
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GrpcResponse = {
-    id: string;
-    error: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of error in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="why-grpc-is-not-rest-anymore">Why grpc is not REST anymore</h2>
-<p>Production error looks different from development error. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring error first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add grpc on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with error when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="mapping-to-http-when-a-gateway-is-involved">Mapping to HTTP at the gateway boundary</h2>
+<p>When gRPC sits behind a gRPC-Web or REST-to-gRPC gateway (grpc-gateway, Envoy's gRPC-JSON transcoding), status codes need an HTTP equivalent for browser clients — <code>NOT_FOUND</code> becomes 404, <code>INVALID_ARGUMENT</code> becomes 400, <code>UNAVAILABLE</code> becomes 503, and so on. This mapping is fairly standard and handled by the gateway tooling automatically, but it's worth confirming your gateway does it correctly rather than collapsing every gRPC error to a generic 500 — that's a common gap that turns a precise, actionable gRPC error into an opaque one at the edge.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on grpc error handling — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Good gRPC error handling means picking the status code that accurately describes what went wrong (not just what's convenient), attaching structured detail via <code>google.rpc.Status</code> so clients can act on the failure instead of just logging it, and being deliberate about which codes are safe for automatic retry. Get the code wrong and every downstream retry policy, alert, and gateway mapping built on top of it is wrong too.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-rest-api-error-handling-patterns/">Acumatica REST API — Error Handling Patterns</a></li>
@@ -181,7 +133,6 @@ app.get('/api/grpcs/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

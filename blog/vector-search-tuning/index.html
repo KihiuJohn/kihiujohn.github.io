@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vector Search Tuning — A Field Guide | John Kihiu</title>
-<meta name="description" content="Vector Search Tuning — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="Tuning vector search in production: HNSW parameters (ef_construction, ef_search, M), approximate vs exact nearest-neighbor trade-offs, hybrid search with BM25, and where re-ranking fits in.">
 <meta name="keywords" content="Acumatica vector, Acumatica search, Acumatica tuning, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vector-search-tuning/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vector Search Tuning — A Field Guide">
-<meta property="og:description" content="Vector Search Tuning — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/vector-search-tuning.svg">
+<meta property="og:description" content="Tuning vector search in production: HNSW parameters (ef_construction, ef_search, M), approximate vs exact nearest-neighbor trade-offs, hybrid search with BM25, and where re-ranking fits in.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vector-search-tuning/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="tuning">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vector Search Tuning — A Field Guide","description":"Vector Search Tuning — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/vector-search-tuning.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vector-search-tuning/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vector Search Tuning — A Field Guide","description":"Tuning vector search in production: HNSW parameters (ef_construction, ef_search, M), approximate vs exact nearest-neighbor trade-offs, hybrid search with BM25, and where re-ranking fits in.","image":"https://kihiujohn.github.io/assets/og/vector-search-tuning.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vector-search-tuning/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vector Search Tuning — A Field Guide","item":"https://kihiujohn.github.io/blog/vector-search-tuning/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,59 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vector Search Tuning — A Field Guide</span></nav>
     <span class="tag">Data / ML · Vector</span>
     <h1>Vector Search Tuning — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vector Search Tuning — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Tuning vector search in production: HNSW parameters (ef_construction, ef_search, M), approximate vs exact nearest-neighbor trade-offs, hybrid search with BM25, and where re-ranking fits in.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data pipelines in production are mostly about how to handle the slow failure modes. this is the pattern that handles the cases that don't show up in the demo data. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="what-vector-search-tuning-a-field-guide-is-for">What Vector Search Tuning — A Field Guide is for</h2>
-<p>What Vector Search Tuning — A Field Guide is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Getting a vector index running is the easy part — every vector database ships a "create index, insert vectors, query" quickstart that works fine on ten thousand rows. Tuning it to hold acceptable recall and latency at ten million rows, under real query load, is the part nobody's quickstart covers. Most of what actually matters comes down to a handful of HNSW parameters, an honest decision about approximate vs. exact search, and whether you're relying on vector similarity alone when you shouldn't be.</p>
+<h2 id="hnsw-parameters">HNSW: the index almost everyone is actually running</h2>
+<p>HNSW (Hierarchical Navigable Small World) is the approximate nearest-neighbor algorithm behind most production vector search today — pgvector, Qdrant, Weaviate, and Pinecone all use it or a close variant. It builds a multi-layer graph where each vector is a node, and search descends from a sparse top layer to a dense bottom layer, following edges toward the query vector. Three parameters control the trade-off between recall, latency, and memory: <code>M</code> (max connections per node — higher M means a denser, more accurate graph and more memory), <code>ef_construction</code> (how thoroughly the graph is built at insert time — higher means a better graph but slower indexing), and <code>ef_search</code> (how many candidates are explored per query — higher means better recall at the cost of query latency).</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM vector
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · pgvector</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE INDEX ON documents
+USING hnsw (embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 100);
+
+-- ef_search is set per-query/session, not baked into the index
+SET hnsw.ef_search = 80;
+
+SELECT id, content
+FROM documents
+ORDER BY embedding <=> '[0.01, 0.02, ...]'::vector
+LIMIT 10;</code></pre>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>In the work I have done on vector search tuning — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+<p><code>M</code> between 12-48 and <code>ef_construction</code> between 100-200 cover most workloads reasonably — pgvector's own defaults (<code>m=16</code>, <code>ef_construction=64</code>) are a sane starting point, not something you need to override on day one. <code>ef_search</code> is the knob to reach for first when tuning an existing index, since it's changeable at query time without a rebuild: start low, measure recall against a labeled query set, and raise it until recall is acceptable, watching the latency cost as you go.</p>
+<div class="callout-warn callout">
+  <strong>ef_search below k gives you nonsense results</strong>
+  <p><code>ef_search</code> must be at least as large as the number of results you're requesting (<code>LIMIT</code>/<code>k</code>), and in practice should be several times larger — <code>ef_search</code> equal to <code>k</code> gives poor recall because the search barely explores beyond the exact count needed. A common starting ratio is <code>ef_search</code> = 4-10x your <code>k</code>.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The vector is not the question; the failure mode of the search is.</p>
+<h2 id="approximate-vs-exact">Approximate vs exact nearest neighbor</h2>
+<p>Exact nearest neighbor (brute-force cosine distance against every vector) guarantees perfect recall but scales linearly with corpus size — fine for tens of thousands of vectors, painful past a few hundred thousand depending on your latency budget and hardware. HNSW and other ANN (approximate nearest neighbor) indexes trade a small, tunable amount of recall for sublinear query time. The trade-off is genuinely tunable, not all-or-nothing: at high <code>ef_search</code> values HNSW recall against a brute-force baseline is often well into the high nineties percent, at the cost of higher latency and memory versus a lower <code>ef_search</code> setting. For most search and RAG use cases, that gap is invisible to end users; for exact-match-critical use cases (deduplication, legal discovery), consider exact search or a hybrid exact-rerank step on the ANN shortlist.</p>
+<h2 id="hybrid-search">Hybrid search: vector similarity alone misses things</h2>
+<p>Pure vector search is weak at exact keyword matches — a query for an error code, a product SKU, or a person's name can score poorly on embedding similarity even when a document contains that exact string, because embeddings are tuned for semantic similarity, not lexical overlap. Hybrid search combines a vector search with a traditional keyword/BM25 search (via Postgres full-text search, Elasticsearch, or a vector DB's built-in sparse-vector support) and merges the two ranked lists, typically with Reciprocal Rank Fusion (RRF) rather than trying to normalize and average two incomparable score scales.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.vector > 0).groupBy("search").agg({"amount": "sum"})</code></pre>
+  <div class="code-header"><span class="code-lang">Python · reciprocal rank fusion</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def reciprocal_rank_fusion(vector_results, bm25_results, k=60):
+    scores = {}
+    for rank, doc_id in enumerate(vector_results):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+    for rank, doc_id in enumerate(bm25_results):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)</code></pre>
 </div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>RRF sidesteps the score-normalization problem entirely by only using rank position, not raw scores, which is why it's become the default fusion method in most hybrid setups (Qdrant, Weaviate, and Elasticsearch all support it natively now).</p>
+<h2 id="re-ranking">Re-ranking: a second, more expensive pass on a short list</h2>
+<p>A cross-encoder reranker (like Cohere Rerank or an open model such as <code>bge-reranker</code>) scores a query against each candidate document jointly, rather than comparing independently-computed embeddings — much more accurate, much more expensive per comparison, which is why it's only run on the top 20-100 candidates already retrieved by vector or hybrid search, not the whole corpus. The retrieval step's job is to cheaply narrow millions of documents to a short list with decent recall; the reranker's job is to get the ordering of that short list right. Skipping reranking is fine for low-stakes search; for RAG pipelines where the top 3-5 chunks go straight into an LLM prompt, a reranker measurably improves what the model actually sees.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Tune retrieval before reaching for reranking</strong>
+  <p>A reranker can't fix a retrieval step that never surfaces the right document in its candidate set. If recall@50 from your vector search is poor, fix <code>ef_search</code>, chunking strategy, or hybrid search first — reranking only reorders what retrieval already found.</p>
 </div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_vector') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>The performance of search in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production search looks different from development search. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM vector
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring search first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add vector on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with search when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on vector search tuning — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Vector search tuning in production is mostly about three levers pulled in order: get the HNSW parameters (<code>ef_search</code> especially) into a range that balances recall against your latency budget, add keyword/BM25 hybrid search so exact matches don't fall through the cracks that pure embeddings leave, and layer a reranker on the retrieved candidates when result quality — not just recall — is what's being measured. None of this requires abandoning approximate search for exact search; it requires actually measuring recall against a labeled query set instead of assuming the defaults are fine.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/itl/ai-risk-management-framework" target="_blank" rel="noopener noreferrer">NIST AI Risk Management Framework</a></li><li><a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/" target="_blank" rel="noopener noreferrer">OWASP Top 10 for LLM Applications</a></li><li><a href="https://developers.google.com/machine-learning/guides/rules-of-ml" target="_blank" rel="noopener noreferrer">Google ML Rules of Thumb</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/hybrid-search-vector-bm25/">Hybrid Search — Vector + BM25</a></li>
@@ -179,7 +149,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

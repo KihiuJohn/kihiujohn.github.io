@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Multi-Tenant Customization Considerations">
 <meta property="og:description" content="How to design Acumatica customizations that work cleanly across multiple tenants — shared code, tenant-specific configuration, and the patterns that keep things maintainable.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-multi-tenant-customization-considerations.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-multi-tenant-customization-considerations/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -94,8 +93,11 @@
 <main class="article">
   <div class="container">
     <p>Acumatica's multi-tenancy is often confused with multi-company. Multi-company is multiple companies or branches sharing one tenant's database. True multi-tenancy is different: one deployed application instance — one IIS app pool, one set of compiled customization DLLs — serving several completely isolated Tenants, each with its own database, managed through the Tenants screen. That distinction matters the moment you write code, because a customization package is not deployed once per tenant. It is deployed once, and every tenant on that instance loads the same assembly into the same process.</p>
-<h2 id="one-instance-many-databases">One instance, many databases</h2>
-<p>When a customer logs in, Acumatica resolves which tenant's database to connect to for that session and scopes data access accordingly. PXCache, PXLongOperation, and the standard graph lifecycle are already tenant-aware — a query built the normal way through a graph's data views will only ever touch the current session's tenant. Most bugs in multi-tenant deployments do not come from the ORM layer. They come from code that steps outside it.</p>
+<h2 id="what-companyid-actually-does">What CompanyID actually does</h2>
+<p>Acumatica's multitenancy is implemented per table, not per database and not as some platform-wide switch you flip once. A table becomes tenant-isolated when it has a CompanyID column that is part of its primary key and part of every index on the table. Every query the platform generates against that table implicitly filters and joins on CompanyID, so tenant A's rows are never visible in a query run under tenant B's session — the isolation is enforced at the schema level, not by application code remembering to add a WHERE clause.</p>
+<p>The consequence that catches people building a custom DAC: if you add a table without a CompanyID column, there is no tenant boundary on it at all. Every row you insert is visible to every tenant sharing that database instance, full stop. This isn't a permissions gap that shows up as an access-denied error — it's silent. The table works fine in testing, because you were only ever logged in as one tenant. The leak only becomes visible once a second tenant goes live on the same instance and someone notices data that isn't theirs.</p>
+<h2 id="one-instance-many-databases">One instance, shared code path</h2>
+<p>PXCache, PXLongOperation, and the standard graph lifecycle already know how to apply CompanyID scoping for any table that has the column — a query built the normal way through a graph's data views will only ever touch the current session's tenant, automatically. Most bugs in multi-tenant deployments do not come from that layer. They come from custom tables missing CompanyID, or from code that steps outside the ORM entirely (raw SQL, static caches) and loses the scoping the platform would otherwise have given it for free.</p>
 <p>Users with cross-tenant access can switch tenants from the login screen without re-authenticating against a different URL or instance. If your customization keeps any assumption that "the current user only ever sees one company," that assumption breaks the first time an admin account with tenant-switching rights touches the screen.</p>
 <h2 id="static-state-is-the-real-risk">Static state is the real risk</h2>
 <p>The customization DLL is loaded once per application instance and shared in memory by every tenant using it. Any <code>static</code> field, singleton, or process-wide cache you add is shared the same way. Cache a price list, a feature flag, or a lookup result in a static <code>Dictionary</code> keyed only by item ID or customer ID, and tenant A's data can leak into tenant B's screen — silently, and usually only noticed after a support ticket from the wrong customer.</p>
@@ -130,8 +132,9 @@ public class SOOrderEntryExt : PXGraphExtension&lt;SOOrderEntry&gt;
 <h2 id="integration-config-cannot-be-hardcoded">Integration config cannot be hardcoded</h2>
 <p>Custom integrations, scheduled processing built on Automation Schedules, and any code that calls out to an external API tend to accumulate hardcoded endpoints, API keys, or account IDs during development, when there is only one tenant to test against. That code breaks as soon as it runs on a shared instance serving multiple customers, each of whom needs their own credentials and endpoint. Store integration settings in a per-tenant settings DAC and resolve them at runtime instead of baking them into the assembly.</p>
 <p>The same applies to hardcoded record IDs — a branch ID, a warehouse ID, a numbering sequence — that happened to exist in your dev tenant. They will not exist, or will mean something different, in every other tenant sharing the instance.</p>
-<h2 id="deployment-scope-and-blast-radius">Deployment scope and blast radius</h2>
-<p>Customization projects publish either to a single tenant or to all tenants on the instance, and that choice has real consequences. There is no per-tenant DLL versioning on a shared instance — if you publish a buggy update to all tenants, every one of them is affected at the same moment, not on a rolling schedule you control. Publishing to a single tenant first, verifying, then rolling forward tenant by tenant is slower but contains the blast radius of a bad release.</p>
+<h2 id="deployment-scope-and-blast-radius">The publish-time gotcha: one action, two scopes</h2>
+<p>This is the part that catches people who otherwise understand everything above. When you publish a customization project on a multitenant site, you pick which tenants to target — and it looks like that selection controls the whole blast radius. It does not. Website-level changes in the project — a new screen, a new field on an existing DAC, a new business event, anything that is schema or UI rather than data — apply to every tenant on that instance the moment you publish, regardless of which tenants you selected. Tenant-specific changes — configuration values, data records, anything scoped to a tenant's own database — apply only to the tenants you targeted.</p>
+<p>So a single publish action can be simultaneously site-wide and tenant-scoped, depending on what part of the project it touches. Someone who publishes "to tenant A only" and assumes that fully isolates the release is right about the data and wrong about the schema and screens — those went everywhere. All tenants also inherit their initial configuration and system data from the System tenant, and System tenant data stays visible to every tenant, which is a second, related way changes propagate further than a single-tenant publish target suggests.</p>
 <table>
   <tr><th>Concept</th><th>Multi-Tenant</th><th>Multi-Company / Branch</th></tr>
   <tr><td>Isolation boundary</td><td>Separate database per tenant</td><td>Shared database, separated by company/branch ID</td></tr>
@@ -142,8 +145,9 @@ public class SOOrderEntryExt : PXGraphExtension&lt;SOOrderEntry&gt;
 <h2 id="testing-across-tenants">Testing across tenants</h2>
 <p>A customization that passes every test in a single-tenant sandbox can still break in production the first time it runs on a shared instance with real tenant switching. Before publishing anything wider than one tenant, walk the diff for static fields, hardcoded IDs, and any assumption that "there is only one company in this database." That review takes minutes and catches the class of bug that otherwise surfaces as a data-leakage incident weeks later.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on Acumatica multi-tenant customizations. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Most multi-tenant mistakes trace back to one wrong mental model: treating "publish to one tenant" as a guarantee that the blast radius stopped there. It doesn't, once your project touches the schema or UI. Add CompanyID to every custom table's primary key and indexes so tenant isolation actually holds, never cache tenant data in a static field without a tenant key in it, and before you publish, know which part of your change is website-wide (schema, screens, code) and which part is tenant-scoped (data, config) — because a single publish action can be both at once. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-designing-a-customization-for-saas/">Designing an Acumatica Customization for SaaS</a></li>
@@ -154,7 +158,6 @@ public class SOOrderEntryExt : PXGraphExtension&lt;SOOrderEntry&gt;
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

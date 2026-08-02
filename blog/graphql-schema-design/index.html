@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL Schema Design — A Field Guide">
 <meta property="og:description" content="GraphQL Schema Design — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-schema-design.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-schema-design/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,54 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design at scale is mostly about deprecations and versioning. this is the pattern that handles the cases that the first version of the API didn't anticipate. This article is the field-tested patterns, with the failure modes that don't show up in the happy path.</p>
-<h2 id="what-graphql-schema-design-a-field-guide-gives-you">What GraphQL Schema Design — A Field Guide gives you</h2>
-<p>What GraphQL Schema Design — A Field Guide gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A GraphQL schema is a contract, and like any contract it is far cheaper to get right before anyone depends on it. Unlike a REST API, where each endpoint can quietly evolve its own shape, a GraphQL schema is one shared graph that every client queries against. Bad decisions early — exposing database columns directly as fields, modelling everything as a nullable String — don't stay contained. They spread into every client that ever queries that type. Schema-first design means writing the SDL before the resolvers, so the shape of the API is a deliberate decision rather than a side effect of whatever the ORM returns.</p>
+<h2 id="model-the-domain-not-the-database">Model the domain, not the database</h2>
+<p>The most common mistake is designing a schema that mirrors database tables. A <code>users</code> table with a nullable <code>manager_id</code> foreign key becomes a schema with a nullable <code>manager: User</code> field — fine, that one's honest. But a status column stored as a raw integer should become a GraphQL enum, not an <code>Int</code>. A schema is meant to describe what a client can ask for in domain terms, not to expose your migration history. Favor specific types over generic ones: an <code>OrderStatus</code> enum with <code>PENDING</code>, <code>PAID</code>, <code>SHIPPED</code>, <code>CANCELLED</code> is self-documenting in a way that <code>status: Int</code> never will be, and it lets tooling autocomplete valid values.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">GRAPHQL · SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>type Order {
+  id: ID!
+  status: OrderStatus!
+  placedAt: DateTime!
+  customer: Customer!
+  lineItems: [OrderLineItem!]!
+  total: Money!
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  CANCELLED
+}
+
+type OrderLineItem {
+  id: ID!
+  sku: String!
+  quantity: Int!
+  unitPrice: Money!
+}</code></pre>
 </div>
-<h2 id="the-api-design">The API design</h2>
-<p>In the work I have done on graphql schema design — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+<h2 id="nullability-is-a-design-decision">Nullability is a design decision</h2>
+<p>Every field in GraphQL is nullable unless you mark it with <code>!</code>. That exclamation point is not a minor detail — it is a promise to every client that the field will never be null, and breaking that promise later is a breaking change. The safer default is to make fields non-null only when you are certain the resolver can always produce a value, and to lean on nullable fields for anything that depends on an external service, a permission check, or a related record that might not exist. A <code>List</code> of a non-null type — <code>[OrderLineItem!]!</code> — is a common and useful pattern: the list itself is never null (an order always returns an array, even if empty), but you still guarantee no null entries inside it.</p>
+<div class="callout-warn">
+  <strong>Non-null is forever</strong>
+  <p>Changing a field from non-null to nullable is a breaking change for any client that doesn't defensively check for null — which most don't, because the schema told them not to. Changing nullable to non-null is technically additive but can break clients whose local caches or generated types assumed null was possible. Get nullability right at design time; loosening it later is cheap, tightening it is not.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the schema is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="connections-and-pagination">Connections and pagination</h2>
+<p>Returning a bare list for anything that can grow unbounded — orders for a customer, comments on a post — is the second most common schema mistake. The Relay connection pattern (<code>edges</code>, <code>node</code>, <code>pageInfo</code> with <code>hasNextPage</code> and cursors) looks like ceremony the first time you write it, but it's the difference between a schema that scales to millions of rows and one that requires a breaking change the day someone's list gets too big to return in one response. Adopt cursor-based pagination for any list field from day one, even when the current data set is small — retrofitting it later means every client query changes shape.</p>
+<h2 id="thinking-in-mutations">Thinking in mutations, not CRUD verbs</h2>
+<p>REST habits push people toward a <code>updateOrder(input: OrderInput)</code> mutation that accepts a giant optional-everything input type and patches whatever fields are present. That's convenient to write and painful to reason about — the client has to know which combinations of fields are actually valid, and the server has to guess intent from what's absent. Prefer specific, intention-revealing mutations: <code>cancelOrder(orderId: ID!)</code>, <code>updateShippingAddress(orderId: ID!, address: AddressInput!)</code>. Each one has a narrow, well-typed input and a predictable effect, and each can evolve independently without the input type becoming an unreadable grab-bag of optional fields.</p>
+<h2 id="deprecation-not-versioning">Deprecation, not versioning</h2>
+<p>GraphQL schemas evolve by addition and deprecation rather than by versioning the way REST APIs do (more on that trade-off separately). The <code>@deprecated(reason: "...")</code> directive lets you mark a field as on its way out while it keeps working for clients still using it — tooling like GraphiQL and Apollo Studio surfaces the deprecation warning directly in the editor, and usage-tracking on most GraphQL servers tells you when it's actually safe to remove.</p>
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>Additive changes are (almost) always safe</strong>
+  <p>Adding a new field, a new type, or a new enum value is non-breaking by default — existing queries don't request it, so nothing changes for them. The one exception is enums: adding a new enum value can break clients using exhaustive switch statements over the old set, which is why some teams add an <code>UNKNOWN</code> catch-all case up front.</p>
 </div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    schema: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>The performance of schema in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production schema looks different from development schema. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring schema first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with schema when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql schema design — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>A well-designed GraphQL schema reads like documentation of the domain: specific types, honest nullability, paginated lists, and mutations named for what they do rather than how they're implemented. Getting this right up front costs an extra design pass before the first resolver is written. Getting it wrong costs a much longer one, later, with production clients depending on the mistake.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/star-schema-vs-snowflake/">Star Schema vs Snowflake Schema</a></li>
@@ -181,7 +150,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

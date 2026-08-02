@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SvelteKit 2 in Production | John Kihiu</title>
-<meta name="description" content="SvelteKit 2 in Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta name="description" content="Running SvelteKit 2 in production: adapter choices, load function data flow, form actions, and the deployment patterns that hold up once real traffic hits the app.">
 <meta name="keywords" content="Acumatica sveltekit, Acumatica production, Acumatica ssr, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/sveltekit-2-production/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="SvelteKit 2 in Production">
-<meta property="og:description" content="SvelteKit 2 in Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/sveltekit-2-production.svg">
+<meta property="og:description" content="Running SvelteKit 2 in production: adapter choices, load function data flow, form actions, and the deployment patterns that hold up once real traffic hits the app.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/sveltekit-2-production/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="ssr">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"SvelteKit 2 in Production","description":"SvelteKit 2 in Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/sveltekit-2-production.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/sveltekit-2-production/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"SvelteKit 2 in Production","description":"Running SvelteKit 2 in production: adapter choices, load function data flow, form actions, and the deployment patterns that hold up once real traffic hits the app.","image":"https://kihiujohn.github.io/assets/og/sveltekit-2-production.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/sveltekit-2-production/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"SvelteKit 2 in Production","item":"https://kihiujohn.github.io/blog/sveltekit-2-production/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,59 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">SvelteKit 2 in Production</span></nav>
     <span class="tag">Modern Web · Sveltekit</span>
     <h1>SvelteKit 2 in Production</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">SvelteKit 2 in Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Running SvelteKit 2 in production: adapter choices, load function data flow, form actions, and the deployment patterns that hold up once real traffic hits the app.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The modern web stack in 2026 has stabilised. The framework matters less than the architecture; the architecture is what makes the app scale. this is one of the patterns that the architecture has to get right. This article is the architecture.</p>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>Implementation: a working example is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>SvelteKit 2 tightened up a lot of the rough edges that made SvelteKit 1 feel like a framework still finding its shape — error handling got simpler, redirects and errors are now plain functions instead of thrown magic objects, and the adapter ecosystem matured to the point where deploying to any of the major platforms is a config file, not a workaround. None of that is exciting to write about, which is exactly why it's worth writing about: boring, predictable framework behavior is what you want once you're running the thing in production instead of writing a demo.</p>
+<h2 id="picking-an-adapter">Picking an adapter</h2>
+<p>The adapter is the single decision that determines the shape of your production deployment, and it's worth making deliberately rather than defaulting to whatever the CLI scaffolds. <code>adapter-node</code> gives you a standalone Node server you run yourself — the right choice if you already have infrastructure (a VM, a container orchestrator, a reverse proxy) and want SvelteKit to be just another Node process behind it. <code>adapter-vercel</code>, <code>adapter-netlify</code>, and <code>adapter-cloudflare</code> map SvelteKit's routing onto each platform's serverless/edge model, trading some control for zero-ops deployment. The mistake I've seen teams make is picking a serverless adapter and then writing code that assumes a long-lived process — in-memory caches, global mutable state, background timers — none of which survive a cold start or a function that gets torn down after the response.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<h2 id="how-it-integrates-with-the-rest-of-the-stack">How it integrates with the rest of the stack</h2>
-<p>In the work I have done on sveltekit 2 in production, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="performance-bundle-size-runtime-and-accessibility">Performance: bundle size, runtime, and accessibility</h2>
-<p>When the work moves from design to production, the questions change. The sveltekit is not the question; the failure mode of the production is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useSveltekit(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
-}</code></pre>
-</div>
-<h2 id="common-pitfalls-when-adopting-sveltekit">Common pitfalls when adopting sveltekit</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
-</div>
-<h2 id="migration-path-from-the-old-approach">Migration path from the old approach</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
+  <div class="code-header"><span class="code-lang">JS · svelte.config.js</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import adapter from '@sveltejs/adapter-node';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+export default {
+  preprocess: vitePreprocess(),
+  kit: {
+    adapter: adapter({
+      out: 'build',
+      envPrefix: 'APP_'
+    })
+  }
 };</code></pre>
 </div>
-<h2 id="how-production-interacts-with-server-components">How production interacts with server components</h2>
-<p>The performance of production in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
+<h2 id="load-functions-and-data-flow">Load functions and where data actually comes from</h2>
+<p>SvelteKit's <code>load</code> functions are the backbone of the framework, and the distinction that trips people up is server load (<code>+page.server.js</code>) versus universal load (<code>+page.js</code>). Server load runs only on the server and can safely touch a database connection, a secret API key, or anything that must never reach the client bundle. Universal load runs on the server during SSR and again in the browser during client-side navigation, so it can't hold secrets but it can call public APIs and reuse fetched data across navigations more cheaply. Putting a database query in a universal load function by mistake either crashes in the browser or, worse, ships your connection string to client JS — SvelteKit doesn't stop you from making that mistake, so the discipline has to come from knowing which file you're in.</p>
+<div class="callout-warn callout">
+  <strong>Streaming with promises can surprise you</strong>
+  <p>Returning a non-awaited promise from a server load function streams it to the page and resolves it client-side — useful for slow, non-critical data, but easy to do by accident if you forget an <code>await</code>. Check your load functions for stray unresolved promises; a slow one turns into a layout shift or a loading spinner nobody intended.</p>
 </div>
-<h2 id="typescript-patterns-for-sveltekit">TypeScript patterns for sveltekit</h2>
-<p>Production production looks different from development production. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<h2 id="form-actions-over-client-side-fetch">Form actions instead of client-side fetch calls</h2>
+<p>Form actions are the part of SvelteKit that feels genuinely different from the SPA-with-an-API-layer pattern most of us defaulted to for a decade. A `+page.server.js` can export named `actions`, and a plain HTML `&lt;form method="POST"&gt;` posts to them without any client-side JavaScript required — progressive enhancement is the default, not an afterthought bolted on later. `use:enhance` upgrades the same form to submit via fetch once JS is available, giving you optimistic UI and no full-page reload, but the form still works if JS fails to load, which matters more than it sounds like on flaky mobile connections.</p>
+<h2 id="caching-and-edge-behavior">Caching headers actually matter here</h2>
+<p>Because SvelteKit renders on the server by default, response caching is a real production lever, not an afterthought. Setting `Cache-Control` headers in a load function (via `setHeaders`) lets you cache public, non-personalized pages at a CDN or edge layer, which is often a bigger performance win than any client-side optimization. The trap is applying the same caching to pages that read cookies or session state — a cached page that ignores per-user data will happily serve one user's content to another, which is a much worse bug than a slow page.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
+  <div class="code-header"><span class="code-lang">JS · +page.server.js</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>export async function load({ setHeaders, fetch }) {
+  const res = await fetch('/api/articles');
+  const articles = await res.json();
+
+  setHeaders({
+    'cache-control': 'public, max-age=60, s-maxage=300'
+  });
+
+  return { articles };
+}</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring production first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add sveltekit on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with production when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="what-actually-breaks-in-production">What actually breaks once real traffic hits it</h2>
+<p>In practice, the production issues I've hit with SvelteKit 2 haven't been framework bugs — they've been assumptions carried over from SPA development. Environment variables not prefixed correctly for the chosen adapter, `fetch` calls inside load functions that don't reuse SvelteKit's own fetch wrapper (and so lose credential forwarding during SSR), and hydration mismatches from server-rendered content that depends on `window` or `Date.now()` without guarding for the server/client boundary. None of these are exotic; they're the same class of bug every SSR framework produces, and the fix is the same discipline every time: know which environment a given piece of code runs in before you write it.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on sveltekit 2 in production. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>SvelteKit 2 in production comes down to three decisions made deliberately instead of by default: which adapter matches your actual infrastructure, which load function type belongs where data sensitivity requires it, and which pages are safe to cache versus which depend on per-user state. Get those three right and the framework mostly gets out of your way — which, for a web framework, is the highest praise there is.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-production-order-screen/">Acumatica Production Order Screen — A Deep Dive</a></li>
@@ -178,7 +149,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

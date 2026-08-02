@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Rebuild and Publish Best Practices | John Kihiu</title>
-<meta name="description" content="The build-publish-validate cycle for Acumatica customizations — when to rebuild, when to publish, when to validate, and the order of operations that prevents the ">
+<meta name="description" content="The save-rebuild-publish discipline for Acumatica customization projects: why rebuild isn't automatic after a code fix, why you always publish from Production, and how to schedule a publish without losing users' work.">
 <meta name="keywords" content="Acumatica customization, Acumatica devops, Acumatica publish, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-rebuild-and-publish-best-practices/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Rebuild and Publish Best Practices">
-<meta property="og:description" content="The build-publish-validate cycle for Acumatica customizations — when to rebuild, when to publish, when to validate, and the order of operations that prevents the ">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-rebuild-and-publish-best-practices.svg">
+<meta property="og:description" content="The save-rebuild-publish discipline for Acumatica customization projects: why rebuild isn't automatic after a code fix, why you always publish from Production, and how to schedule a publish without losing users' work.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-rebuild-and-publish-best-practices/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="publish">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Rebuild and Publish Best Practices","description":"The build-publish-validate cycle for Acumatica customizations — when to rebuild, when to publish, when to validate, and the order of operations that prevents the ","image":"https://kihiujohn.github.io/assets/og/acumatica-rebuild-and-publish-best-practices.svg","datePublished":"2026-04-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-rebuild-and-publish-best-practices/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Rebuild and Publish Best Practices","description":"The save-rebuild-publish discipline for Acumatica customization projects: why rebuild isn't automatic after a code fix, why you always publish from Production, and how to schedule a publish without losing users' work.","image":"https://kihiujohn.github.io/assets/og/acumatica-rebuild-and-publish-best-practices.svg","datePublished":"2026-04-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-rebuild-and-publish-best-practices/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Rebuild and Publish Best Practices","item":"https://kihiujohn.github.io/blog/acumatica-rebuild-and-publish-best-practices/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,59 +86,33 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Rebuild and Publish Best Practices</span></nav>
     <span class="tag">DevOps · Customization</span>
     <h1>Acumatica Rebuild and Publish Best Practices</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">The build-publish-validate cycle for Acumatica customizations — when to rebuild, when to publish, when to validate, and the order of operations that prevents the </p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">The save-rebuild-publish discipline for Acumatica customization projects: why rebuild isn't automatic after a code fix, why you always publish from Production, and how to schedule a publish without losing users' work.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-04-30">Apr 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Every Acumatica customization project sits on a small state machine: edit, compile, publish, verify. Teams that skip steps or get the order wrong end up with a site stuck "compiling" during business hours, a generic inquiry that silently vanished, or two projects that overwrite each other's DAC extension. None of that is exotic — it's almost always a sequencing mistake that a checklist would have caught.</p>
-<h2 id="compile-vs-publish-vs-rebuild">Compile vs. publish vs. rebuild</h2>
-<p>These three actions in the Customization Projects screen look similar but do very different things. <strong>Compile</strong> only validates that the project's code, DAC extensions, and graph extensions build cleanly — it does not touch the running site. Use it constantly while developing; it's cheap and safe to run against a live instance because nothing gets replaced.</p>
-<p><strong>Publish</strong> compiles and then deploys — it replaces the site's running assemblies, updates the database schema for any DAC changes, regenerates the site map, and triggers an application pool recycle. Every user gets bounced and the site is unavailable for the duration. <strong>Rebuild</strong> (via "Rebuild All" or "Clear Cache and Rebuild") forces a full recompilation of the customization runtime rather than an incremental one — it's a troubleshooting step, not something you run as part of a normal release, because it's slower and clears cached generic inquiry and screen metadata across the board.</p>
-<h2 id="publish-order-and-project-dependencies">Publish order and project dependencies</h2>
-<p>Acumatica lets you select multiple customization projects and publish them together, and in most cases that's the safer option — the platform resolves dependencies between the selected projects in a single compile pass. The trouble starts when projects are published separately and one depends on another: a project that extends a DAC field added by a different project will fail to compile if that base project isn't published first (or alongside it). If you maintain a suite of projects — say a core "Data Model" project and several feature projects layered on top — publish them as one selection whenever possible rather than clicking through them one at a time.</p>
-<p>Two projects modifying the same table are the other common failure. If Project A adds a column to a DAC and Project B independently adds a same-named field or an incompatible index on the same table, publish will throw a schema conflict. Keep a single project (or a clearly owned subset) responsible for shared DAC changes, and have feature projects extend it rather than duplicate it.</p>
-<h2 id="what-goes-wrong-during-publish">What goes wrong during publish</h2>
-<p>On constrained cloud or trial instances, publish can time out on large codebases — the app pool recycle takes longer than the request timeout and the browser reports a failure even though the publish is still finishing server-side. Don't panic-click publish again; check the trace log first. A failed or interrupted publish can also leave orphaned entries: generic inquiries or site map nodes that were partially created before the rollback, which then show up as broken links or duplicate menu items until cleaned up manually.</p>
-<p>The other common symptom is the site sitting in an unresponsive or "compiling" state for anyone hitting it during the publish window. There's no partial availability — end users need to be warned or locked out, which is why publishing to production mid-morning on a Tuesday is asking for a support ticket.</p>
-<div class="callout-warn">
-  <strong>Never publish blind to production</strong>
-  <p>Publish to a sandbox or test tenant first — ideally one restored from a recent production snapshot — and let it sit long enough to catch startup errors in the trace log and Windows Event Viewer. A clean compile in isolated storage does not guarantee a clean publish against production's actual data and existing customizations.</p>
+    <p>The mechanics of publishing an Acumatica customization project look simple enough that people skip steps — save, hit publish, done. Most of the "why isn't my fix live" and "why did production lose a customization" tickets I get called in on trace back to exactly that: someone skipped rebuild, published from the wrong instance, or published mid-shift and clobbered a user's in-progress work. None of this is subtle once you know the sequence. It's just not written down anywhere obvious, so every team relearns it the hard way once.</p>
+<h2 id="the-save-rebuild-publish-cycle">The save, rebuild, publish cycle</h2>
+<p>Saving a code file inside a customization project does not rebuild the project, and rebuilding does not publish it. Those are three separate steps, and Acumatica will not do the second or third for you automatically. This is the single most common self-inflicted bug I see: a developer fixes a syntax error or a logic bug in a graph extension, saves the file, republishes — and the fix doesn't take. Nine times out of ten the project was never rebuilt after the save, so publish just redeployed the last successful build, syntax error and all (or an older, unrelated fix).</p>
+<p>The rule that actually prevents this: after any code change, no matter how small, save it, then explicitly rebuild the project, then republish. Don't treat a one-line fix as exempt — a one-character typo fix that skips the rebuild step fails exactly the same way a large change does. If a fix "isn't working" after publish and the code looks correct, the first thing to check isn't the code, it's whether a rebuild actually happened between the save and the publish.</p>
+<h2 id="publish-always-from-production">Always publish from Production</h2>
+<p>This is the rule that matters most on the list, because it's the one that causes damage silently. When you're managing customizations across multiple tenants on one Acumatica instance, always trigger the publish from the Production tenant, targeting all the other tenants alongside it — never publish from a non-production tenant as the source. Publishing from a stale or divergent non-prod instance doesn't just fail to update production correctly; it can actively unpublish customizations that are currently live in production, because the publish operation reconciles tenants against whatever project state the source tenant holds. If that source is behind, production goes backward.</p>
+<div class="callout-warn callout">
+  <strong>The failure mode is quiet</strong>
+  <p>Unpublishing from a bad source doesn't throw a dramatic error — it just leaves production running an older customization state than before you started. Nobody notices until a screen customization or a workflow a user relied on has quietly reverted. If you're promoting changes across a dev → staging → production pipeline rather than tenants on one instance, that's a related but separate discipline — see <a href="/blog/acumatica-environment-promotion/">environment promotion</a> for how the package moves between instances. The rule here is narrower and just as important: whichever tenant you publish <em>from</em>, on a shared instance, treat as the source of truth, and that should always be Production.</p>
 </div>
-<h2 id="promotion-pipeline-dev-to-test-to-production">Promotion pipeline: dev to test to production</h2>
-<p>Treat the customization project like a build artifact, not a live-edited document. Export the finished project as a .zip package from the dev environment, import it into the test tenant, publish there, and only promote the same .zip to production once it's verified — rather than re-creating the changes by hand in each environment. This keeps the three environments byte-identical and makes rollback trivial: if production publish fails, you still have the last-known-good .zip to re-import.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">POWERSHELL · EXPORT/IMPORT VIA CUSTOMIZATION CLI</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Export from dev after a clean local publish
-CustomizationCli.exe export `
-  -url https://dev.example.com `
-  -project "CoreDataModel;ARInvoiceExtensions" `
-  -output C:\releases\core-2026-04-30.zip
-
-# Import + publish into the test tenant, dependencies resolved together
-CustomizationCli.exe import `
-  -url https://test.example.com `
-  -file C:\releases\core-2026-04-30.zip `
-  -publish
-
-# Same package promoted to production after sign-off, outside business hours
-CustomizationCli.exe import `
-  -url https://prod.example.com `
-  -file C:\releases\core-2026-04-30.zip `
-  -publish</code></pre>
-</div>
-<p>Before that last step: take a database backup or system snapshot, export the currently-live customization project as a fallback, and schedule the window outside business hours. After publish completes, watch the trace log for a few minutes — startup exceptions from a bad DAC extension or a missing dependency usually surface in the first requests, not immediately at publish completion.</p>
-<table>
-  <tr><th>Action</th><th>What it does</th><th>When to use it</th></tr>
-  <tr><td>Compile</td><td>Validates build only, no deployment</td><td>Continuously during development</td></tr>
-  <tr><td>Publish (incremental)</td><td>Compiles, deploys, recycles app pool</td><td>Normal releases, scheduled windows</td></tr>
-  <tr><td>Rebuild All / Clear Cache</td><td>Forces full recompilation, clears cached metadata</td><td>Troubleshooting stale screens or GI results only</td></tr>
-  <tr><td>Multi-project publish</td><td>Resolves dependencies across selected projects together</td><td>Any time projects share DAC/graph extensions</td></tr>
-</table>
+<h2 id="publishing-after-hours-and-the-lockout">Publishing after hours, and why the lockout matters</h2>
+<p>A publish recycles the application and can modify the definition of a screen someone has open right now. If a user is mid-transaction on a screen your customization touches when publish runs, they can lose unsaved work, or land on a broken page when the site comes back. This is why publish belongs after hours, not squeezed into a quiet-looking hour mid-afternoon: "quiet-looking" and "nobody has an unsaved record open" are not the same thing.</p>
+<p>Before publishing, disable any inbound integrations that could be mid-transaction (scheduled imports, API-driven order creation, anything that doesn't have a user watching it who can just retry), and schedule a lockout window so people aren't logging in and starting work moments before the site restarts out from under them. A short, clearly communicated lockout costs a few minutes of inconvenience; an uncommunicated publish that eats someone's half-finished AP bill costs a lot more than that in trust.</p>
+<h2 id="validate-before-you-package">Validate after publish, before you package</h2>
+<p>Once publish completes, test the actual customization — open the screen, run the workflow, check the generic inquiry — before you go on to export the deployment package for promotion elsewhere. This ordering matters: the deployment package should represent something you've confirmed works in the environment you just published to, not just something that compiled cleanly. A clean build and a clean publish only tell you the code deployed; they don't tell you the button does what it's supposed to when a real user clicks it.</p>
+<h2 id="keep-versions-aligned">Keep the Acumatica version aligned across environments</h2>
+<p>Publishing the same customization project against different underlying Acumatica ERP versions in dev, staging, and production is a good way to get a clean publish in one place and a broken one in another, because platform APIs and DAC definitions do shift between versions. Before deploying or publishing to production, confirm dev, staging, and production are all on the same Acumatica version — update the lagging instances first rather than discovering the mismatch when a customization that worked fine in staging throws an error against production's older (or newer) build.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on Acumatica projects. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Nothing here is exotic: rebuild after every fix because save alone doesn't recompile, always publish from Production so you're never overwriting live work from a stale source, publish after hours with integrations disabled and a lockout scheduled so nobody loses in-progress work, and test before you package rather than after. Get that sequence right and publishing an Acumatica customization stops being an event people brace for.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-customization-upgrade-survival-guide/">Acumatica Customization Upgrade Survival Guide</a></li>
@@ -151,7 +124,6 @@ CustomizationCli.exe import `
     </div>
 
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

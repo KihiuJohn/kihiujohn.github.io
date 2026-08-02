@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kubernetes 1.30 New Features — A Complete Guide | John Kihiu</title>
-<meta name="description" content="Kubernetes 1.30 New Features — A Complete Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
+<meta name="description" content="Kubernetes 1.30 graduated native sidecar containers and ValidatingAdmissionPolicy to general availability, moved structured authorization configuration toward GA, and pushed Dynamic Resource Allocation further through alpha — here's what each change actually means for a running cluster.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica features, Acumatica orchestration, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-1-30-new-features/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kubernetes 1.30 New Features — A Complete Guide">
-<meta property="og:description" content="Kubernetes 1.30 New Features — A Complete Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-1-30-new-features.svg">
+<meta property="og:description" content="Kubernetes 1.30 graduated native sidecar containers and ValidatingAdmissionPolicy to general availability, moved structured authorization configuration toward GA, and pushed Dynamic Resource Allocation further through alpha — here's what each change actually means for a running cluster.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-1-30-new-features/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="orchestration">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes 1.30 New Features — A Complete Guide","description":"Kubernetes 1.30 New Features — A Complete Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.","image":"https://kihiujohn.github.io/assets/og/kubernetes-1-30-new-features.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-1-30-new-features/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes 1.30 New Features — A Complete Guide","description":"Kubernetes 1.30 graduated native sidecar containers and ValidatingAdmissionPolicy to general availability, moved structured authorization configuration toward GA, and pushed Dynamic Resource Allocation further through alpha — here's what each change actually means for a running cluster.","image":"https://kihiujohn.github.io/assets/og/kubernetes-1-30-new-features.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-1-30-new-features/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kubernetes 1.30 New Features — A Complete Guide","item":"https://kihiujohn.github.io/blog/kubernetes-1-30-new-features/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,68 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kubernetes 1.30 New Features — A Complete Guide</span></nav>
     <span class="tag">DevOps · Kubernetes</span>
     <h1>Kubernetes 1.30 New Features — A Complete Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kubernetes 1.30 New Features — A Complete Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kubernetes 1.30 graduated native sidecar containers and ValidatingAdmissionPolicy to general availability, moved structured authorization configuration toward GA, and pushed Dynamic Resource Allocation further through alpha — here's what each change actually means for a running cluster.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="the-deployment-pipeline-for-kubernetes">The deployment pipeline for kubernetes</h2>
-<p>The deployment pipeline for kubernetes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every Kubernetes minor release is a mix of the same three things: features graduating from alpha to beta to stable, deprecated APIs finally getting removed, and a batch of scheduler and kubelet improvements nobody notices until they fix a problem you had. 1.30 fits that pattern — nothing in it is a rewrite, but a few of the graduations are worth updating your manifests and RBAC around.</p>
+<h2 id="native-sidecar-containers-reach-ga">Native sidecar containers reach GA</h2>
+<p>The most immediately useful change is native sidecar container support graduating to stable. Before this, a "sidecar" was just a convention — a second container in the pod that happened to run alongside your main container, with no special lifecycle guarantees, which caused real problems for logging agents, service mesh proxies, and anything that needed to start before the main container and stay alive until after it exited. The fix is an init container with <code>restartPolicy: Always</code>, which tells the kubelet to treat it as a genuine sidecar: it starts before regular init containers finish blocking, keeps running for the pod's lifetime, and — critically for Jobs — doesn't stop the pod from being marked complete when the main container exits.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-new">SLOs and error budgets for new</h2>
-<p>In the work I have done on kubernetes 1.30 new features — a complete guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="incident-response-for-kubernetes">Incident response for kubernetes</h2>
-<p>When the work moves from design to production, the questions change. The kubernetes is not the question; the failure mode of the new is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "kubernetes_new" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="what-kubernetes-1-30-new-features-a-complete-guide-gives-you">What Kubernetes 1.30 New Features — A Complete Guide gives you</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">yaml · native sidecar via init container</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: v1
+kind: Pod
 metadata:
-  name: kubernetes
+  name: app-with-sidecar
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: kubernetes
-  template:
-    metadata:
-      labels:
-        app: kubernetes</code></pre>
+  initContainers:
+    - name: log-shipper
+      image: fluent-bit:2.2
+      restartPolicy: Always   # this makes it a native sidecar
+      # runs for the pod's whole lifetime, starts before app container
+  containers:
+    - name: app
+      image: myapp:1.4</code></pre>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The performance of new in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>Production new looks different from development new. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<p>This matters most for service meshes (Envoy/Istio sidecars no longer racing the main container on startup) and for batch Jobs that ship logs or metrics via a sidecar — the Job can now actually complete instead of hanging on a sidecar that never exits.</p>
+<h2 id="validatingadmissionpolicy-goes-ga">ValidatingAdmissionPolicy goes GA</h2>
+<p>ValidatingAdmissionPolicy lets you write admission control rules in CEL (Common Expression Language) directly as a Kubernetes resource, instead of standing up a webhook server to reject or allow requests. For a large class of policy checks — required labels, disallowed image registries, replica count floors — this removes an entire webhook deployment, its TLS certificates, and its availability requirements from the admission path. It's not a full replacement for OPA/Gatekeeper or Kyverno in every case, but for straightforward rules it's now a stable, in-tree option with one less moving part to keep available.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">yaml · validatingadmissionpolicy</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: require-approved-registry
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+        operations: ["CREATE"]
+  validations:
+    - expression: >
+        object.spec.containers.all(c,
+          c.image.startsWith('registry.internal/'))
+      message: "images must come from the internal registry"</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring new first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kubernetes on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with new when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<div class="callout">
+  <strong>No webhook to keep alive</strong>
+  <p>Because ValidatingAdmissionPolicy runs as a compiled CEL expression inside the API server itself, there's no separate webhook pod that can go unavailable and start failing admission requests open or closed. That operational simplification is the main reason to prefer it over a webhook for policies simple enough to express in CEL.</p>
+</div>
+<h2 id="structured-authorization-configuration">Structured authorization configuration moves toward GA</h2>
+<p>The API server's authorization chain — which authorizers run, in what order, and how they combine — has historically been configured through a mix of command-line flags with limited expressiveness. The <code>AuthorizationConfiguration</code> structured config file replaces that with a proper config resource supporting multiple authorizer webhooks with explicit chaining and fail-open/fail-closed behavior per authorizer, which matters for clusters layering multiple authorization systems (say, RBAC plus an external policy service) and needing precise control over what happens when one of them is unreachable.</p>
+<h2 id="dynamic-resource-allocation-still-alpha-but-moving">Dynamic Resource Allocation: still alpha, but moving</h2>
+<p>Dynamic Resource Allocation (DRA) is Kubernetes' answer to requesting specialized hardware — GPUs, FPGAs, anything beyond the simple integer-count model that <code>resources.limits</code> was designed for — through a claims-based API closer to how PersistentVolumeClaims work for storage. It's still alpha in 1.30, with continued refinement to the resource claim and resource class APIs, but it's the direction Kubernetes is heading for AI/ML and specialized-hardware scheduling, and it's worth tracking even before it's something you'd run in production.</p>
+<h2 id="pod-scheduling-readiness-and-the-usual-kubelet-churn">Pod scheduling readiness, and the usual kubelet churn</h2>
+<p>Pod scheduling readiness gates continued maturing in this release, letting external controllers hold a pod out of the scheduler's consideration until a precondition is met — useful for gang-scheduling and custom autoscaling logic that needs to delay scheduling decisions. Beyond the headline items, 1.30 carries the usual load of scheduler plugin refinements, kubelet metrics additions, and deprecated API cleanup that every minor release ships — the kind of change that doesn't get a blog post of its own but shows up in the changelog and occasionally in a `kubectl` deprecation warning you'll want to act on before the next upgrade.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kubernetes 1.30 new features — a complete guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The two changes worth acting on immediately are native sidecar support, if you run service mesh proxies or logging sidecars in Jobs, and ValidatingAdmissionPolicy, if you're maintaining webhook servers for policy checks simple enough to express in CEL. Structured authorization and DRA are worth watching but don't demand changes yet — DRA in particular is still alpha and will keep shifting before it's something to depend on in production.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/airflow-3-features/">Apache Airflow 3 New Features</a></li>
@@ -191,7 +158,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

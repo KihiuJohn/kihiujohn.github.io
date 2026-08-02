@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Istio Service Mesh — A Field Guide | John Kihiu</title>
-<meta name="description" content="Istio Service Mesh — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="How Istio's sidecar proxies, automatic mTLS, and traffic-shaping actually work in a running cluster, and the real memory, latency, and debugging cost of putting Envoy in front of every pod.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica istio, Acumatica service-mesh, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-istio-service-mesh/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Istio Service Mesh — A Field Guide">
-<meta property="og:description" content="Istio Service Mesh — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-istio-service-mesh.svg">
+<meta property="og:description" content="How Istio's sidecar proxies, automatic mTLS, and traffic-shaping actually work in a running cluster, and the real memory, latency, and debugging cost of putting Envoy in front of every pod.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-istio-service-mesh/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="service-mesh">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Istio Service Mesh — A Field Guide","description":"Istio Service Mesh — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/kubernetes-istio-service-mesh.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-istio-service-mesh/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Istio Service Mesh — A Field Guide","description":"How Istio's sidecar proxies, automatic mTLS, and traffic-shaping actually work in a running cluster, and the real memory, latency, and debugging cost of putting Envoy in front of every pod.","image":"https://kihiujohn.github.io/assets/og/kubernetes-istio-service-mesh.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-istio-service-mesh/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Istio Service Mesh — A Field Guide","item":"https://kihiujohn.github.io/blog/kubernetes-istio-service-mesh/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,66 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Istio Service Mesh — A Field Guide</span></nav>
     <span class="tag">DevOps · Kubernetes</span>
     <h1>Istio Service Mesh — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Istio Service Mesh — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Istio's sidecar proxies, automatic mTLS, and traffic-shaping actually work in a running cluster, and the real memory, latency, and debugging cost of putting Envoy in front of every pod.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="the-deployment-pipeline-for-istio">The deployment pipeline for istio</h2>
-<p>The deployment pipeline for istio is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Istio wraps every pod in your mesh with an Envoy sidecar and hands traffic management, mTLS, and observability to that proxy instead of your application code. That's the pitch. The part that doesn't make it into the pitch is that you're now running two containers per pod instead of one, every network call takes an extra hop through a proxy, and debugging a timeout means figuring out whether the problem is your app, the sidecar in front of it, or the sidecar in front of whatever it's calling.</p>
+<h2 id="how-the-sidecar-gets-there">How the sidecar gets there</h2>
+<p>Istio injects an Envoy container into each pod either automatically, via an <code>istio-injection: enabled</code> label on the namespace, or manually with <code>istioctl kube-inject</code>. Once injected, the sidecar transparently intercepts all inbound and outbound traffic for the pod using iptables rules set up by an init container, so your application code doesn't change at all — it still calls services by their normal DNS names. Newer Istio versions also support an ambient mesh mode that moves the proxy out of the pod entirely and onto a per-node component, trading some per-request features for a lower per-pod resource footprint. Which mode you're running matters when you're trying to explain where a request actually went.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Istio
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">bash · check injection</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>kubectl label namespace payments istio-injection=enabled
+kubectl get pods -n payments -o jsonpath='{.items[*].spec.containers[*].name}'
+# expect to see "istio-proxy" alongside your app container
+kubectl exec -it deploy/checkout -c istio-proxy -n payments -- pilot-agent request GET config_dump</code></pre>
 </div>
-<h2 id="slos-and-error-budgets-for-service">SLOs and error budgets for service</h2>
-<p>In the work I have done on istio service mesh — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="incident-response-for-istio">Incident response for istio</h2>
-<p>When the work moves from design to production, the questions change. The istio is not the question; the failure mode of the service is.</p>
+<h2 id="mtls-and-the-control-plane">mTLS and the control plane</h2>
+<p><code>istiod</code> is the single control plane binary that replaced the separate Pilot, Citadel, and Galley components from Istio's earlier architecture — it hands out certificates, pushes configuration to the Envoy sidecars, and validates config before it's applied. With <code>PeerAuthentication</code> set to <code>STRICT</code>, every sidecar-to-sidecar connection is automatically upgraded to mutual TLS: both sides present a certificate issued by istiod, rotated automatically, with zero changes to application code. It's a real security improvement over plaintext pod-to-pod traffic, and it's also one more thing that has to be healthy for anything to talk to anything else — a stalled certificate rotation or a misconfigured PeerAuthentication policy takes down traffic that has nothing to do with the change you actually made.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "istio_service" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="what-istio-service-mesh-a-field-guide-gives-you">What Istio Service Mesh — A Field Guide gives you</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">yaml · peerauthentication</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: security.istio.io/v1
+kind: PeerAuthentication
 metadata:
-  name: istio
+  name: default
+  namespace: payments
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: istio
-  template:
-    metadata:
-      labels:
-        app: istio</code></pre>
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: checkout-canary
+  namespace: payments
+spec:
+  host: checkout.payments.svc.cluster.local
+  subsets:
+    - name: v1
+      labels: {version: v1}
+    - name: v2
+      labels: {version: v2}</code></pre>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The performance of service in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<h2 id="traffic-shaping-with-virtualservice">Traffic shaping with VirtualService</h2>
+<p>The traffic management story is the strongest argument for adopting Istio at all: a <code>VirtualService</code> paired with a <code>DestinationRule</code> lets you route 95% of traffic to the stable version of a service and 5% to a canary, based on weight, headers, or path — without touching a single Kubernetes Service or Deployment. Rolling that back is a config change, not a redeploy. The same mechanism handles retries, timeouts, and circuit breaking centrally instead of each service reimplementing them in application code, which is genuinely useful once you have more than a handful of services calling each other.</p>
 <div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
+  <strong>Canary weight lives in one place</strong>
+  <p>Because the split is defined in <code>VirtualService</code>, you can push a canary from 5% to 50% to 100% with three <code>kubectl apply</code> calls and no pod restarts. That's the point of the mesh — but it also means a typo in that YAML redirects real production traffic, so treat these manifests with the same review rigor as a Deployment spec.</p>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>Production service looks different from development service. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Istio
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+<h2 id="what-it-actually-costs">What it actually costs</h2>
+<p>Every pod in the mesh carries an extra container: Envoy's baseline memory footprint is real, and it multiplies by every pod in the cluster, not just the ones doing meaningful traffic. Every request now makes at least two extra hops — client sidecar out, server sidecar in — before it reaches application code, which shows up as added p99 latency that's easy to miss in aggregate dashboards and painful in a service with a tight SLA. And when something breaks, standard debugging tools stop being enough: a <code>curl</code> from inside the pod that succeeds doesn't tell you whether the sidecar's mTLS handshake or the DestinationRule's circuit breaker is what's actually failing between two services.</p>
+<div class="callout callout-warn">
+  <strong>Debugging goes through the proxy, not around it</strong>
+  <p>When a service call fails and both endpoints look healthy, check Envoy first: <code>istioctl proxy-config</code> and the sidecar's own access logs usually explain more than application logs do. A 503 with no application-side error is almost always the mesh — a missing DestinationRule, an expired cert, or a retry policy that gave up before your service ever saw the request.</p>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring service first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add istio on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with service when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="observability-you-get-for-free">Observability you get for free</h2>
+<p>The payoff that's easiest to undervalue is observability: because every request already passes through a sidecar, Istio can export consistent request-level metrics, distributed traces, and a service graph without any application instrumentation. Kiali visualizes the mesh topology and traffic flow, Jaeger gives you distributed traces across service boundaries, and Prometheus scrapes the same metrics Envoy is already generating. For a system with a dozen or more services calling each other, that uniform visibility is worth a lot — you stop guessing which service in a call chain is slow and start measuring it directly, per hop.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on istio service mesh — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Istio's value is concentrated: mTLS everywhere, traffic shaping without redeploys, and a service graph you didn't have to build. Its cost is concentrated too — sidecar memory and CPU on every pod, an extra network hop on every call, and a debugging surface that now includes a proxy layer between every two services. It earns its keep once you have enough services that canary releases and cross-service observability are recurring problems rather than one-off asks. Below that scale, the sidecar tax is a real cost paid for a feature set you're mostly not using yet.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/argo-workflows/">Argo Workflows — A Complete Guide</a></li>
@@ -191,7 +156,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

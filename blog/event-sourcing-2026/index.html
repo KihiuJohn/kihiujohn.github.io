@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Event Sourcing 2026 — A Field Guide">
 <meta property="og:description" content="Event Sourcing 2026 — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/event-sourcing-2026.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/event-sourcing-2026/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,82 +92,57 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="schema-evolution-for-sourcing">Schema evolution for sourcing</h2>
-<p>Schema evolution for sourcing is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Event sourcing is a simple idea that is easy to describe and genuinely hard to live with: instead of storing the current state of a record, you store every state <em>change</em> as an immutable event, and you derive current state by replaying those events in order. The database row you're used to querying becomes a cache — a convenient, disposable projection — rather than the source of truth. The events are the source of truth.</p>
+<h2 id="state-as-a-sequence-of-events">State as a sequence of events</h2>
+<p>In a conventional CRUD model, an <code>Order</code> table has a <code>status</code> column, and an update overwrites it. History is gone unless you bolted on an audit table. In an event-sourced model, you never update the order row directly. Instead you append events — <code>OrderPlaced</code>, <code>OrderLineAdded</code>, <code>OrderShipped</code>, <code>OrderCancelled</code> — to an append-only log, keyed by the aggregate's ID. The current state of the order is whatever you get from folding all of its events, in sequence, through a function that knows how to apply each event type to the previous state.</p>
+<p>This has a name in the domain-driven design world: the <code>Order</code> is an <strong>aggregate</strong>, and the events are grouped by aggregate ID (often called a <strong>stream</strong>). "Rebuilding an aggregate" just means reading its stream from the start and applying each event's mutation in order — no different, mechanically, from a functional <code>reduce</code> over a list.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM event
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">TYPESCRIPT · REBUILDING AN AGGREGATE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>type OrderEvent =
+  | { type: 'OrderPlaced'; customerId: string; at: string }
+  | { type: 'OrderLineAdded'; sku: string; qty: number; price: number }
+  | { type: 'OrderShipped'; at: string }
+  | { type: 'OrderCancelled'; reason: string };
+
+function apply(state: OrderState, event: OrderEvent): OrderState {
+  switch (event.type) {
+    case 'OrderPlaced':
+      return { ...state, customerId: event.customerId, status: 'placed' };
+    case 'OrderLineAdded':
+      return { ...state, lines: [...state.lines, event], total: state.total + event.qty * event.price };
+    case 'OrderShipped':
+      return { ...state, status: 'shipped' };
+    case 'OrderCancelled':
+      return { ...state, status: 'cancelled' };
+  }
+}
+
+// Current state = fold every event in the stream, in order
+const order = events.reduce(apply, emptyOrderState());</code></pre>
 </div>
-<h2 id="cost-optimisation-for-event">Cost optimisation for event</h2>
-<p>In the work I have done on event sourcing 2026 — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="the-testing-pyramid-for-sourcing">The testing pyramid for sourcing</h2>
-<p>When the work moves from design to production, the questions change. The event is not the question; the failure mode of the sourcing is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.event > 0).groupBy("sourcing").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="backfills-and-rollbacks-for-event">Backfills and rollbacks for event</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-event-store">The event store</h2>
+<p>An event store is a database optimized for exactly one access pattern: append events to a stream, and read a stream back in order. It is not a general-purpose query engine. Purpose-built event stores (EventStoreDB, Marten on Postgres, Axon Server) give you that natively; plenty of teams build the same shape on top of a relational table with an auto-incrementing sequence per stream, or on a Kafka-compatible log with compaction disabled. The two properties that matter are immutability — events are never edited or deleted, only appended — and strict ordering within a stream, usually enforced with an optimistic concurrency check on the expected version number so two concurrent writers to the same aggregate can't silently clobber each other.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Optimistic concurrency, not locks</strong>
+  <p>Writers append an event with the expected current stream version. If another writer got there first, the version has moved and the append is rejected — the caller re-reads and retries. This is what lets an event store handle concurrent writers without row-level locking.</p>
 </div>
-<h2 id="what-event-sourcing-2026-a-field-guide-is-for">What Event Sourcing 2026 — A Field Guide is for</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_event') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>The performance of sourcing in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>Production sourcing looks different from development sourcing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM event
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
+<h2 id="snapshots">Snapshots, because replay isn't free</h2>
+<p>Folding a stream from event zero works fine for an aggregate with a few hundred events. It stops working for one with a few hundred thousand — replaying on every read becomes the bottleneck. The standard fix is a <strong>snapshot</strong>: periodically persist the folded state at a given version, and on read, load the nearest snapshot and only replay the events after it. Snapshots are a performance optimization, not a second source of truth — you can always delete every snapshot and rebuild them by replaying from the beginning, and a correct event-sourced system should be able to prove that to you.</p>
+<h2 id="cqrs-and-projections">CQRS and read models</h2>
+<p>Event sourcing and CQRS (Command Query Responsibility Segregation) are frequently bundled together, but they're separable ideas. CQRS just means the model you write through and the model you read through are different. Event sourcing makes CQRS almost inevitable in practice, because a stream of <code>OrderLineAdded</code> events is a terrible thing to query directly — "show me all orders over $500 shipped last week" means folding every stream, which nobody wants on a request path. So you build <strong>projections</strong>: subscribers that consume the event stream and maintain denormalized, query-optimized read models (a SQL table, a search index, a cache) purpose-built for a specific screen or report. The read model is disposable — it's derived, deterministic output of a fold, so if it gets corrupted or you need a new shape, you replay the log into a fresh one.</p>
+<h2 id="where-it-earns-its-keep">Where it earns its keep, and where it doesn't</h2>
+<p>The pattern pays for itself when the history itself is a first-class requirement — audit trails, financial ledgers, anything where "what happened and in what order" matters as much as "what's true now," or where you need to support business logic that depends on temporal sequence (has this customer ever cancelled three orders in a row?). It's expensive overhead when a record's current state is genuinely all anyone will ever care about — a user's display name doesn't need an immutable event history, and modeling it as one is complexity with no return. The failure mode I see most often is teams adopting event sourcing because it sounds architecturally serious, then hand-rolling snapshotting, versioning, and projection rebuilds that a plain audited table would have given them for free.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sourcing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add event on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sourcing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concept</th><th>What it means</th></tr>
+  <tr><td>Event</td><td>An immutable fact that already happened, named in the past tense</td></tr>
+  <tr><td>Stream</td><td>The ordered sequence of events for one aggregate instance</td></tr>
+  <tr><td>Aggregate</td><td>The current state, derived by folding a stream</td></tr>
+  <tr><td>Snapshot</td><td>A cached fold at a point in time, purely a performance shortcut</td></tr>
+  <tr><td>Projection</td><td>A derived read model built by consuming the event stream</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on event sourcing 2026 — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Event sourcing is a trade: you give up the convenience of mutable state and cheap ad-hoc queries, and in exchange you get a complete, replayable history and the ability to derive as many read models as you need from a single source of truth. Whether that trade is worth it comes down to one question — does this domain actually need its history to be a queryable, first-class thing, or would a row that gets overwritten do just as well?</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>
@@ -179,7 +153,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

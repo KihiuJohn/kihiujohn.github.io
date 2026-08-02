@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Terraform Modules — A Field Guide | John Kihiu</title>
-<meta name="description" content="Terraform Modules — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="Designing Terraform modules that stay useful: honest input variables, outputs that don't leak implementation details, versioning with git tags, and why a module with 40 optional variables is worse than no module at all.">
 <meta name="keywords" content="Acumatica terraform, Acumatica modules, Acumatica iac, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/terraform-modules/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Terraform Modules — A Field Guide">
-<meta property="og:description" content="Terraform Modules — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/terraform-modules.svg">
+<meta property="og:description" content="Designing Terraform modules that stay useful: honest input variables, outputs that don't leak implementation details, versioning with git tags, and why a module with 40 optional variables is worse than no module at all.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/terraform-modules/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="iac">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Terraform Modules — A Field Guide","description":"Terraform Modules — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/terraform-modules.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/terraform-modules/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Terraform Modules — A Field Guide","description":"Designing Terraform modules that stay useful: honest input variables, outputs that don't leak implementation details, versioning with git tags, and why a module with 40 optional variables is worse than no module at all.","image":"https://kihiujohn.github.io/assets/og/terraform-modules.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/terraform-modules/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Terraform Modules — A Field Guide","item":"https://kihiujohn.github.io/blog/terraform-modules/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,106 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Terraform Modules — A Field Guide</span></nav>
     <span class="tag">DevOps · Terraform</span>
     <h1>Terraform Modules — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Terraform Modules — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Designing Terraform modules that stay useful: honest input variables, outputs that don't leak implementation details, versioning with git tags, and why a module with 40 optional variables is worse than no module at all.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="gitops-for-modules">GitOps for modules</h2>
-<p>GitOps for modules is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Terraform
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="the-deployment-pipeline-for-terraform">The deployment pipeline for terraform</h2>
-<p>In the work I have done on terraform modules — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="slos-and-error-budgets-for-modules">SLOs and error budgets for modules</h2>
-<p>When the work moves from design to production, the questions change. The terraform is not the question; the failure mode of the modules is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "terraform_modules" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
+    <p>Most bad Terraform modules are bad for the same reason: someone tried to anticipate every future use case instead of describing the one use case they had. A module isn't a virtue on its own — it's a trade. You give up some flexibility for less duplication and a smaller blast radius when you change something. The moment a module has more surface area than the resources it wraps, you've made the trade backwards.</p>
+<h2 id="designing-inputs-and-outputs">Designing inputs and outputs</h2>
+<p>The variables block is the module's contract, and most leaky abstractions start there. A common mistake is exposing a variable because the underlying resource has an argument, not because a caller actually needs to set it. If every consumer of your module passes the same value for <code>encryption_algorithm</code>, that's not a variable — that's a default you haven't written yet. Good module inputs map to decisions the caller actually makes: environment, size, whether a feature is on. Everything else should have a sensible default baked in, or not be exposed at all.</p>
+<p>Outputs have the same discipline problem in the other direction. It's tempting to output every attribute a resource exposes "in case someone needs it later." Don't. An output is part of your public API — once another module or root config depends on it, you can't quietly change its shape. Output the things composition actually requires (an ID, an ARN, a connection endpoint), not the entire resource as a convenience.</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">HCL</span><button class="copy-btn" type="button">Copy</button></div><pre><code>// modules/vpc/variables.tf
+variable "name" {
+  description = "Name prefix for all resources in this VPC"
+  type        = string
+}
+
+variable "cidr_block" {
+  description = "CIDR range for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "azs" {
+  description = "Availability zones to spread subnets across"
+  type        = list(string)
+}
+
+variable "enable_nat_gateway" {
+  description = "Provision a NAT gateway for private subnet egress"
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "Tags applied to every resource this module creates"
+  type        = map(string)
+  default     = {}
+}
+
+// modules/vpc/outputs.tf
+output "vpc_id" {
+  description = "ID of the created VPC"
+  value       = aws_vpc.this.id
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets, in the same order as var.azs"
+  value       = aws_subnet.private[*].id
+}
+
+output "public_subnet_ids" {
+  description = "IDs of the public subnets, in the same order as var.azs"
+  value       = aws_subnet.public[*].id
+}</code></pre></div>
+<p>Notice what's missing: no <code>vpc_arn</code> output nobody asked for, no <code>subnet_cidr_blocks</code> output duplicating something callers can get from the subnet resource directly if they really need it, no boolean flag for every optional AWS feature the VPC resource supports. Four inputs that map to real decisions, three outputs that other modules actually consume.</p>
+<h2 id="module-composition">Module composition and root wiring</h2>
+<p>Modules calling modules is normal and often the right shape, but it should mirror how your infrastructure actually decomposes, not how your file tree happens to be organized. A "networking" module that calls a "vpc" module that calls a "subnet" module is fine if each layer adds something — routing decisions, multi-region wiring, environment-specific defaults. It's a problem when each layer just re-passes the same six variables downward and adds nothing, because now a caller has to read three files to understand one decision.</p>
+<p>The root module is where composition should actually happen for anything account- or environment-specific. Keep child modules generic about "a VPC" or "an RDS instance," and let the root module decide how many, which sizes, and how they wire together for this particular environment.</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">HCL</span><button class="copy-btn" type="button">Copy</button></div><pre><code>// root main.tf
+module "vpc" {
+  source = "git::https://github.com/acme/terraform-modules.git//vpc?ref=v1.4.0"
+
+  name               = "prod-use1"
+  cidr_block         = "10.20.0.0/16"
+  azs                = ["us-east-1a", "us-east-1b", "us-east-1c"]
+  enable_nat_gateway = true
+
+  tags = {
+    environment = "production"
+    managed_by  = "terraform"
   }
-}</code></pre>
-</div>
-<h2 id="incident-response-for-terraform">Incident response for terraform</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+}
+
+module "app_cluster" {
+  source = "git::https://github.com/acme/terraform-modules.git//ecs-service?ref=v2.1.0"
+
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+  service_name       = "checkout-api"
+  desired_count      = 3
+}</code></pre></div>
+<p>The root module wires two independently versioned modules together using outputs as the glue. Neither module knows the other exists — <code>ecs-service</code> just needs a VPC ID and subnet IDs, which is exactly the composition boundary that keeps modules reusable across projects that don't share a network layout.</p>
+<h2 id="versioning-modules">Versioning modules</h2>
+<p>Unversioned module sources are the single most common way teams get burned. If your source is a branch (<code>ref=main</code>) or, worse, unpinned entirely, then every <code>terraform init</code> can silently pull in someone else's change to the module and your plan diff has nothing to do with what you actually intended to change. Pin to a tag, always: <code>source = "git::https://github.com/acme/terraform-modules.git//vpc?ref=v1.4.0"</code>. Tag the module repo with semver, bump the tag when you make a breaking change to variables or outputs, and let consumers upgrade on their own schedule by bumping the <code>ref</code>.</p>
+<p>If you're publishing internally at any scale, a private registry (Terraform Cloud's, or a self-hosted one) is worth setting up over raw git sources — the <code>source = "app.terraform.io/acme/vpc/aws"</code> style reference gives you a real version constraint syntax (<code>version = "~> 1.4"</code>) instead of exact git refs, plus a browsable index of what modules exist. For a single team with a handful of modules, git tags are fine and require zero extra infrastructure.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Treat module tags like a public API</strong>
+  <p>A breaking change is anything that would fail an existing caller's plan without them editing their code: renaming a variable, removing an output, changing a variable's type. Bump the major version for those. Adding an optional variable with a default, or a new output, is safe as a minor or patch bump. Consumers pinning to a tag should be able to trust that distinction.</p>
 </div>
-<h2 id="what-terraform-modules-a-field-guide-gives-you">What Terraform Modules — A Field Guide gives you</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: terraform
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: terraform
-  template:
-    metadata:
-      labels:
-        app: terraform</code></pre>
+<h2 id="the-kitchen-sink-module">Avoid the kitchen-sink module</h2>
+<p>The failure mode nobody warns you about is the opposite of duplication: a module so generic it becomes harder to use than the raw resources it wraps. I've inherited modules with 40+ optional variables — half of them booleans toggling features nobody uses, a few of them nested objects with their own optional sub-fields — where understanding what a fifteen-line <code>module</code> block would actually provision took longer than writing the resources by hand. That's not reuse, it's indirection with extra steps.</p>
+<p>The tell is usually the module's own defaults file: if you need a table to document which combinations of variables are valid together, or a variable exists purely to disable a resource block entirely (<code>create_thing = false</code>), the module is trying to be every possible shape of infrastructure instead of one shape, well. The fix is almost always to split it. A module for the common 80% case with three or four inputs, and a second, more explicit module (or just raw resources in the root) for the unusual cases, beats one mega-module trying to serve both.</p>
+<div class="callout callout-warn">
+  <strong>If it needs a wiki page, it's too generic</strong>
+  <p>A module whose variables require a separate document explaining which combinations are supported is a module that has stopped being an abstraction and started being a second, worse copy of the Terraform language. If onboarding a new caller means walking them through the variables file, consider whether two focused modules — or no module at all — would actually be less work.</p>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>The performance of modules in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>Production modules looks different from development modules. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Terraform
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring modules first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add terraform on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with modules when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on terraform modules — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Good modules are boring: a handful of inputs that map to real decisions, outputs that other modules can build on without knowing your internals, and a version tag that means something when you bump it. The instinct to make a module handle every possible case is understandable — it feels like foresight — but in practice it just moves the complexity from "duplicated resource blocks" to "an API nobody can hold in their head." When in doubt, write the module for the case in front of you, version it, and let the next case earn its own variable.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/opentofu-vs-terraform/">OpenTofu vs Terraform — A Comparison</a></li>
@@ -191,7 +196,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

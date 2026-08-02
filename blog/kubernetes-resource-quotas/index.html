@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kubernetes Resource Quotas — A Field Guide | John Kihiu</title>
-<meta name="description" content="Kubernetes Resource Quotas — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="How Kubernetes ResourceQuota and LimitRange objects govern namespace-level CPU, memory, and object-count usage, and the patterns for rolling them out without breaking existing deployments.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica quotas, Acumatica limits, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-resource-quotas/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kubernetes Resource Quotas — A Field Guide">
-<meta property="og:description" content="Kubernetes Resource Quotas — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-resource-quotas.svg">
+<meta property="og:description" content="How Kubernetes ResourceQuota and LimitRange objects govern namespace-level CPU, memory, and object-count usage, and the patterns for rolling them out without breaking existing deployments.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-resource-quotas/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="limits">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Resource Quotas — A Field Guide","description":"Kubernetes Resource Quotas — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/kubernetes-resource-quotas.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-resource-quotas/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Resource Quotas — A Field Guide","description":"How Kubernetes ResourceQuota and LimitRange objects govern namespace-level CPU, memory, and object-count usage, and the patterns for rolling them out without breaking existing deployments.","image":"https://kihiujohn.github.io/assets/og/kubernetes-resource-quotas.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-resource-quotas/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kubernetes Resource Quotas — A Field Guide","item":"https://kihiujohn.github.io/blog/kubernetes-resource-quotas/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,76 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kubernetes Resource Quotas — A Field Guide</span></nav>
     <span class="tag">DevOps · Kubernetes</span>
     <h1>Kubernetes Resource Quotas — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kubernetes Resource Quotas — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Kubernetes ResourceQuota and LimitRange objects govern namespace-level CPU, memory, and object-count usage, and the patterns for rolling them out without breaking existing deployments.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="incident-response-for-kubernetes">Incident response for kubernetes</h2>
-<p>Incident response for kubernetes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A Kubernetes namespace with no ResourceQuota is an open floor: any deployment in it can request as much CPU or memory as the node scheduler will allow, and a bad rollout or a runaway job can starve every other workload sharing that cluster. ResourceQuota and LimitRange are the two objects that turn a shared cluster from "whoever asks for the most wins" into something with actual, enforced boundaries per team or per environment.</p>
+<h2 id="what-resourcequota-actually-constrains">What ResourceQuota actually constrains</h2>
+<p>A <code>ResourceQuota</code> is a namespaced object that caps aggregate resource consumption and object counts across everything in that namespace: total CPU and memory requests/limits, the number of Pods, Services, PersistentVolumeClaims, ConfigMaps, and Secrets, and even storage class-specific quotas for PVCs. It doesn't cap any single pod — a pod can still request more than its fair share as long as the namespace total stays under quota. That's the key thing people get wrong: quota is an aggregate ceiling, not a per-pod limit. Per-pod limits are LimitRange's job.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="what-kubernetes-resource-quotas-a-field-guide-gives-you">What Kubernetes Resource Quotas — A Field Guide gives you</h2>
-<p>In the work I have done on kubernetes resource quotas — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The kubernetes is not the question; the failure mode of the resource is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "kubernetes_resource" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">YAML · resourcequota.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: v1
+kind: ResourceQuota
 metadata:
-  name: kubernetes
+  name: team-checkout-quota
+  namespace: checkout
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: kubernetes
-  template:
-    metadata:
-      labels:
-        app: kubernetes</code></pre>
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    pods: "50"
+    services: "10"
+    persistentvolumeclaims: "20"
+    count/deployments.apps: "15"</code></pre>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of resource in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production resource looks different from development resource. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<h2 id="why-limitrange-has-to-come-first">Why LimitRange usually has to come first</h2>
+<p>The moment you apply a ResourceQuota that includes <code>requests.cpu</code> or <code>requests.memory</code>, every pod created afterward in that namespace is required to specify resource requests — the API server rejects any pod spec that omits them, because otherwise it has nothing to subtract from the quota. If your existing deployments were written without requests and limits (common in namespaces that grew organically), applying quota first will start failing every new rollout with an admission error. A <code>LimitRange</code> fixes this by defining defaults: if a container doesn't specify requests/limits, the LimitRange injects them automatically, so existing manifests keep working while the quota is enforced underneath.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · limitrange.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: v1
+kind: LimitRange
+metadata:
+  name: checkout-defaults
+  namespace: checkout
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "2"
+        memory: 2Gi
+      min:
+        cpu: 50m
+        memory: 64Mi</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring resource first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kubernetes on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with resource when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<div class="callout-warn callout">
+  <strong>Rollout order matters</strong>
+  <p>Apply the LimitRange before the ResourceQuota in a namespace that has existing workloads without explicit requests/limits. Doing it the other way round means the next deploy, restart, or scale event for any pod missing requests will be rejected by the API server until someone notices and patches the manifests.</p>
+</div>
+<h2 id="scopes-and-priority-classes">Scoping quota to priority classes and QoS</h2>
+<p>ResourceQuota supports <code>scopes</code> and <code>scopeSelector</code>, which let you carve out separate quotas for different slices of the same namespace — for example, a stricter quota for <code>BestEffort</code> pods versus <code>Guaranteed</code> ones, or a quota that only applies to pods with a given <code>PriorityClass</code>. This is the mechanism for saying "batch jobs in this namespace can burst up to X, but the always-on API service has its own separate, protected ceiling" without splitting the workloads into different namespaces. It's more setup than a single flat quota, and most teams don't need it until they're running mixed batch-and-serving workloads in the same namespace.</p>
+<h2 id="what-happens-when-quota-is-hit">What happens when quota is hit</h2>
+<p>Hitting a ResourceQuota limit doesn't evict or throttle running pods — it blocks the creation of new objects. A <code>kubectl apply</code> or a Horizontal Pod Autoscaler trying to scale up will get an admission error (<code>exceeded quota</code>) and the object simply won't be created. This is usually the first place teams discover a quota exists: an autoscaler silently stops scaling, or a CI pipeline's deploy step starts failing, and the actual error is buried in an event rather than surfaced anywhere obvious. <code>kubectl describe resourcequota -n &lt;namespace&gt;</code> and <code>kubectl get events -n &lt;namespace&gt;</code> are the first two commands worth running when a namespace stops accepting new pods for no visible reason.</p>
+<div class="callout">
+  <strong>Watch usage before enforcing hard limits</strong>
+  <p>Run <code>kubectl describe resourcequota</code> against a namespace's current usage before tightening its hard limits. Quotas set from a guess rather than observed usage tend to either block legitimate scaling within a month, or sit so loose they don't actually protect the cluster from anything.</p>
+</div>
+<h2 id="rollout-strategy-for-existing-clusters">Rolling quotas into a cluster that doesn't have them yet</h2>
+<p>Retrofitting quotas onto a cluster that's been running quota-free for a while is mostly a communication problem, not a technical one. Start by measuring actual usage per namespace over a couple of weeks with <code>kubectl top pods</code> or your metrics stack, set quotas at roughly 1.5-2x observed peak rather than at whatever number seems safe in the abstract, and land the LimitRange first as described above. Expect the first month to surface a handful of namespaces where someone's deployment has no resource requests at all and was quietly consuming far more than anyone realized — that's usually the actual value of doing this exercise, independent of the quota enforcement itself.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kubernetes resource quotas — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>ResourceQuota caps aggregate namespace consumption and object counts; LimitRange fills in per-container defaults and per-container min/max so that quota enforcement doesn't break workloads that never specified requests in the first place. Land the LimitRange before the ResourceQuota, base the numbers on measured usage rather than guesses, and expect `kubectl describe resourcequota` plus namespace events to be your primary debugging tool the first time a rollout gets silently blocked.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/argo-workflows/">Argo Workflows — A Complete Guide</a></li>
@@ -191,7 +166,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

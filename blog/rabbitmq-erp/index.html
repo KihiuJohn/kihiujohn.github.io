@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RabbitMQ + ERP Integration | John Kihiu</title>
-<meta name="description" content="RabbitMQ + ERP Integration is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
+<meta name="description" content="How to use RabbitMQ exchange types, durable acknowledgments, and dead-letter queues to move data reliably in and out of an ERP system without losing messages when a consumer crashes.">
 <meta name="keywords" content="Acumatica rabbitmq, Acumatica erp, Acumatica events, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/rabbitmq-erp/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="RabbitMQ + ERP Integration">
-<meta property="og:description" content="RabbitMQ + ERP Integration is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/rabbitmq-erp.svg">
+<meta property="og:description" content="How to use RabbitMQ exchange types, durable acknowledgments, and dead-letter queues to move data reliably in and out of an ERP system without losing messages when a consumer crashes.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/rabbitmq-erp/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="events">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"RabbitMQ + ERP Integration","description":"RabbitMQ + ERP Integration is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.","image":"https://kihiujohn.github.io/assets/og/rabbitmq-erp.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/rabbitmq-erp/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"RabbitMQ + ERP Integration","description":"How to use RabbitMQ exchange types, durable acknowledgments, and dead-letter queues to move data reliably in and out of an ERP system without losing messages when a consumer crashes.","image":"https://kihiujohn.github.io/assets/og/rabbitmq-erp.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/rabbitmq-erp/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"RabbitMQ + ERP Integration","item":"https://kihiujohn.github.io/blog/rabbitmq-erp/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +86,81 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">RabbitMQ + ERP Integration</span></nav>
     <span class="tag">Acumatica · Rabbitmq</span>
     <h1>RabbitMQ + ERP Integration</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">RabbitMQ + ERP Integration is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to use RabbitMQ exchange types, durable acknowledgments, and dead-letter queues to move data reliably in and out of an ERP system without losing messages when a consumer crashes.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="how-to-debug-erp-in-production">How to debug erp in production</h2>
-<p>How to debug erp in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most ERP integrations start as a point-to-point HTTP call — system A posts to system B's API when something happens — and that works fine until you have three or four downstream systems that all need to know about the same event, and one of them is slow or down half the time. RabbitMQ earns its keep at exactly that point: it decouples the ERP from the systems that consume its events, so a warehouse system being down for maintenance doesn't block an order from also reaching the reporting pipeline. The parts that actually matter are the exchange topology, delivery guarantees, and what happens when a consumer rejects a message — not the "hello world" publish/subscribe demo.</p>
+<h2 id="exchange-types-and-how-they-map-to-erp-events">Exchange types and how they map to ERP events</h2>
+<p>RabbitMQ routes messages through an exchange before they reach a queue, and the exchange type determines the routing logic. A <strong>direct exchange</strong> routes on an exact routing key match — useful for a single well-known consumer, like a dedicated invoice-processing queue. A <strong>fanout exchange</strong> ignores the routing key entirely and copies the message to every bound queue — the right shape for "broadcast this event to everyone who cares," such as a stock-level change that both a pricing engine and a low-stock alert service need to see. A <strong>topic exchange</strong> matches routing keys against wildcard patterns (<code>*</code> for one segment, <code>#</code> for many), which is what most real ERP integrations end up using: publish with a key like <code>erp.order.created</code> or <code>erp.order.cancelled</code>, and let the warehouse system bind to <code>erp.order.*</code> while the reporting system binds to <code>erp.#</code> and picks up everything. One exchange, one publish call in the ERP, and each consumer decides what it cares about via its binding — the ERP never needs to know who's listening.</p>
+<h2 id="durability-and-acknowledgments-so-writes-are-not-lost">Durability and acknowledgments so writes are not lost</h2>
+<p>The default RabbitMQ behaviour — auto-ack, non-durable queue, in-memory only — will lose messages the moment either the broker restarts or a consumer crashes mid-processing, and for ERP data that means a sale that never reaches the warehouse or an invoice that never gets fiscalised. Three settings fix this together: declare the queue and exchange as <code>durable</code> so they survive a broker restart, publish messages with <code>delivery_mode=2</code> (persistent) so the message itself is written to disk, and use manual acknowledgment (<code>ack</code> only after the consumer has actually committed the write) instead of auto-ack. Manual ack is the one people skip because it's an extra line of code, and it's also the one that actually matters: with auto-ack, RabbitMQ considers the message delivered the instant it hits the consumer's TCP socket, whether or not the consumer's ERP write ever succeeds.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class RabbitmqErpExt : PXGraphExtension<RabbitmqEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Rabbitmq doc)
-    {
-        // Custom erp logic for rabbitmq erp integration
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">Python · pika</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import pika, json
+
+connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq.internal"))
+channel = connection.channel()
+
+channel.exchange_declare(exchange="erp.events", exchange_type="topic", durable=True)
+channel.queue_declare(queue="warehouse.orders", durable=True)
+channel.queue_bind(queue="warehouse.orders", exchange="erp.events", routing_key="erp.order.*")
+
+def publish_order_created(order):
+    channel.basic_publish(
+        exchange="erp.events",
+        routing_key="erp.order.created",
+        body=json.dumps(order),
+        properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
+    )
+
+def on_order_message(ch, method, properties, body):
+    order = json.loads(body)
+    try:
+        write_order_to_warehouse_system(order)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except ValidationError:
+        # reject without requeue -> routed to the dead-letter queue instead of looping forever
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+channel.basic_consume(queue="warehouse.orders", on_message_callback=on_order_message)
+channel.start_consuming()</code></pre>
 </div>
-<h2 id="the-version-of-rabbitmq-that-works">The version of rabbitmq that works</h2>
-<p>In the work I have done on rabbitmq + erp integration, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout">
+  <strong>Prefetch limits protect the consumer</strong>
+  <p>Set <code>channel.basic_qos(prefetch_count=10)</code> on the consumer so RabbitMQ only pushes 10 unacknowledged messages at a time instead of flooding the process with the entire queue backlog. Without it, a slow ERP write can leave thousands of messages sitting unacknowledged in the consumer's memory.</p>
+</div>
+<h2 id="dead-letter-queues-for-erp-validation-failures">Dead-letter queues for ERP-side validation failures</h2>
+<p>Not every message failure is transient. A malformed order, a reference to a customer that doesn't exist yet, a currency code the ERP doesn't recognise — these will fail the same way every time you retry, and a naive consumer that requeues on error will loop the same bad message forever, burning CPU and flooding logs. The fix is a dead-letter exchange (DLX): configure the main queue with <code>x-dead-letter-exchange</code> pointing at a separate exchange, and any message that's rejected with <code>requeue=False</code> (or that expires via a TTL) gets routed there instead of vanishing or looping. The dead-letter queue becomes a holding area a human or a reconciliation job can inspect, rather than a silent black hole.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Distinguish retryable from non-retryable failures</strong>
+  <p>A database connection timeout should be retried; a message that fails schema validation should not be retried, it should go straight to the dead-letter queue. Conflating the two either causes infinite retry loops on bad data, or silently drops messages that would have succeeded on a second attempt. Catch validation errors separately from infrastructure errors and nack them differently.</p>
 </div>
-<h2 id="why-rabbitmq-erp-integration-matters-in-production">Why RabbitMQ + ERP Integration matters in production</h2>
-<p>When the work moves from design to production, the questions change. The rabbitmq is not the question; the failure mode of the erp is.</p>
+<h2 id="queue-declaration-with-dead-lettering-configured">Queue declaration with dead-lettering configured</h2>
+<p>The dead-letter binding is set at queue-declaration time as an argument, not as a separate runtime decision — which means it has to be right before the first message ever lands in the queue, since RabbitMQ won't let you redeclare a queue with different arguments once it exists.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for rabbitmq
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">Python · pika</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>channel.exchange_declare(exchange="erp.events.dlx", exchange_type="fanout", durable=True)
+channel.queue_declare(queue="warehouse.orders.failed", durable=True)
+channel.queue_bind(queue="warehouse.orders.failed", exchange="erp.events.dlx")
+
+channel.queue_declare(
+    queue="warehouse.orders",
+    durable=True,
+    arguments={
+        "x-dead-letter-exchange": "erp.events.dlx",
+        "x-message-ttl": 86400000,  # optional: also dead-letter anything unprocessed after 24h
+    },
+)</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="rabbitmq-implementation-walkthrough">Rabbitmq implementation walkthrough</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The performance of erp in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="performance-and-observability-for-rabbitmq">Performance and observability for rabbitmq</h2>
-<p>Production erp looks different from development erp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class RabbitmqErpExt : PXGraphExtension<RabbitmqEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Rabbitmq doc)
-    {
-        // Custom erp logic for rabbitmq erp integration
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring erp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add rabbitmq on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with erp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="what-this-buys-you-over-direct-http-calls">What this buys you over direct HTTP calls</h2>
+<p>The honest case for RabbitMQ over direct service-to-service HTTP calls isn't throughput, it's failure isolation and fan-out. If the warehouse system's API is down for an hour, the messages queue up and get processed when it comes back, instead of the ERP retrying an HTTP call and giving up after a few attempts. Adding a fourth consumer of order-created events — say, a Slack notification service — is a queue binding, not a code change in the ERP or in any existing consumer. The cost is operational: you now have a broker to monitor, queue depth to alert on, and a dead-letter queue that needs someone to actually look at it periodically, or it becomes a graveyard of failures nobody ever fixes.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on rabbitmq + erp integration. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>RabbitMQ's value in an ERP integration comes from three specific mechanisms working together: topic exchanges so one publish reaches every interested consumer without the ERP knowing who they are, durable queues plus manual acknowledgment so a crashed consumer doesn't silently lose a write, and dead-letter queues so validation failures land somewhere visible instead of looping or disappearing. Skip any one of the three and the integration looks fine in testing and loses data quietly in production the first time something goes wrong.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/event-driven-architecture-erp/">Event-Driven Architecture for ERP — A Field Guide</a></li>
@@ -187,7 +171,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

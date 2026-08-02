@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Incident Command System — A Field Guide">
 <meta property="og:description" content="Incident Command System — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/incident-command-system.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/incident-command-system/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,34 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="the-command-edge-cases-i-have-shipped">The command edge cases I have shipped</h2>
-<p>The command edge cases I have shipped is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IncidentCommandExt : PXGraphExtension<IncidentEntry>
-{
-    [PXOverride]
-    public virtual void Command(Incident doc)
-    {
-        // Custom command logic for incident command system
-        if (doc?.Command == null) return;
-        Base.Command(doc);
-    }
-}</code></pre>
+    <p>The Incident Command System (ICS) originated in US wildfire response in the 1970s, after multiple agencies discovered their separate command structures and terminology made coordinating a large fire nearly impossible. Software engineering teams borrowed the core idea decades later, and it solves the same underlying problem: when something is on fire (literally or figuratively) and several people are trying to help, without clear roles the response is often slower and more chaotic than if fewer people were involved.</p>
+<h2 id="the-incident-commander-role">The Incident Commander role, and why it's not the fixer</h2>
+<p>The single most important idea in ICS, and the one teams most often get backwards, is that the Incident Commander (IC) does not fix the problem. The IC's job is coordination: tracking what's known, deciding who's investigating what, deciding when to escalate or pull in more people, managing communication to stakeholders, and declaring when the incident is resolved. The person best qualified to fix the underlying issue is rarely the person who should also be fielding Slack questions from six different stakeholders — splitting those roles is what lets the technical responder actually focus.</p>
+<div class="callout">
+  <strong>The IC role rotates by who's on call, not by seniority</strong>
+  <p>A common mistake is assuming the most senior engineer should always be IC. In practice, IC is a skill (coordination, calm communication, decision-making under uncertainty) that's somewhat independent of deep technical expertise in the specific system that's broken. Many mature incident programs train several people to serve as IC and rotate the role, keeping the most technically relevant person free to actually investigate.</p>
 </div>
-<h2 id="migration-path-when-incident-changes">Migration path when incident changes</h2>
-<p>In the work I have done on incident command system — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="severity-levels-and-what-they-trigger">Severity levels: the point is consistent triggers, not precision</h2>
+<p>Most incident programs define 3-5 severity levels (SEV1 through SEV4/5 is common), each tied to concrete triggers — a SEV1 might mean "customer-facing outage affecting all users" and automatically triggers paging the on-call IC, opening a dedicated channel, and starting a timeline. The specific labels matter less than having them defined in advance and consistently applied: the value isn't a precise severity score, it's that everyone in the organization knows what response a given severity level triggers, so no one has to argue about whether to page someone at 2am while the outage is ongoing.</p>
+<h2 id="roles-beyond-the-ic">Roles beyond the IC: scribe and communications</h2>
+<p>Larger incidents benefit from two more defined roles. A <strong>scribe</strong> maintains a timeline in real time — what was observed, what was tried, when — which sounds like overhead during the incident but is the single biggest lever on how useful the postmortem afterward will be, because human memory of a stressful hour is unreliable within a day. A <strong>communications lead</strong> handles updates to stakeholders and customers, freeing the IC and the responders from having to context-switch out of the technical problem to answer "any update?" every ten minutes. For a small team, one person may hold multiple roles, but naming the roles explicitly, even informally, still helps.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Too many people in the room is its own failure mode</strong>
+  <p>The instinct during a bad incident is to pull in everyone who might know something. Past a certain point this actively slows resolution — more people means more competing theories, more parallel (uncoordinated) changes to the system, and more communication overhead for the IC. ICS explicitly limits who's "in the incident" versus who's a passive observer, and the IC controls that boundary.</p>
 </div>
-<h2 id="how-to-debug-command-in-production">How to debug command in production</h2>
-<p>When the work moves from design to production, the questions change. The incident is not the question; the failure mode of the command is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for incident
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-version-of-incident-that-works">The version of incident that works</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="why-incident-command-system-a-field-guide-matters-in-production">Why Incident Command System — A Field Guide matters in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>The performance of command in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="incident-implementation-walkthrough">Incident implementation walkthrough</h2>
-<p>Production command looks different from development command. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IncidentCommandExt : PXGraphExtension<IncidentEntry>
-{
-    [PXOverride]
-    public virtual void Command(Incident doc)
-    {
-        // Custom command logic for incident command system
-        if (doc?.Command == null) return;
-        Base.Command(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="declaring-and-closing-an-incident">Declaring and closing: both need clear criteria</h2>
+<p>Teams are usually decent at declaring an incident but bad at closing one cleanly — the system recovers, everyone quietly stops paying attention, and no one formally declares it resolved or schedules the retrospective. Define closure criteria the same way you define severity triggers: what observable condition means the incident is over (error rate back to baseline for N minutes, not just "looks fine now"), and who has authority to declare it closed. This matters because an incident that's never formally closed rarely gets a retrospective, and the lessons from it are lost.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring command first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add incident on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with command when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Role</th><th>Responsibility</th><th>Not responsible for</th></tr>
+  <tr><td>Incident Commander</td><td>Coordination, decisions, escalation, declaring resolution</td><td>Directly debugging/fixing the issue</td></tr>
+  <tr><td>Technical responder(s)</td><td>Investigating and fixing the underlying problem</td><td>Stakeholder communication</td></tr>
+  <tr><td>Scribe</td><td>Real-time timeline of observations and actions</td><td>Decision-making</td></tr>
+  <tr><td>Communications lead</td><td>Stakeholder/customer updates</td><td>Technical investigation</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on incident command system — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>ICS works because it separates coordination from fixing, gives every incident a named owner for decisions, and defines severity and closure criteria in advance so no one has to negotiate them mid-fire. None of it requires special tooling — a defined IC rotation, a severity rubric, and the discipline to name a scribe on anything past a SEV2 gets most of the benefit.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/incident-retrospectives/">Incident Retrospectives — A Field Guide</a></li>
@@ -187,7 +130,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

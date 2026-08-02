@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica REST API — Pagination and OData | John Kihiu</title>
-<meta name="description" content="How to paginate through large Acumatica REST result sets using $top, $skip, and continuation tokens — plus a guide to the OData query options that actually work in Acumatica.">
+<meta name="description" content="Acumatica's contract-based REST API caps every response at $top records with no total-count header — call it once and you silently lose data. Here's the correct $top/$skip pagination loop, and when to expose a GI as an OData feed instead.">
 <meta name="keywords" content="Acumatica api, Acumatica integration, Acumatica rest, Acumatica odata, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-rest-api-pagination-and-odata/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica REST API — Pagination and OData">
-<meta property="og:description" content="How to paginate through large Acumatica REST result sets using $top, $skip, and continuation tokens — plus a guide to the OData query options that actually work in Acumatica.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-rest-api-pagination-and-odata.svg">
+<meta property="og:description" content="Acumatica's contract-based REST API caps every response at $top records with no total-count header — call it once and you silently lose data. Here's the correct $top/$skip pagination loop, and when to expose a GI as an OData feed instead.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-rest-api-pagination-and-odata/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -22,7 +21,7 @@
 <meta property="article:tag" content="odata">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica REST API — Pagination and OData","description":"How to paginate through large Acumatica REST result sets using $top, $skip, and continuation tokens — plus a guide to the OData query options that actually work in Acumatica.","image":"https://kihiujohn.github.io/assets/og/acumatica-rest-api-pagination-and-odata.svg","datePublished":"2026-05-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-rest-api-pagination-and-odata/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica REST API — Pagination and OData","description":"Acumatica's contract-based REST API caps every response at $top records with no total-count header — call it once and you silently lose data. Here's the correct $top/$skip pagination loop, and when to expose a GI as an OData feed instead.","image":"https://kihiujohn.github.io/assets/og/acumatica-rest-api-pagination-and-odata.svg","datePublished":"2026-05-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-rest-api-pagination-and-odata/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica REST API — Pagination and OData","item":"https://kihiujohn.github.io/blog/acumatica-rest-api-pagination-and-odata/"}]}
@@ -30,12 +29,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -67,7 +66,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -88,56 +87,53 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica REST API — Pagination and OData</span></nav>
     <span class="tag">Acumatica · API</span>
     <h1>Acumatica REST API — Pagination and OData</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to paginate through large Acumatica REST result sets using $top, $skip, and continuation tokens — plus a guide to the OData query options that actually work in Acumatica.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica's contract-based REST API caps every response at $top records with no total-count header — call it once and you silently lose data. Here's the correct $top/$skip pagination loop, and when to expose a GI as an OData feed instead.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-05-22">May 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica's contract-based REST API supports a standard set of OData-style query string parameters — <code>$top</code>, <code>$skip</code>, <code>$filter</code>, <code>$expand</code>, <code>$select</code>, and <code>$custom</code> — against every endpoint under <code>/entity/{endpointName}/{version}/</code>. Most of the integration bugs I get called in to fix aren't about getting data out of Acumatica; they're about pulling it out efficiently, in order, without falling over on a 200,000-row Sales Order export. This post covers how pagination actually behaves, which OData options are worth using, and where the pattern breaks down at scale.</p>
-<h2 id="basic-top-skip-pagination">Basic $top / $skip pagination</h2>
-<p>The REST API doesn't return a total record count or a next-page cursor by default. The standard pattern is to fix a page size with <code>$top</code> and increment <code>$skip</code> by that same amount on each subsequent call, continuing until a response comes back with fewer records than you asked for — that's your signal you've hit the last page.</p>
-<p>There's no server-side "hasMore" flag or continuation token in the base contract API, so client code has to track this itself. A typical loop keeps a running offset, requests <code>$top=100</code> each time, and stops as soon as the returned array length is less than 100.</p>
-<h2 id="filtering-with-filter">Filtering with $filter</h2>
-<p>OData filter expressions let you narrow results server-side instead of pulling everything and filtering in your client. Acumatica supports the usual operators — <code>eq</code>, <code>ne</code>, <code>gt</code>, <code>ge</code>, <code>lt</code>, <code>le</code>, combined with <code>and</code> / <code>or</code> — against fields exposed in the endpoint contract. Filtering on an indexed field like <code>OrderNbr</code>, <code>Status</code>, or a date field is far cheaper than fetching unfiltered pages and discarding rows client-side.</p>
-<p>This matters more than it sounds: every unnecessary row Acumatica has to serialize and you have to deserialize is time your integration is holding open a session against a production app pool.</p>
-<h2 id="controlling-payload-with-select-and-expand">Controlling payload with $select and $expand</h2>
-<p>By default a GET against an endpoint like SalesOrder returns the full contract shape for the header, but not the detail lines — for those you need <code>$expand=Details</code>. That's convenient for a single-record lookup, but expanding details across a bulk paginated pull multiplies payload size fast: 100 orders with 20 lines each is 2,000 detail rows serialized into one response.</p>
-<p>Use <code>$select</code> to trim the field list down to what the downstream system actually consumes. Combining a tight <code>$select</code> with <code>$expand</code> only on the detail entities you need keeps response times predictable as page count grows. Pulling every field on every entity "just in case" is the single most common cause of slow syncs I see in the field.</p>
-<div class="callout callout-warn">
-  <strong>Deep $skip gets expensive</strong>
-  <p>Acumatica translates $top/$skip into an OFFSET/FETCH query against the underlying SQL Server tables. As $skip grows into the tens of thousands, the database still has to walk and discard every prior row before it can return your page — response times degrade the further into a dataset you page. For large historical exports, filter on a monotonic field instead of paging deep.</p>
-</div>
-<h2 id="incremental-sync-instead-of-deep-paging">Incremental sync instead of deep paging</h2>
-<p>For anything beyond a few thousand records, I avoid deep <code>$skip</code> entirely. Acumatica exposes <code>LastModifiedDateTime</code> on most entities, so the more reliable pattern is a keyset-style sync: filter with <code>LastModifiedDateTime gt {last synced timestamp}</code>, order ascending, and page through only the delta since the last run. This avoids the offset cost altogether and gives you incremental sync for free — you only ever request records that changed, not the whole table on every run.</p>
-<p>Record the highest <code>LastModifiedDateTime</code> you've seen at the end of each run and use it as the filter floor next time. It's a small amount of state to track compared to re-running a full paginated export on every sync.</p>
-<h2 id="authentication-and-session-context">Authentication and session context</h2>
-<p>Paginated pulls need to reuse the same authenticated context across every page — either a cookie-based session from <code>/entity/auth/login</code> or an OAuth 2.0 bearer token. Some query state in Acumatica is tied to the session, so rotating credentials mid-pagination or spreading pages across parallel sessions can produce inconsistent results. Keep one session (or token) alive for the duration of a paginated export, and log out cleanly when you're done rather than letting sessions pile up.</p>
-<p>Acumatica doesn't publish a fixed public rate limit the way some SaaS APIs do, but a long-running paginated pull competes with real UI users for the same application pool worker threads. On a production instance, that means a bulk sync during business hours can visibly slow the screen for whoever's entering Sales Orders at the same time. Run large exports off-peak, or through a dedicated integration user with its own throttling, rather than firing pages as fast as the client can go.</p>
+    <p>Acumatica's contract-based REST API supports <code>$top</code> and <code>$skip</code> against every endpoint under <code>/entity/{endpointName}/{version}/</code>, and that's the entire pagination mechanism — there's no total-record-count header, no <code>hasMore</code> flag, and no continuation token in the base contract API. Most of the integration bugs I get called in to fix on this API aren't exceptions or auth failures; they're a sync job that ran clean for months and quietly stopped picking up new records once a table crossed a few hundred rows. This post covers the bug shape that causes that, the pagination loop that avoids it, and when a Generic Inquiry exposed as an OData feed is the better tool than the entity REST endpoint in the first place.</p>
+<h2 id="the-bug-nobody-notices">The bug that doesn't throw an error</h2>
+<p>Here's how it happens: someone calls <code>GET /entity/Default/24.200.001/SalesOrder?$top=50</code>, gets back exactly 50 records, and treats that as the whole result set. It works in testing because the sandbox has 30 sales orders. It works in production for the first few months because the table hasn't crossed 50 rows yet. Then it crosses 50, and the integration silently stops picking up anything past the first page — no exception, no failed request, no log line. The response is valid, the status code is 200, and the data is simply incomplete. That's the shape of this bug: it isn't a crash, it's silent data loss, and it usually gets discovered by a customer asking where an order went rather than by monitoring.</p>
+<p>The fix is not "add a bigger $top." Any fixed page size runs into the same wall once the dataset outgrows it. The endpoint has to be paginated in a loop regardless of how large you set the page.</p>
+<h2 id="the-correct-loop">The correct loop pattern</h2>
+<p>Since there's no count header or cursor to trust, the loop has to infer the end of the result set from the page size itself: request <code>$top</code>, and if the number of records that comes back is less than <code>$top</code>, that page was the last one. Anything else — assuming a fixed number of pages, stopping after one call, polling a count endpoint that doesn't exist — either breaks or is more complex than it needs to be.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">HTTP · REQUEST</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>GET /entity/Default/24.200.001/SalesOrder
-    ?$filter=LastModifiedDateTime gt datetimeoffset'2026-07-01T00:00:00Z'
-      and Status eq 'Open'
-    &$select=OrderNbr,OrderType,Status,CustomerID,OrderTotal,LastModifiedDateTime
-    &$expand=Details
-    &$top=100
-    &$skip=0
-Cookie: ASP.NET_SessionId=&lt;session-from-auth-login&gt;
-Accept: application/json</code></pre>
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · PAGINATION LOOP</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const PAGE_SIZE = 50;
+let skip = 0;
+let allOrders = [];
+
+while (true) {
+  const url = `${baseUrl}/entity/Default/24.200.001/SalesOrder`
+    + `?$filter=Status eq 'Open'`
+    + `&$select=OrderNbr,Status,CustomerID,OrderTotal`
+    + `&$top=${PAGE_SIZE}&$skip=${skip}`;
+
+  const res = await fetch(url, { headers: authHeaders });
+  const page = await res.json();
+
+  allOrders = allOrders.concat(page);
+
+  // Fewer records than requested means this was the last page.
+  if (page.length < PAGE_SIZE) break;
+
+  skip += PAGE_SIZE;
+}</code></pre>
 </div>
-<table>
-  <tr><th>Parameter</th><th>Purpose</th></tr>
-  <tr><td><code>$top</code></td><td>Page size — number of records to return per call.</td></tr>
-  <tr><td><code>$skip</code></td><td>Offset — number of records to skip before returning results.</td></tr>
-  <tr><td><code>$filter</code></td><td>Server-side filtering with eq, gt, and, or, etc. against contract fields.</td></tr>
-  <tr><td><code>$expand</code></td><td>Include related detail entities (e.g. line items) in the same response.</td></tr>
-  <tr><td><code>$select</code></td><td>Limit returned fields to reduce payload size and serialization cost.</td></tr>
-  <tr><td><code>$custom</code></td><td>Request custom or Usr- fields not present in the default contract.</td></tr>
-</table>
+<p>That's the whole pattern. It costs one extra round trip at the very end (a page that returns exactly 0 records, if the total happens to be an exact multiple of your page size), which is a fine trade for never silently truncating a result set again. Keep <code>$top</code> reasonably small — 50 to 100 — so each request stays fast and a slow page doesn't hold a session open for longer than necessary.</p>
+<div class="callout callout-warn">
+  <strong>Don't trust a "total count" you haven't seen documented for your endpoint</strong>
+  <p>It's tempting to look for a count field somewhere in the response envelope and use it to calculate pages up front. The base contract API doesn't return one. If you've seen a count-like field on a specific custom endpoint, that's something someone added deliberately — don't assume it generalizes to every entity, and don't build a sync that breaks silently if that field is ever absent.</p>
+</div>
+<h2 id="when-a-gi-odata-feed-is-the-better-fit">When a GI/OData feed is the better fit</h2>
+<p>The entity-level REST API is built for transactional integration — creating and updating Sales Orders, Bills, Stock Items, the things a real business process needs to act on. If what you actually want is a reporting or export feed — a flattened, pre-joined view of data for a BI tool or a scheduled extract — a Generic Inquiry exposed via OData is usually a better starting point than paginating a raw entity endpoint. On the GI screen, checking "Expose via OData" turns that inquiry into its own OData endpoint, and it honors <code>$skip</code> and <code>$top</code> the same way you'd expect from a standard OData service — so the same paginate-until-a-short-page-comes-back loop above works against it unchanged.</p>
+<p>The advantage isn't the pagination mechanics, which are identical either way — it's that the GI lets you shape the result server-side (joins, filters, calculated fields) instead of pulling the full entity contract and reshaping it in client code on every page. If a report needs data from three related screens, building that join once in a GI beats stitching together three separate paginated REST pulls.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on Acumatica REST integrations. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The failure mode with Acumatica's REST pagination isn't an error you can catch — it's a page that comes back looking completely valid while silently leaving the rest of the table behind. Treat every entity endpoint call as one page of an unknown number, loop on <code>$top</code>/<code>$skip</code> until a short page tells you you're done, and reach for a GI exposed via OData instead of the entity API when the actual need is a shaped reporting feed rather than a transactional read.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-oauth-2-setup-step-by-step/">Acumatica OAuth 2.0 Setup — Step by Step</a></li>
@@ -148,7 +144,6 @@ Accept: application/json</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

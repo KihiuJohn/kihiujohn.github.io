@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kafka KRaft Mode — A Field Guide | John Kihiu</title>
-<meta name="description" content="Kafka KRaft Mode — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
+<meta name="description" content="What changed when Kafka replaced ZooKeeper with its own KRaft consensus protocol: simpler operations, faster controller failover, and what to check before migrating an existing cluster.">
 <meta name="keywords" content="Acumatica kafka, Acumatica kraft, Acumatica streaming, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kafka-kraft-mode/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kafka KRaft Mode — A Field Guide">
-<meta property="og:description" content="Kafka KRaft Mode — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kafka-kraft-mode.svg">
+<meta property="og:description" content="What changed when Kafka replaced ZooKeeper with its own KRaft consensus protocol: simpler operations, faster controller failover, and what to check before migrating an existing cluster.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kafka-kraft-mode/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="streaming">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kafka KRaft Mode — A Field Guide","description":"Kafka KRaft Mode — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in every.","image":"https://kihiujohn.github.io/assets/og/kafka-kraft-mode.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kafka-kraft-mode/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kafka KRaft Mode — A Field Guide","description":"What changed when Kafka replaced ZooKeeper with its own KRaft consensus protocol: simpler operations, faster controller failover, and what to check before migrating an existing cluster.","image":"https://kihiujohn.github.io/assets/og/kafka-kraft-mode.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kafka-kraft-mode/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kafka KRaft Mode — A Field Guide","item":"https://kihiujohn.github.io/blog/kafka-kraft-mode/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,42 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kafka KRaft Mode — A Field Guide</span></nav>
     <span class="tag">Data / ML · Kafka</span>
     <h1>Kafka KRaft Mode — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kafka KRaft Mode — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">What changed when Kafka replaced ZooKeeper with its own KRaft consensus protocol: simpler operations, faster controller failover, and what to check before migrating an existing cluster.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough data teams to know the patterns that work. They share a few traits: schema contracts, data quality tests, and lineage that is the source of truth. This article is the patterns.</p>
-<h2 id="cost-optimisation-for-kafka">Cost optimisation for kafka</h2>
-<p>Cost optimisation for kafka is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM kafka
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-kraft">The testing pyramid for kraft</h2>
-<p>In the work I have done on kafka kraft mode — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-kafka">Backfills and rollbacks for kafka</h2>
-<p>When the work moves from design to production, the questions change. The kafka is not the question; the failure mode of the kraft is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.kafka > 0).groupBy("kraft").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="what-kafka-kraft-mode-a-field-guide-is-for">What Kafka KRaft Mode — A Field Guide is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>For over a decade, running Kafka meant running ZooKeeper too — a separate ensemble whose sole job was storing cluster metadata and electing a controller. KRaft (Kafka Raft) removed that dependency by moving metadata management into Kafka itself, using the same Raft consensus algorithm Kafka already used for partition replication. As of Kafka 3.3+ KRaft is production-ready, and as of 4.0 ZooKeeper support was removed entirely — so understanding KRaft isn't optional anymore for anyone running a current Kafka version.</p>
+<h2 id="why-zookeeper-was-the-thing-to-remove">Why ZooKeeper was the thing to remove</h2>
+<p>ZooKeeper worked, but it meant operating two distinct distributed systems with different failure modes, different tuning knobs, and different operational runbooks, just to run one Kafka cluster. Metadata changes (topic creation, partition reassignment, ACL updates) went through ZooKeeper and then had to propagate to the controller and out to every broker — a path with real latency, especially at cluster sizes with thousands of partitions, where controller failover after a crash could take tens of seconds while the new controller reloaded full metadata state from ZooKeeper.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>KRaft brokers still have distinct controller and broker roles</strong>
+  <p>KRaft doesn't remove the concept of a controller — it removes ZooKeeper as the place that metadata lives. A small set of nodes run in the "controller" process role (forming a Raft quorum that stores the metadata log), while broker nodes handle client traffic. In smaller deployments, a node can run both roles combined.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="what-actually-changed-operationally">What actually changed operationally</h2>
+<p>With KRaft, cluster metadata lives in an internal Kafka topic (<code>__cluster_metadata</code>) replicated via Raft across the controller quorum, the same replication mechanism Kafka already uses for regular topics. Controller failover is now a Raft leader election among nodes that already have the metadata log locally, instead of a full reload from an external system — which is why failover times dropped from tens of seconds to sub-second in most reported benchmarks. Operationally, this means one system to run, one set of nodes to secure and monitor, and one fewer moving part that can fall out of sync with Kafka's own view of the world.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_kafka') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+  <div class="code-header"><span class="code-lang">PROPERTIES · MINIMAL KRAFT BROKER CONFIG</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>process.roles=broker,controller
+node.id=1
+controller.quorum.voters=1@controller1:9093,2@controller2:9093,3@controller3:9093
+listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+controller.listener.names=CONTROLLER
+inter.broker.listener.name=PLAINTEXT</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>The performance of kraft in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
+<h2 id="migrating-an-existing-cluster">Migrating an existing ZooKeeper cluster</h2>
+<p>Kafka provided an online migration path (available from 3.4 onward) that lets a running ZooKeeper-based cluster move to KRaft without downtime: stand up a KRaft controller quorum, put it into migration mode so it reads from ZooKeeper as the source of truth temporarily, then cut brokers over one at a time to KRaft-managed metadata, and finally decommission ZooKeeper once every broker has migrated. The realistic risk isn't the mechanism, which is well-tested at this point — it's doing this on a cluster with a large number of partitions and topics without a rollback plan tested in staging first, since a partial migration state is harder to reason about than either endpoint.</p>
+<div class="callout-warn callout">
+  <strong>Check client and tooling compatibility before migrating</strong>
+  <p>Some older admin tooling, monitoring integrations, and third-party Kafka management UIs assumed ZooKeeper's existence for cluster introspection. Before migrating a production cluster, verify every tool in your operational stack — not just the Kafka clients — has KRaft support, since a monitoring gap post-migration is a worse surprise than the migration itself.</p>
 </div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>Production kraft looks different from development kraft. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM kafka
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring kraft first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kafka on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with kraft when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="new-clusters-should-just-start-on-kraft">New clusters should just start on KRaft</h2>
+<p>For any cluster being stood up new, there's no argument for starting on ZooKeeper mode at this point — KRaft has been the default and the actively developed path for several major versions, and ZooKeeper mode is deprecated and removed outright in Kafka 4.0. The only reason to still be thinking about the migration path at all is an existing cluster that predates KRaft's production readiness.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kafka kraft mode — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>KRaft's real contribution isn't a new feature so much as the removal of an entire second distributed system Kafka operators had to run and reason about. Faster controller failover and simpler operations are the visible benefits; the bigger one is fewer places for cluster state to disagree with itself. If you're still running ZooKeeper mode, the online migration path is well-supported — the main risk is under-testing it on a cluster with real production scale before cutting over.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.apache.org/" target="_blank" rel="noopener noreferrer">Apache data project documentation</a></li><li><a href="https://docs.getdbt.com/" target="_blank" rel="noopener noreferrer">dbt documentation</a></li><li><a href="https://www.nist.gov/privacy-framework" target="_blank" rel="noopener noreferrer">NIST Privacy Framework</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/kafka-streams-vs-kafka/">Kafka Streams vs Kafka — A Field Guide</a></li>
@@ -179,7 +132,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

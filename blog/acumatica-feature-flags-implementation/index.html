@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Feature Flags Implementation | John Kihiu</title>
-<meta name="description" content="Acumatica Feature Flags Implementation is the Acumatica operations topic that you only get good at by doing it badly a few times.">
+<meta name="description" content="Acumatica has no built-in feature flag system, but publishing a customization is all-or-nothing. Here is how I use a simple Usr-prefixed flag field and setup screen to decouple deploying customization code from turning its behavior on.">
 <meta name="keywords" content="Acumatica devops, Acumatica customization, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-feature-flags-implementation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Feature Flags Implementation">
-<meta property="og:description" content="Acumatica Feature Flags Implementation is the Acumatica operations topic that you only get good at by doing it badly a few times.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-feature-flags-implementation.svg">
+<meta property="og:description" content="Acumatica has no built-in feature flag system, but publishing a customization is all-or-nothing. Here is how I use a simple Usr-prefixed flag field and setup screen to decouple deploying customization code from turning its behavior on.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-feature-flags-implementation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -20,7 +19,7 @@
 <meta property="article:tag" content="customization">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Feature Flags Implementation","description":"Acumatica Feature Flags Implementation is the Acumatica operations topic that you only get good at by doing it badly a few times.","image":"https://kihiujohn.github.io/assets/og/acumatica-feature-flags-implementation.svg","datePublished":"2026-06-03","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-feature-flags-implementation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Feature Flags Implementation","description":"Acumatica has no built-in feature flag system, but publishing a customization is all-or-nothing. Here is how I use a simple Usr-prefixed flag field and setup screen to decouple deploying customization code from turning its behavior on.","image":"https://kihiujohn.github.io/assets/og/acumatica-feature-flags-implementation.svg","datePublished":"2026-06-03","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-feature-flags-implementation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Feature Flags Implementation","item":"https://kihiujohn.github.io/blog/acumatica-feature-flags-implementation/"}]}
@@ -28,12 +27,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -65,7 +64,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -86,100 +85,55 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Feature Flags Implementation</span></nav>
     <span class="tag">DevOps · Devops</span>
     <h1>Acumatica Feature Flags Implementation</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica Feature Flags Implementation is the Acumatica operations topic that you only get good at by doing it badly a few times.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Acumatica has no built-in feature flag system, but publishing a customization is all-or-nothing. Here is how I use a simple Usr-prefixed flag field and setup screen to decouple deploying customization code from turning its behavior on.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-03">Jun 3, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is a discipline, not a tool. this is one of the parts of the discipline. The pattern is to push the system towards being boring, observable, and recoverable. This article is the discipline.</p>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The CI/CD pipeline integration is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>There is no official Acumatica "feature flag" feature — no toggle screen shipped by the platform, no SDK for it. What I mean by feature flags here is a discipline I apply myself when building customizations: a way to get code into production without committing to turning its behavior on for everyone at the same moment. It matters in Acumatica specifically because of how publishing works.</p>
+<h2 id="why-acumatica-customizations-need-this-more-than-most-platforms">Why Acumatica customizations need this more than most platforms</h2>
+<p>When you publish a customization project, it goes live as a unit. There's no native concept of a canary release or a gradual rollout of a customization package — the project is either published or it isn't, and once it's published, every screen and every piece of graph extension logic in it is live for every user with access. That's fine for a bug fix. It's a problem for anything bigger: a new validation rule on Sales Orders, a changed default, a new required field — the kind of change you'd rather verify against one company or one branch before every user in every subsidiary hits it. Without something in between, "the code is deployed" and "the behavior is active for everyone" are the same event. A flag field is how you separate them.</p>
+<h2 id="the-mechanism-a-usr-field-the-code-checks">The mechanism: a Usr-prefixed field the code checks</h2>
+<p>The pattern is plain: add a custom boolean or selector field — something like <code>UsrNewPricingLogicEnabled</code> — on a setup DAC you control, expose it on a setup screen (or an existing configuration screen if one fits), and have the graph extension check that field before running the new logic. Nothing exotic; it's the same conditional-visibility and conditional-branch tooling you already use for everything else in Acumatica, pointed at a switch instead of a business rule.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>In the work I have done on acumatica feature flags implementation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>When the work moves from design to production, the questions change. The acumatica is not the question; the failure mode of the feature is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "acumatica_feature" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
+  <div class="code-header"><span class="code-lang">C# · GRAPH EXTENSION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public class SOOrderEntry_PricingExt : PXGraphExtension<SOOrderEntry>
+{
+    protected virtual void _(Events.RowUpdated<SOOrder> e)
+    {
+        var row = (SOOrder)e.Row;
+        if (row == null) return;
+
+        var setup = SelectFrom<UsrCustomizationSetup>.View.Select(Base);
+        bool newPricingEnabled = setup?.UsrNewPricingLogicEnabled == true;
+
+        if (newPricingEnabled)
+        {
+            ApplyNewPricingLogic(row);
+        }
+        else
+        {
+            ApplyLegacyPricingLogic(row);
+        }
+    }
 }</code></pre>
 </div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+<p>The setup DAC is a single-row (or per-branch) table you already know how to build — the same shape as any other company-level or branch-level settings screen. There's no separate flag-management product to install; it's a screen you own, sized to exactly the flags you need and no more.</p>
+<h2 id="scoping-the-flag-per-tenant-or-per-branch">Scoping the flag per tenant or per branch</h2>
+<p>Where this earns its keep is multi-tenant and multi-branch deployments. If the setup DAC is keyed by <code>CompanyID</code> (or scoped to a specific tenant in a multi-tenant instance), you can publish the customization across the whole environment during a maintenance window, but leave the flag off everywhere except the one company or branch you're validating against. Confirm the new behavior against real data for that tenant, then flip the flag on for the next one, and the next, instead of every tenant getting the new behavior the instant the DLL lands. This is not Acumatica giving you tenant-isolated feature rollout — it's you building a settings table that happens to respect the same CompanyID boundaries the rest of the ERP already enforces.</p>
+<div class="callout callout-warn">
+  <strong>The flag is not a substitute for a real rollback plan</strong>
+  <p>A flag field only helps if the old code path is still there to fall back to. If your "new logic" replaces the old logic outright instead of branching around it, turning the flag off does nothing — you've already deleted your rollback. Keep both paths live until the flag has been on in production long enough that you're comfortable deleting the old one.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: acumatica
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: acumatica
-  template:
-    metadata:
-      labels:
-        app: acumatica</code></pre>
-</div>
-<h2 id="why-acumatica-is-the-on-call-s-best-friend">Why acumatica is the on-call's best friend</h2>
-<p>The performance of feature in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="gitops-for-feature">GitOps for feature</h2>
-<p>Production feature looks different from development feature. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Acumatica
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring feature first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add acumatica on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with feature when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="the-cheaper-version-conditional-field-visibility">The cheaper version: conditional field or action visibility</h2>
+<p>Not every rollout needs a branching graph handler. If the change is "this new field or button shouldn't be visible to everyone yet," PXUIField's Visible property (or a PXDefault/PXUIField pair driven off the same setup field, or off a role check) is a poor-man's flag that costs a few lines. You're not toggling logic, just whether a control appears — useful when the risk is UI confusion rather than a behavior change that could corrupt data. I reach for this before I reach for a full setup-DAC-and-branch approach; it covers a surprising number of "not ready for everyone yet" requests on its own.</p>
+<h2 id="when-to-remove-the-flag">When to remove the flag</h2>
+<p>A flag that outlives its rollout is just dead conditional logic that the next developer has to reverse-engineer. Once a behavior has been on for every company or branch for a normal business cycle and nobody's asked to roll it back, delete the old code path, delete the flag field, and delete the setup screen control if nothing else uses it. The discipline isn't just adding the switch — it's taking it back out once the decision it was protecting has actually been made.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on acumatica feature flags implementation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Acumatica doesn't ship a feature flag system, and pretending otherwise just confuses the next developer who goes looking for one. What it does have is an all-or-nothing publish model, which is exactly why a flag is worth building yourself: a Usr-prefixed field on a setup DAC, checked by the graph extension before the new logic runs, scoped by CompanyID or branch if you need staged rollout across tenants. It turns "deployed" and "turned on" into two separate decisions you control instead of one publish click that commits you to both at once.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-customization-upgrade-survival-guide/">Acumatica Customization Upgrade Survival Guide</a></li>
@@ -190,7 +144,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

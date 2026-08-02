@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Webhook Retry Strategies — A Field Guide">
 <meta property="og:description" content="Webhook Retry Strategies — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/webhook-retry-strategies.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/webhook-retry-strategies/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="workflow">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,29 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Webhook", "type": "n8n-nodes-base.webhook"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Webhook"}]]}
-    }
-}</code></pre>
-</div>
-<h2 id="why-webhook-fails-at-3-am-and-what-to-do">Why webhook fails at 3 AM and what to do</h2>
-<p>In the work I have done on webhook retry strategies — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="ordering-and-sequencing-in-retry">Ordering and sequencing in retry</h2>
-<p>When the work moves from design to production, the questions change. The webhook is not the question; the failure mode of the retry is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleWebhook(event) {
-    try {
-        const result = await processRetry(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="the-runbook-for-webhook">The runbook for webhook</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        webhook: item.json.webhook,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>The performance of retry in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="what-webhook-retry-strategies-a-field-guide-is-for">What Webhook Retry Strategies — A Field Guide is for</h2>
-<p>Production retry looks different from development retry. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Webhook", "type": "n8n-nodes-base.webhook"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Webhook"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring retry first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add webhook on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with retry when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on webhook retry strategies — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
+
+<p><strong>Webhook Retry Strategies — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+
+<h2 id="scope">Define the boundary before choosing the tool</h2>
+<p>For this topic, the important boundary is a stable contract, explicit error semantics, idempotency, observability, and a deprecation path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+
+<h2 id="implementation">Build the smallest verifiable slice</h2>
+<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
+<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+
+<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+
+<h2 id="failure-modes">Design for the failure users actually see</h2>
+<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+
+<h2 id="review">Review the result with evidence</h2>
+<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+
+<h2 id="recommendation">Practical recommendation</h2>
+<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+
     <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
@@ -192,7 +126,6 @@ return items.map(item =&gt; ({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

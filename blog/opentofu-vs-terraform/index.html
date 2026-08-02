@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenTofu vs Terraform — A Comparison | John Kihiu</title>
-<meta name="description" content="OpenTofu vs Terraform — A Comparison is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="OpenTofu vs Terraform: the BSL license change that triggered the Linux Foundation fork, current compatibility, state file and provider registry differences, and why teams are or aren't migrating.">
 <meta name="keywords" content="Acumatica opentofu, Acumatica terraform, Acumatica iac, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/opentofu-vs-terraform/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="OpenTofu vs Terraform — A Comparison">
-<meta property="og:description" content="OpenTofu vs Terraform — A Comparison is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/opentofu-vs-terraform.svg">
+<meta property="og:description" content="OpenTofu vs Terraform: the BSL license change that triggered the Linux Foundation fork, current compatibility, state file and provider registry differences, and why teams are or aren't migrating.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/opentofu-vs-terraform/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="iac">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"OpenTofu vs Terraform — A Comparison","description":"OpenTofu vs Terraform — A Comparison is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/opentofu-vs-terraform.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/opentofu-vs-terraform/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"OpenTofu vs Terraform — A Comparison","description":"OpenTofu vs Terraform: the BSL license change that triggered the Linux Foundation fork, current compatibility, state file and provider registry differences, and why teams are or aren't migrating.","image":"https://kihiujohn.github.io/assets/og/opentofu-vs-terraform.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/opentofu-vs-terraform/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"OpenTofu vs Terraform — A Comparison","item":"https://kihiujohn.github.io/blog/opentofu-vs-terraform/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,48 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">OpenTofu vs Terraform — A Comparison</span></nav>
     <span class="tag">DevOps · Opentofu</span>
     <h1>OpenTofu vs Terraform — A Comparison</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">OpenTofu vs Terraform — A Comparison is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">OpenTofu vs Terraform: the BSL license change that triggered the Linux Foundation fork, current compatibility, state file and provider registry differences, and why teams are or aren't migrating.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="the-deployment-pipeline-for-opentofu">The deployment pipeline for opentofu</h2>
-<p>The deployment pipeline for opentofu is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Opentofu
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-terraform">SLOs and error budgets for terraform</h2>
-<p>In the work I have done on opentofu vs terraform — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="incident-response-for-opentofu">Incident response for opentofu</h2>
-<p>When the work moves from design to production, the questions change. The opentofu is not the question; the failure mode of the terraform is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "opentofu_terraform" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="what-opentofu-vs-terraform-a-comparison-gives-you">What OpenTofu vs Terraform — A Comparison gives you</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>In August 2023, HashiCorp switched Terraform's license from Mozilla Public License 2.0 to the Business Source License — a change aimed at stopping competitors from repackaging Terraform as a paid product, but one that also spooked a large chunk of the open-source infrastructure-as-code community. Within weeks, a group of vendors (Spacelift, Env0, Gruntwork, Harness, and others) forked the last MPL-licensed Terraform commit and donated it to the Linux Foundation as OpenTofu. Two years on, the practical question for most teams isn't ideological — it's whether OpenTofu is a safe drop-in replacement, and whether migrating is worth the churn.</p>
+<h2 id="what-actually-changed-with-the-license">What actually changed with the license</h2>
+<p>The BSL doesn't restrict most Terraform users at all — you can still use it freely for building and running your own infrastructure, internal tooling, or client work. What it restricts is building a competing product on top of it: a managed Terraform-as-a-service offering, for instance, now needs a commercial agreement with HashiCorp. That's a narrow restriction in practice, but it was enough to make foundations, some enterprises, and any project with strict open-source licensing policies (many can't depend on BSL code at all) want an alternative with no such carve-out. OpenTofu ships under MPL 2.0, the same license Terraform used before the switch, with no BUSL-style commercial restriction attached.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>The fork point matters for provenance, not for daily use</strong>
+  <p>OpenTofu started from Terraform's codebase as of the last MPL-licensed release, then diverged. For day-to-day work this is invisible — the CLI commands, HCL syntax, and module structure are the same. It matters mostly for compliance teams doing license audits, and for understanding why some newer Terraform-only features (anything shipped after the fork) aren't automatically in OpenTofu until its maintainers implement an equivalent.</p>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="compatibility-in-practice">Compatibility in practice</h2>
+<p>For the overwhelming majority of configurations, OpenTofu is a drop-in replacement — same HCL syntax, same provider plugin protocol, same core commands (<code>plan</code>, <code>apply</code>, <code>destroy</code>). Most teams migrate by installing the <code>tofu</code> binary, pointing their CI at it instead of <code>terraform</code>, and running <code>plan</code> to confirm zero unexpected diff. Where the two have started to diverge is newer language features — OpenTofu has shipped things Terraform doesn't have yet (like native support for iterating over provider configurations, and encrypted state as a first-class feature) while HashiCorp has continued adding its own Terraform-only features on the other side. Neither project is purely a subset of the other anymore; they're two codebases that started identical and are slowly accumulating independent capabilities.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: opentofu
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: opentofu
-  template:
-    metadata:
-      labels:
-        app: opentofu</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · SWAPPING THE BINARY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Most CI migrations are this simple for compatible configs
+- terraform init
+- terraform plan -out=tfplan
+- terraform apply tfplan
+
+# becomes
+- tofu init
+- tofu plan -out=tfplan
+- tofu apply tfplan
+
+# state files, .tfstate format, and the provider plugin protocol
+# are unchanged, so existing remote state backends keep working</code></pre>
 </div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The performance of terraform in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
+<h2 id="state-files-and-provider-registries">State files and provider registries</h2>
+<p>OpenTofu reads and writes the same state file format Terraform uses, so migrating an existing project doesn't require any state migration step — you point the new binary at the same backend (S3, Terraform Cloud-compatible backends, etc.) and it just works. The provider ecosystem is where things get more nuanced: OpenTofu can pull providers from the standard Terraform Registry, but it also runs its own registry mirror to guard against HashiCorp changing registry terms of service in a way that could lock out non-HashiCorp tooling in the future. In practice this is invisible unless a provider maintainer does something registry-specific; almost every provider that works with Terraform works with OpenTofu unchanged.</p>
+<div class="callout-warn callout">
+  <strong>Terraform Cloud/HCP-specific features don't carry over</strong>
+  <p>If your workflow depends on HashiCorp's hosted Terraform Cloud or Enterprise — remote runs, Sentinel policy checks, the HCP state backend's proprietary features — those aren't part of the open-source split and won't work identically with OpenTofu without finding an equivalent from another vendor (Spacelift, Env0, and others build OpenTofu-native alternatives). Migrating the CLI is easy; migrating an entire platform workflow built around HashiCorp's commercial products is a separate, larger decision.</p>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>Production terraform looks different from development terraform. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Opentofu
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring terraform first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add opentofu on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with terraform when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="why-teams-are-or-arent-migrating">Why teams are, or aren't, migrating</h2>
+<p>Teams migrating tend to cite the license risk directly — foundations, government-adjacent work, and companies with policies against BSL dependencies don't have much choice. Teams staying on Terraform tend to cite inertia and risk aversion more than any technical preference: existing CI pipelines work, existing state is fine where it is, and switching the tool underneath a production infrastructure codebase is a change with real (if small) risk for a benefit that, for most non-vendor teams, is mostly philosophical. Neither position requires the other to be wrong — this is one of the few tooling decisions where "wait and see what your peers do" is a defensible strategy, since compatibility has held up well enough that switching later remains cheap.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on opentofu vs terraform — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>OpenTofu exists because of a licensing decision, not a technical failing in Terraform — and for most configurations it remains close enough to a drop-in replacement that migrating is a low-risk, mostly symbolic move. The real decision points are whether your organization's licensing policy cares about BSL, and whether you depend on HashiCorp's commercial platform features that don't have an OpenTofu-ecosystem equivalent yet. Everything else — state format, HCL syntax, the bulk of the provider registry — has stayed compatible enough that this is a decision you can revisit later without much cost either way.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/terraform-1-9-new-features/">Terraform 1.9 New Features — A Complete Guide</a></li>
@@ -191,7 +138,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Next.js 15 Performance Tuning | John Kihiu</title>
-<meta name="description" content="Next.js 15 Performance Tuning is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta name="description" content="Practical performance work for Next.js 15: bundle analysis, image and font optimisation, Suspense streaming, experimental partial prerendering, and avoiding server-component fetch waterfalls.">
 <meta name="keywords" content="Acumatica nextjs, Acumatica performance, Acumatica optimisation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/nextjs-15-performance/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Next.js 15 Performance Tuning">
-<meta property="og:description" content="Next.js 15 Performance Tuning is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/nextjs-15-performance.svg">
+<meta property="og:description" content="Practical performance work for Next.js 15: bundle analysis, image and font optimisation, Suspense streaming, experimental partial prerendering, and avoiding server-component fetch waterfalls.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/nextjs-15-performance/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="optimisation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Performance Tuning","description":"Next.js 15 Performance Tuning is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-performance.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-performance/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Performance Tuning","description":"Practical performance work for Next.js 15: bundle analysis, image and font optimisation, Suspense streaming, experimental partial prerendering, and avoiding server-component fetch waterfalls.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-performance.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-performance/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Next.js 15 Performance Tuning","item":"https://kihiujohn.github.io/blog/nextjs-15-performance/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,65 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Next.js 15 Performance Tuning</span></nav>
     <span class="tag">Modern Web · Nextjs</span>
     <h1>Next.js 15 Performance Tuning</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Next.js 15 Performance Tuning is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Practical performance work for Next.js 15: bundle analysis, image and font optimisation, Suspense streaming, experimental partial prerendering, and avoiding server-component fetch waterfalls.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Modern web development on this settles into a small set of patterns after the first few projects. The framework matters less than the discipline; the discipline is what makes the framework useful. The pattern that survives 18 months in production is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM.</p>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>Implementation: a working example is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most Next.js performance problems I've debugged aren't framework problems — they're a fetch waterfall hiding behind a Server Component, or an image that never got the <code>next/image</code> treatment. Next.js gives you real tools for all of this; the work is knowing which one to reach for and how to see the problem before you guess at a fix.</p>
+<h2 id="bundle-analysis-first">Start with bundle analysis, not intuition</h2>
+<p><code>@next/bundle-analyzer</code> wraps your Next config and produces a treemap of what's actually in your client JS bundles after tree-shaking. It routinely surfaces the same offenders: a full moment.js or lodash import where three functions were needed, a chart library pulled into a page that only renders it behind a modal, or a client component boundary drawn so high that server-only code got bundled for the client. Run it before optimizing anything — guessing which dependency is heavy is a bad use of time next to just looking.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
+  <div class="code-header"><span class="code-lang">TS · next.config.ts</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import bundleAnalyzer from '@next/bundle-analyzer';
+
+const withAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+});
+
+export default withAnalyzer({
+  // ...rest of your Next.js config
 });</code></pre>
 </div>
-<h2 id="how-it-integrates-with-the-rest-of-the-stack">How it integrates with the rest of the stack</h2>
-<p>In the work I have done on next.js 15 performance tuning, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
+<h2 id="images-and-fonts">Image and font optimization are close to free</h2>
+<p><code>next/image</code> handles resizing, format conversion to WebP/AVIF, and lazy-loading below the fold automatically — the main mistake is not setting explicit <code>width</code>/<code>height</code> (or using <code>fill</code> with a sized parent), which is what causes layout shift even through the optimized component. <code>next/font</code> self-hosts Google Fonts at build time and injects the correct <code>font-display</code> and preload hints, which avoids both a render-blocking request to Google's CDN and the FOUT/FOIT flash — this alone is usually worth more to Core Web Vitals than most JavaScript-level tuning, because font loading is one of the more common causes of Cumulative Layout Shift on content-heavy pages.</p>
+<div class="callout">
+  <strong>Set sizes on next/image</strong>
+  <p>Without a <code>sizes</code> attribute matching your actual responsive layout, the browser may download a larger image variant than it renders. Match <code>sizes</code> to your CSS breakpoints, not just the largest possible display width.</p>
 </div>
-<h2 id="performance-bundle-size-runtime-and-accessibility">Performance: bundle size, runtime, and accessibility</h2>
-<p>When the work moves from design to production, the questions change. The next is not the question; the failure mode of the performance is.</p>
+<h2 id="streaming-with-suspense">Streaming with Suspense turns one slow query into a fast page</h2>
+<p>Wrapping a slow data-dependent section in <code>&lt;Suspense&gt;</code> with a <code>loading.tsx</code> or inline fallback lets Next.js stream the rest of the page to the browser immediately and fill in the slow part when it resolves, rather than blocking the entire response on the slowest query. This is the single highest-leverage change for a page with one slow widget dragging down an otherwise-fast page — instead of the whole route waiting on a 2-second analytics query, the shell, nav, and fast content paint immediately and the analytics panel streams in after.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useNext(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">TSX · app/dashboard/page.tsx</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { Suspense } from 'react';
+import { SlowAnalyticsPanel } from './analytics-panel';
+import { FastSummary } from './fast-summary';
+
+export default function DashboardPage() {
+  return (
+    &lt;&gt;
+      &lt;FastSummary /&gt;
+      &lt;Suspense fallback={&lt;PanelSkeleton /&gt;}&gt;
+        {/* Streams in once its own data fetch resolves */}
+        &lt;SlowAnalyticsPanel /&gt;
+      &lt;/Suspense&gt;
+    &lt;/&gt;
+  );
 }</code></pre>
 </div>
-<h2 id="common-pitfalls-when-adopting-next">Common pitfalls when adopting next</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
+<h2 id="avoiding-server-component-waterfalls">Avoiding fetch waterfalls inside server components</h2>
+<p>The subtle trap is <code>await</code>-ing sequential, independent fetches inside a Server Component — each one blocks the next even when they don't depend on each other. If a page needs a user, their orders, and a product catalog, and none of those depend on each other's result, kick them off together with <code>Promise.all</code> rather than awaiting them one at a time. This is easy to introduce accidentally when a component tree calls its own data-fetching function per component instead of at the top and passing props down, since each nested component's <code>await</code> only starts once its parent has already finished rendering.</p>
+<div class="callout-warn callout">
+  <strong>Nested async components serialize by default</strong>
+  <p>If component A awaits its own data, then renders component B which awaits its own data, B's fetch doesn't start until A finishes. Lift independent fetches to a common ancestor and run them concurrently, or pass already-resolved data down as props.</p>
 </div>
-<h2 id="migration-path-from-the-old-approach">Migration path from the old approach</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
-</div>
-<h2 id="how-performance-interacts-with-server-components">How performance interacts with server components</h2>
-<p>The performance of performance in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
-</div>
-<h2 id="typescript-patterns-for-next">TypeScript patterns for next</h2>
-<p>Production performance looks different from development performance. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring performance first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add next on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with performance when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="partial-prerendering">Partial prerendering (experimental)</h2>
+<p>Partial Prerendering lets a single route serve a static shell instantly from the CDN while dynamic, personalized segments stream in behind Suspense boundaries — combining the speed of static generation with per-user dynamic content, without you having to choose one rendering mode for the whole route. It's still experimental in the 15.x line and needs an explicit flag to enable, so it's worth prototyping on a non-critical route before betting a whole app's rendering strategy on it, but it's the clearest signal of where App Router rendering is heading.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on next.js 15 performance tuning. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The performance wins that actually move the needle are unglamorous in order: measure the bundle before touching code, let <code>next/image</code> and <code>next/font</code> do the media optimization they're built for, stream slow sections behind Suspense instead of blocking the whole page, and audit your Server Components for sequential awaits that should be concurrent. Partial prerendering is worth watching, but it's additive to that list, not a replacement for doing the basics first.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/nextjs-15-caching/">Next.js 15 Caching Strategies</a></li>
@@ -178,7 +155,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

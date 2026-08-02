@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL Federation — A Field Guide">
 <meta property="og:description" content="GraphQL Federation — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-federation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-federation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,76 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The API landscape in 2026 is more capable than it was in 2020. REST, GraphQL, gRPC, webhooks. this is one of the parts of the modern API. This article is the part.</p>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>Security: auth, authz, rate limiting is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Federation exists because a single GraphQL schema eventually outgrows a single team. Once you have a catalog service, an orders service, and a reviews service each wanting to expose <code>Product</code> fields, you either force one team to own the whole schema on everyone else's behalf, or you let each team publish its own slice and compose them into one graph at request time. That composition, done properly rather than as a client-side hack, is what Apollo Federation provides.</p>
+
+<h2 id="subgraphs-and-schema-ownership">Subgraphs and schema ownership</h2>
+<p>A federated graph is made of <strong>subgraphs</strong> — ordinary GraphQL servers, each with its own schema, resolvers, and deployment lifecycle. The catalog subgraph might own <code>Product</code>'s name and price; the reviews subgraph might contribute a <code>reviews</code> field on that same <code>Product</code> type without owning the type itself. No subgraph needs to know about the others' internals. What it needs to agree on is which type it can extend and how to identify an instance of a type it doesn't fully own.</p>
+
+<h2 id="the-key-directive-and-entities">The @key directive and entities</h2>
+<p>A type that multiple subgraphs need to reference is called an <strong>entity</strong>, and it's marked with the <code>@key</code> directive naming the field(s) that uniquely identify it:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">GRAPHQL · SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Catalog subgraph — owns the base type
+type Product @key(fields: "id") {
+  id: ID!
+  name: String!
+  price: Int!
+}
+
+# Reviews subgraph — extends the entity with a new field
+type Product @key(fields: "id") {
+  id: ID!
+  reviews: [Review!]!
+}
+
+type Review {
+  id: ID!
+  body: String!
+  rating: Int!
+}</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on graphql federation — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="why-graphql-is-not-rest-anymore">Why graphql is not REST anymore</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the federation is.</p>
+<p>In Federation 1 this required an explicit <code>extend type Product</code> plus <code>@external</code> on the borrowed <code>id</code> field. Federation 2 relaxed that: any subgraph can declare the same <code>@key</code> on a type and contribute fields to it without the <code>extend</code>/<code>@external</code> ceremony, as long as the composition step can reconcile the pieces.</p>
+
+<h2 id="reference-resolvers">Resolving entity references</h2>
+<p>When the gateway needs to attach reviews to a product that the catalog subgraph already resolved, it doesn't refetch the whole object — it asks the reviews subgraph to resolve its fields given just the entity's key. Each subgraph that contributes to an entity it doesn't own implements a reference resolver, commonly named <code>__resolveReference</code>:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="idempotency-in-federation">Idempotency in federation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="contract-testing-for-graphql">Contract testing for graphql</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    federation: string;
-    createdAt: Date;
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · RESOLVER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const resolvers = {
+  Product: {
+    __resolveReference(reference, context) {
+      // reference = { __typename: "Product", id: "42" }
+      return { id: reference.id };
+    },
+    reviews(product, args, context) {
+      return context.reviewsLoader.loadForProduct(product.id);
+    },
+  },
 };</code></pre>
 </div>
-<h2 id="observability-tracing-federation">Observability: tracing federation</h2>
-<p>The performance of federation in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
+<p>The gateway supplies a "representation" — essentially just the <code>__typename</code> and key fields — and the subgraph's job is to turn that representation into whatever it needs to resolve its own fields. This is the mechanism that lets a query touching five subgraphs execute as a small number of targeted requests instead of the gateway guessing at REST endpoints.</p>
+
+<h2 id="gateway-composition-and-query-planning">The gateway, composition, and query planning</h2>
+<p>The gateway (or router, in Apollo's newer Rust-based implementation) doesn't proxy requests blindly. At startup — or, in managed federation, on every schema publish — it fetches each subgraph's schema and runs <strong>composition</strong>: merging the subgraph schemas into one supergraph schema, validating that <code>@key</code> fields line up and that no two subgraphs define the same field on a type in a conflicting way. Composition failures are caught in CI, before a bad subgraph deploy reaches production.</p>
+<p>At request time, the gateway builds a <strong>query plan</strong>: given the incoming operation, it decides which subgraphs must be called, in what order, and how to stitch the responses back into the shape the client asked for. A query that spans <code>Product</code>, <code>reviews</code>, and <code>inventory</code> might plan out as one call to catalog, followed by parallel calls to reviews and inventory using the product IDs returned from the first call.</p>
 <div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
+  <strong>Composition is a build-time gate, not a runtime surprise</strong>
+  <p>Most federation setups run <code>rover subgraph check</code> (or the equivalent) in CI against the current supergraph before a subgraph schema change merges. That's what catches a renamed field or a conflicting <code>@key</code> before it breaks query planning for everyone else's queries.</p>
 </div>
-<h2 id="sdk-generation-for-graphql">SDK generation for graphql</h2>
-<p>Production federation looks different from development federation. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+
+<h2 id="federation-vs-schema-stitching">How this differs from schema stitching</h2>
+<p>Schema stitching — the older approach — merges independently-designed schemas at the gateway using ad hoc delegation logic, usually written by whoever owns the gateway. There's no formal concept of entity ownership: if two schemas both define a <code>Product</code> type, reconciling them is manual, gateway-side code, and it tends to become a bottleneck the gateway team has to maintain for every other team's types. Federation inverts that: ownership of a type's fields is declared by each subgraph via <code>@key</code> and field placement, composition is a mechanical, checkable step rather than hand-written glue, and query planning is generated rather than hardcoded. The trade-off is that federation requires everyone to adopt its directives and constraints, whereas stitching can bolt together schemas that were never designed to be composed.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring federation first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with federation when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Aspect</th><th>Schema stitching</th><th>Apollo Federation</th></tr>
+  <tr><td>Entity ownership</td><td>Implicit, resolved by gateway code</td><td>Explicit via <code>@key</code></td></tr>
+  <tr><td>Composition</td><td>Manual merge logic</td><td>Automated, checked in CI</td></tr>
+  <tr><td>Cross-service fields</td><td>Custom delegation resolvers</td><td>Reference resolvers per subgraph</td></tr>
+  <tr><td>Query execution</td><td>Gateway-authored</td><td>Generated query plan</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql federation — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<p>Federation isn't free — you're running a gateway, a composition step, and a contract between subgraph teams that has to hold under change. It earns its cost when several teams genuinely need to contribute fields to the same conceptual entities. If only one team owns the whole domain, a single non-federated GraphQL server is simpler and does the same job.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/graphql-federation-vs-bff/">GraphQL Federation vs BFF</a></li>
@@ -181,7 +172,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

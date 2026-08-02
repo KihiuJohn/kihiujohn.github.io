@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kubernetes Cost Optimisation — A Field Guide | John Kihiu</title>
-<meta name="description" content="Kubernetes Cost Optimisation — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
+<meta name="description" content="Why overprovisioned CPU and memory requests, not limits, are the biggest silent driver of Kubernetes spend, and how right-sizing, bin-packing, spot capacity, and cleanup actually bring the bill down.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica cost, Acumatica optimisation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-cost-optimisation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kubernetes Cost Optimisation — A Field Guide">
-<meta property="og:description" content="Kubernetes Cost Optimisation — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-cost-optimisation.svg">
+<meta property="og:description" content="Why overprovisioned CPU and memory requests, not limits, are the biggest silent driver of Kubernetes spend, and how right-sizing, bin-packing, spot capacity, and cleanup actually bring the bill down.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-cost-optimisation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="optimisation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Cost Optimisation — A Field Guide","description":"Kubernetes Cost Optimisation — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.","image":"https://kihiujohn.github.io/assets/og/kubernetes-cost-optimisation.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-cost-optimisation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Cost Optimisation — A Field Guide","description":"Why overprovisioned CPU and memory requests, not limits, are the biggest silent driver of Kubernetes spend, and how right-sizing, bin-packing, spot capacity, and cleanup actually bring the bill down.","image":"https://kihiujohn.github.io/assets/og/kubernetes-cost-optimisation.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-cost-optimisation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kubernetes Cost Optimisation — A Field Guide","item":"https://kihiujohn.github.io/blog/kubernetes-cost-optimisation/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,86 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kubernetes Cost Optimisation — A Field Guide</span></nav>
     <span class="tag">DevOps · Kubernetes</span>
     <h1>Kubernetes Cost Optimisation — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kubernetes Cost Optimisation — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Why overprovisioned CPU and memory requests, not limits, are the biggest silent driver of Kubernetes spend, and how right-sizing, bin-packing, spot capacity, and cleanup actually bring the bill down.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="why-kubernetes-is-the-on-call-s-best-friend">Why kubernetes is the on-call's best friend</h2>
-<p>Why kubernetes is the on-call's best friend is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="gitops-for-cost">GitOps for cost</h2>
-<p>In the work I have done on kubernetes cost optimisation — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-deployment-pipeline-for-kubernetes">The deployment pipeline for kubernetes</h2>
-<p>When the work moves from design to production, the questions change. The kubernetes is not the question; the failure mode of the cost is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "kubernetes_cost" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-cost">SLOs and error budgets for cost</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Why overprovisioned CPU and memory requests, not limits, are the biggest silent driver of Kubernetes spend, and how right-sizing, bin-packing, spot capacity, and cleanup actually bring the bill down. Every cluster I've inherited had the same story: requests set once at launch by copy-pasting a number that felt safe, never revisited, multiplied across dozens of deployments and every replica. Nobody notices because nothing breaks — the cluster just quietly reserves capacity nobody uses, and the invoice reflects it.</p>
+<h2 id="requests-drive-cost-limits-drive-throttling">Requests drive cost, limits drive throttling</h2>
+<p>This is the distinction most teams get backwards. A pod's <code>resources.requests</code> is what the scheduler reserves on a node and what your cloud bill is actually shaped around — it's the number that determines how many pods fit per node and how many nodes you need. <code>resources.limits</code> only matters once the pod is running: exceed the CPU limit and you get throttled, exceed the memory limit and you get OOMKilled. A pod can run for months without ever touching its limits while its oversized requests sit there reserving capacity nobody uses, 24 hours a day, whether traffic is at 2am-quiet or peak. Overprovisioned requests are the single biggest silent cost driver in most clusters, and they're invisible unless you go looking, because nothing alerts on "this pod reserved 4x what it needs."</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Where to look first</strong>
+  <p>Compare actual usage (from metrics-server or a Prometheus histogram over 2-4 weeks, covering peak) against configured requests per workload. Anything reserving 3-5x its p95 usage is a candidate for right-sizing before you touch anything else — node count, autoscaler tuning, spot instances — because it's usually the largest single lever.</p>
 </div>
-<h2 id="incident-response-for-kubernetes">Incident response for kubernetes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="right-sizing-with-historical-data-and-vpa">Right-sizing with historical data or VPA</h2>
+<p>The safest way to right-size is to pull actual CPU and memory usage over a real window — at least a couple of weeks, ideally including a traffic peak — and set requests close to observed p90-p95 usage rather than a guessed ceiling. The Vertical Pod Autoscaler can do this analysis for you if you run it in recommendation-only mode (<code>updateMode: "Off"</code>): it watches usage and produces a suggested request/limit, but doesn't evict or restart anything, which makes it safe to run everywhere as a signal rather than an active controller. I treat VPA recommendations as a starting point to review, not something to wire up in <code>Auto</code> mode blindly — a workload with a genuine, occasional spike will get a recommendation based on its quiet periods if you don't account for the spike deliberately.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">YAML · vpa-recommender.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
 metadata:
-  name: kubernetes
+  name: checkout-api-vpa
+  namespace: payments
 spec:
-  replicas: 3
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout-api
+  updatePolicy:
+    updateMode: "Off"      # recommendation only, no evictions
+  resourcePolicy:
+    containerPolicies:
+      - containerName: '*'
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 2
+          memory: 2Gi</code></pre>
+</div>
+<h2 id="bin-packing-fewer-larger-nodes">Bin-packing: fewer, larger nodes beat many small ones</h2>
+<p>Every node has fixed overhead — the kubelet, the CNI, system daemonsets, and a reserved slice of CPU/memory that's never schedulable. Ten small nodes carry that overhead ten times; two large nodes carry it twice. Beyond the raw overhead, small nodes fragment capacity: a node with 500m CPU free is useless to a pod that requests 750m, even though the cluster as a whole has plenty of room. Consolidating onto fewer, larger nodes — combined with pod topology spread constraints or node affinity so you don't sacrifice availability by putting all replicas on one physical node — typically recovers a meaningful chunk of "wasted" capacity that bin-packing math alone was losing to fragmentation. Cluster Autoscaler and Karpenter both bin-pack more effectively when the node pool isn't artificially constrained to one small instance size.</p>
+<h2 id="spot-capacity-for-fault-tolerant-workloads">Spot and preemptible capacity for fault-tolerant workloads</h2>
+<p>Stateless, horizontally-scaled, fault-tolerant workloads — batch jobs, CI runners, async workers, most stateless HTTP services behind a load balancer — are good candidates for spot or preemptible instances, which run at a steep discount in exchange for the cloud provider being able to reclaim them with short notice. The two things that make this safe rather than a pager-duty generator are a PodDisruptionBudget that caps how many replicas can be down at once, and an autoscaler (Karpenter or Cluster Autoscaler) that reacts fast enough to replace reclaimed capacity before the PDB gets violated. Anything stateful, anything with a single replica, or anything where a 30-second interruption notice isn't enough runway does not belong on spot.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · pdb-and-toleration.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-pdb
+spec:
+  minAvailable: 60%
   selector:
     matchLabels:
-      app: kubernetes
+      app: async-worker
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: async-worker
+spec:
   template:
-    metadata:
-      labels:
-        app: kubernetes</code></pre>
+    spec:
+      tolerations:
+        - key: "karpenter.sh/capacity-type"
+          operator: "Equal"
+          value: "spot"
+          effect: "NoSchedule"
+      nodeSelector:
+        karpenter.sh/capacity-type: spot</code></pre>
 </div>
-<h2 id="what-kubernetes-cost-optimisation-a-field-guide-gives-you">What Kubernetes Cost Optimisation — A Field Guide gives you</h2>
-<p>The performance of cost in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
+<div class="callout callout-warn">
+  <strong>Don't put stateful workloads on spot without a plan</strong>
+  <p>A database, a message queue leader, or anything holding local disk state that isn't replicated will not tolerate a 30-second eviction notice gracefully. If you want the spot discount for these, it has to come with a real failover story — not a hope that the reclaim never happens during a bad week.</p>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>Production cost looks different from development cost. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Kubernetes
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring cost first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kubernetes on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with cost when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="cleaning-up-what-nobody-is-watching">Cleaning up what nobody is watching</h2>
+<p>Past the scheduling math, the other reliable source of waste is things that were spun up for a project that ended and never got torn down: idle namespaces from a proof-of-concept six months ago, orphaned PersistentVolumeClaims left behind after a StatefulSet was deleted but its PVCs weren't, and LoadBalancer-type Services that provisioned a cloud load balancer nobody's pointed DNS at anymore. None of these show up in CPU/memory dashboards because they're not compute-bound costs — they're forgotten storage and forgotten cloud LB line items that accumulate quietly. A periodic `kubectl get pvc --all-namespaces` cross-referenced against active StatefulSets, and a look at your cloud provider's load balancer list against your cluster's actual Service objects, catches most of it.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kubernetes cost optimisation — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Cost optimization in Kubernetes isn't mainly about picking cheaper instance types — it's about closing the gap between what you've asked the scheduler to reserve and what your workloads actually use. Requests drive that reservation and the bill; limits only govern what happens once a pod is already running. Right-size requests from real usage data first, bin-pack onto fewer larger nodes second, move genuinely fault-tolerant workloads to spot capacity third, and sweep for orphaned PVCs and unused load balancers on a schedule. In that order, because the first one is usually where most of the money actually is.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/aws-cost-optimisation/">AWS Cost Optimisation — A Field Guide</a></li>
@@ -191,7 +176,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

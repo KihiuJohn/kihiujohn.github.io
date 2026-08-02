@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PHP 8 JIT Compiler — A Field Guide | John Kihiu</title>
-<meta name="description" content="PHP 8 JIT Compiler — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="PHP 8's JIT compiler explained: tracing vs function JIT, why it barely moves the needle for I/O-bound web requests, and where it actually pays off in CPU-bound numeric code.">
 <meta name="keywords" content="Acumatica php, Acumatica jit, Acumatica performance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/php-8-jit-compiler/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PHP 8 JIT Compiler — A Field Guide">
-<meta property="og:description" content="PHP 8 JIT Compiler — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/php-8-jit-compiler.svg">
+<meta property="og:description" content="PHP 8's JIT compiler explained: tracing vs function JIT, why it barely moves the needle for I/O-bound web requests, and where it actually pays off in CPU-bound numeric code.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/php-8-jit-compiler/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="performance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP 8 JIT Compiler — A Field Guide","description":"PHP 8 JIT Compiler — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/php-8-jit-compiler.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-8-jit-compiler/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP 8 JIT Compiler — A Field Guide","description":"PHP 8's JIT compiler explained: tracing vs function JIT, why it barely moves the needle for I/O-bound web requests, and where it actually pays off in CPU-bound numeric code.","image":"https://kihiujohn.github.io/assets/og/php-8-jit-compiler.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-8-jit-compiler/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PHP 8 JIT Compiler — A Field Guide","item":"https://kihiujohn.github.io/blog/php-8-jit-compiler/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,46 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PHP 8 JIT Compiler — A Field Guide</span></nav>
     <span class="tag">Laravel · Php</span>
     <h1>PHP 8 JIT Compiler — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PHP 8 JIT Compiler — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PHP 8's JIT compiler explained: tracing vs function JIT, why it barely moves the needle for I/O-bound web requests, and where it actually pays off in CPU-bound numeric code.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Laravel developers working on this eventually converge on a small set of conventions that don't show up in the framework docs. The convention is to do the boring thing first and reach for the framework's built-ins before adding a dependency. The pattern that survives 18 months in production is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM.</p>
-<h2 id="where-it-fits-in-the-laravel-request-lifecycle">Where it fits in the Laravel request lifecycle</h2>
-<p>Where it fits in the Laravel request lifecycle is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>PHP 8.0 shipped with a JIT compiler and, in the years since, I've seen the same pattern play out on almost every project that turned it on expecting a free win: nothing measurable happens. That's not a bug or a disappointing implementation — it's a direct consequence of what a typical Laravel request actually spends its time doing, which is not the kind of work a JIT accelerates. Understanding why is more useful than the opcache.jit config flags themselves.</p>
+<h2 id="tracing-vs-function-jit">Tracing JIT vs function JIT</h2>
+<p>PHP's JIT operates in one of two modes. Function JIT compiles an entire function to machine code the first time it's called, on the bet that the whole function is worth compiling. Tracing JIT — the default and the one almost everyone means when they say "PHP JIT" — instead watches opcache execute the bytecode, identifies hot loops and hot paths through actual execution, and compiles only those traced paths to machine code, with guards that fall back to the interpreter if execution takes an untraced branch. Tracing JIT wins on typical numeric hot loops because it specializes for the types and branches actually taken, not every possible path through the function.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class PhpController extends Controller
-{
-    public function store(JitRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return php::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">INI · OPCACHE.JIT CONFIG</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>; php.ini — JIT requires opcache to be enabled first
+opcache.enable=1
+opcache.enable_cli=1
+opcache.jit_buffer_size=100M
+
+; opcache.jit is a 4-digit code: CRTO
+;   C = CPU-specific optimization level (0-5)
+;   R = register allocation (0=none, 1=local, 2=global)
+;   T = trigger (0=disabled, 1=always, 4=hot function+loop tracing)
+;   O = optimization level (0-5)
+opcache.jit=1254   ; the commonly recommended tracing JIT default</code></pre>
 </div>
-<h2 id="implementation-with-a-clean-laravel-pattern">Implementation with a clean Laravel pattern</h2>
-<p>In the work I have done on php 8 jit compiler — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Setting <code>opcache.jit_buffer_size</code> to <code>0</code> disables JIT entirely regardless of the <code>opcache.jit</code> value — that's the actual on/off switch, and it's a common source of "I set opcache.jit but nothing changed" confusion.</p>
+<h2 id="why-web-requests-barely-move">Why a typical web request barely moves</h2>
+<p>A Laravel request spends its time doing things the JIT has no leverage over: querying a database over a network socket, waiting on Redis, serializing a response, running framework bootstrap code that executes each opcode once per request rather than in a hot loop. Tracing JIT needs a loop or a function to run enough times, within the same request or worker process, to be identified as hot and get compiled — and PHP-FPM's typical shared-nothing, process-per-request model recycles or restarts workers, so the JIT's compiled traces often don't get the chance to pay off before the process cycles. Opcache itself — caching parsed bytecode so PHP doesn't re-parse and re-compile source on every request — already captured the biggest, cheapest performance win for web workloads years before JIT existed; JIT is compiling that already-cached bytecode further, into native machine code, which only matters if the bytecode itself is the bottleneck.</p>
 <div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
+  <strong>Benchmarks showing 3x wins are usually numeric microbenchmarks</strong>
+  <p>The demo numbers that circulated when JIT shipped — Mandelbrot generation, ray tracing, tight numeric loops — are real, but they're not representative of a Laravel app's request path. If you benchmark JIT against your own app and see single-digit percent or no change, that's the expected outcome, not a misconfiguration.</p>
 </div>
-<h2 id="testing-the-edge-cases">Testing the edge cases</h2>
-<p>When the work moves from design to production, the questions change. The php is not the question; the failure mode of the jit is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('phps', PhpController::class);
-});</code></pre>
-</div>
-<h2 id="performance-considerations-on-production-hardware">Performance considerations on production hardware</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="where-jit-does-help">Where JIT actually helps</h2>
+<p>The wins show up in CPU-bound code with tight loops over primitive types: image processing, encryption/hashing-heavy code, math-heavy data transformation, or long-running scripts (a CLI import job, a queue worker processing thousands of records with the same code path repeatedly) where the same function executes enough times within one process for tracing to kick in and the compiled trace to be reused. If your bottleneck profile shows CPU time in PHP userland code rather than time waiting on I/O, JIT is worth measuring. If a profiler shows most of your request time in database queries or external HTTP calls, JIT changes nothing about that.</p>
 <div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
+  <strong>Measure before you touch config</strong>
+  <p>Enable JIT, benchmark the actual endpoints or jobs you care about with something like <code>ab</code>, <code>wrk</code>, or a proper load test, and compare against the same test with JIT off. Don't trust a synthetic benchmark from someone else's workload to tell you what will happen to yours.</p>
 </div>
-<h2 id="what-to-avoid-in-2026">What to avoid in 2026</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (PhpJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
-</div>
-<h2 id="alternatives-and-when-to-reach-for-them">Alternatives and when to reach for them</h2>
-<p>The performance of jit in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="why-php-matters-for-a-laravel-codebase">Why php matters for a Laravel codebase</h2>
-<p>Production jit looks different from development jit. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class PhpController extends Controller
-{
-    public function store(JitRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return php::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring jit first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add php on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with jit when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on php 8 jit compiler — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The JIT compiler is a real feature with real wins, just not for the workload most PHP web apps run. Opcache already solved the expensive part of PHP's request lifecycle — re-parsing source on every request — years before JIT arrived, which leaves JIT to compile already-fast bytecode into native code for workloads that are actually CPU-bound in tight loops. Turn it on if you're running numeric or CPU-heavy PHP, benchmark it if you're curious about a typical Laravel app, and don't expect it to fix a request path that's slow because of a database query.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
@@ -185,7 +136,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Terraform State Management — A Field Guide | John Kihiu</title>
-<meta name="description" content="Terraform State Management — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="Terraform's state file is the single source of truth for what it thinks exists — get the backend, locking, and import story wrong and you get corrupted state or infrastructure Terraform can't see.">
 <meta name="keywords" content="Acumatica terraform, Acumatica state, Acumatica iac, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/terraform-state-management/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Terraform State Management — A Field Guide">
-<meta property="og:description" content="Terraform State Management — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/terraform-state-management.svg">
+<meta property="og:description" content="Terraform's state file is the single source of truth for what it thinks exists — get the backend, locking, and import story wrong and you get corrupted state or infrastructure Terraform can't see.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/terraform-state-management/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="iac">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Terraform State Management — A Field Guide","description":"Terraform State Management — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/terraform-state-management.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/terraform-state-management/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Terraform State Management — A Field Guide","description":"Terraform's state file is the single source of truth for what it thinks exists — get the backend, locking, and import story wrong and you get corrupted state or infrastructure Terraform can't see.","image":"https://kihiujohn.github.io/assets/og/terraform-state-management.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/terraform-state-management/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Terraform State Management — A Field Guide","item":"https://kihiujohn.github.io/blog/terraform-state-management/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,61 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Terraform State Management — A Field Guide</span></nav>
     <span class="tag">DevOps · Terraform</span>
     <h1>Terraform State Management — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Terraform State Management — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Terraform's state file is the single source of truth for what it thinks exists — get the backend, locking, and import story wrong and you get corrupted state or infrastructure Terraform can't see.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>DevOps is mostly about how to handle the cases that don't show up in the happy path. this is the pattern that handles them. The pattern that works is to push the system towards being observable, with a runbook for the failure modes that the dashboards don't cover.</p>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The CI/CD pipeline integration is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Terraform
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>In the work I have done on terraform state management — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>When the work moves from design to production, the questions change. The terraform is not the question; the failure mode of the state is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "terraform_state" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
+    <p>Terraform's state file is not an implementation detail — it's the only record Terraform has of what it thinks exists and how your configuration maps to real resource IDs. Every plan, every apply, every destroy reads that file first. Lose it, corrupt it, or let two people write to it at once, and Terraform stops being able to tell you the truth about your infrastructure. Most of the pain I've seen with Terraform in teams has nothing to do with HCL syntax — it's state management done carelessly.</p>
+<h2 id="remote-backends">Why local state doesn't survive contact with a team</h2>
+<p>The default backend is local: a <code>terraform.tfstate</code> file sitting next to your <code>.tf</code> files. That's fine solo, and it falls apart the moment a second person runs <code>apply</code>. Nobody has the latest state, there's no locking, and the file itself often contains secrets in plaintext (database passwords, private keys) that now live in whoever's home directory happened to run Terraform last. A remote backend fixes all three problems: the state lives in one shared location, Terraform can lock it during an operation, and you can restrict who can read it.</p>
+<p>The most common setup is an S3 bucket for storage paired with a DynamoDB table for locking. Terraform writes the state to S3 and, before any operation that touches it, takes out a lock row in DynamoDB. If someone else's <code>apply</code> is already running, yours waits or fails cleanly instead of racing it.</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">HCL</span><button class="copy-btn" type="button">Copy</button></div><pre><code>terraform {
+  backend "s3" {
+    bucket         = "acme-terraform-state"
+    key            = "prod/networking/terraform.tfstate"
+    region         = "eu-west-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
   }
-}</code></pre>
+}</code></pre></div>
+<p>The alternative worth knowing is Terraform Cloud or HCP Terraform, which gives you remote state, locking, and a run history with no DynamoDB table to manage yourself. For a small team already paying for HCP Terraform's remote execution, it's less infrastructure to babysit than rolling your own S3+DynamoDB backend. For everyone else already on AWS, S3 and DynamoDB are two resources you likely already know how to operate, and they cost close to nothing.</p>
+<h2 id="state-locking">What locking actually prevents</h2>
+<p>State locking exists for one reason: two concurrent applies writing to the same state file will corrupt it. Terraform's plan/apply cycle reads the state, computes a diff against your config and the real infrastructure, then writes a new state back. If a second process reads the same "before" state while the first is still applying, both processes compute plans against a state that's about to be stale, and whichever one writes last wins — silently discarding the other's changes, or worse, writing a state file that no longer matches reality at all.</p>
+<p>With DynamoDB-backed locking, the lock is just a conditional write to a row keyed by the state file's path. Terraform acquires it before reading state and releases it after writing. If you've ever seen <code>Error acquiring the state lock</code>, that's the mechanism working correctly, not a bug — it means another run genuinely holds the lock.</p>
+<div class="callout-warn callout">
+  <strong>Do not hand-edit the state file, and do not force-unlock casually</strong>
+  <p>The state file is JSON, so it's tempting to open it and fix something by hand. Don't — a single misplaced resource address or dependency edge desyncs Terraform's model from reality in a way that's hard to diagnose later. Use <code>terraform state mv</code>, <code>terraform state rm</code>, or the <code>import</code> block instead. Similarly, <code>terraform force-unlock</code> is for the case where a run genuinely crashed and left a stale lock behind — running it because your apply "seems stuck" while another process is legitimately mid-apply will let two applies race each other and corrupt the state.</p>
 </div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="importing-existing-infrastructure">Bringing existing infrastructure under management</h2>
+<p>Not everything starts life in Terraform. You inherit resources someone clicked into existence in the console, or you're incrementally migrating a stack one resource at a time. <code>terraform import</code> has long been the way to tell Terraform "this resource exists, here's its ID, add it to state" — but it only touches state, not your <code>.tf</code> files, so you still have to hand-write a matching resource block and hope the attributes line up.</p>
+<p>The newer <code>import</code> block, added in Terraform 1.5, is a better fit for anything beyond a one-off: it's declarative, goes in your regular configuration, and shows up in <code>terraform plan</code> as an explicit import action you can review before it happens, the same as any other change.</p>
+<div class="code-block"><div class="code-header"><span class="code-lang">HCL</span><button class="copy-btn" type="button">Copy</button></div><pre><code>import {
+  to = aws_security_group.app
+  id = "sg-0abc123456789def0"
+}
+
+resource "aws_security_group" "app" {
+  name        = "app-sg"
+  description = "Security group for the app tier"
+  vpc_id      = var.vpc_id
+}</code></pre></div>
+<p>Run <code>terraform plan -generate-config-out=generated.tf</code> alongside an import block and Terraform will write a best-effort resource block for you, which saves the tedious part of matching every attribute by hand. Always review the generated config — it's a starting point, not something to apply blind.</p>
+<h2 id="splitting-state">Splitting state to limit blast radius</h2>
+<p>A single root module with one state file for an entire environment is the easiest way to end up terrified of running <code>terraform apply</code>. If your VPC, your RDS instance, and your Kubernetes cluster all live in one state, a bad plan on an unrelated change can still touch (or worse, propose destroying) something critical, and a corrupted state file takes everything down with it, not just one component.</p>
+<p>The fix is to split state along ownership and blast-radius lines: one root module (and one state file) for networking, another for data stores, another per service or team. Terraform workspaces can help here too, but workspaces are for multiple environments of the *same* configuration (dev/staging/prod), not for splitting unrelated infrastructure — don't reach for workspaces to solve a "state is too big" problem, reach for more root modules. Cross-module references then go through <code>terraform_remote_state</code> data sources or, more robustly, through fixed outputs like SSM parameters or explicit IDs passed as variables.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Smaller state means smaller plans to review</strong>
+  <p>Splitting state isn't just about safety during an apply — it makes <code>terraform plan</code> output reviewable again. A plan against a 400-resource monolith state is something people rubber-stamp because reading it properly takes an hour. A plan against a 20-resource module is something people actually read.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: terraform
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: terraform
-  template:
-    metadata:
-      labels:
-        app: terraform</code></pre>
-</div>
-<h2 id="why-terraform-is-the-on-call-s-best-friend">Why terraform is the on-call's best friend</h2>
-<p>The performance of state in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="gitops-for-state">GitOps for state</h2>
-<p>Production state looks different from development state. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Terraform
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring state first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add terraform on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with state when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="detecting-drift">Detecting drift before it detects you</h2>
+<p>Drift is what happens when reality and state disagree — someone changed a security group rule in the console during an incident, an autoscaling event modified a tag, or another tool touched a resource Terraform also manages. Terraform doesn't watch your infrastructure continuously; it only finds out about drift when you run <code>terraform plan</code>, which refreshes its view of real infrastructure and diffs it against state and config. An unexpected diff — a change you didn't make, showing up as something Terraform now wants to "fix" — is your drift signal.</p>
+<p>The practical habit is running <code>terraform plan</code> on a schedule (a nightly CI job is enough for most teams) even when nobody intends to apply anything, purely to catch drift while it's still one resource and not fifteen. Left unchecked, drift compounds: the plan output gets noisier, people start ignoring it because "it always shows changes," and the one plan that matters gets lost in the noise. If a change was made out-of-band deliberately, either codify it in Terraform immediately or, if it should stay unmanaged, pull the resource out of state with <code>terraform state rm</code> rather than leaving Terraform fighting reality every run.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on terraform state management — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>None of this is exotic: a remote backend with locking, careful imports instead of hand-edited state, state split along real ownership boundaries, and a habit of running <code>plan</code> even when you don't intend to apply. What makes state management hard in practice isn't any single piece — it's that state failures are silent until they aren't, and by the time <code>terraform apply</code> tells you something is wrong, the state file and reality may have already diverged in ways that take real archaeology to untangle. Treat the state file with the same seriousness as a production database, because for Terraform's purposes, that's exactly what it is.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/opentofu-vs-terraform/">OpenTofu vs Terraform — A Comparison</a></li>
@@ -191,7 +151,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

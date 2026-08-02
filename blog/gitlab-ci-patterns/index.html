@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GitLab CI/CD Patterns — A Field Guide">
 <meta property="og:description" content="GitLab CI/CD Patterns — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/gitlab-ci-patterns.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/gitlab-ci-patterns/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,73 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The CI/CD pipeline integration is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most <code>.gitlab-ci.yml</code> files start clean and end up as a wall of copy-pasted jobs nobody wants to touch. The features below are the ones that actually keep a pipeline maintainable as it grows: how jobs get selected, how config gets shared instead of duplicated, and how a pipeline decides whether to run at all.</p>
+<h2 id="stages-and-jobs">Stages and jobs</h2>
+<p>A pipeline is built from jobs, and jobs are grouped into stages. Every job in a stage runs in parallel; GitLab waits for a stage to finish (or fail) before starting the next one. A job is just a YAML key with a <code>script:</code> — everything else (<code>stage</code>, <code>image</code>, <code>rules</code>, <code>needs</code>, and so on) configures how and when it runs. The default stage order, if you don't declare one, is <code>build</code>, <code>test</code>, <code>deploy</code>, plus the implicit <code>.pre</code> and <code>.post</code> that always run first and last regardless of where you put them.</p>
+<h2 id="rules-vs-only-except">rules: vs the deprecated only/except</h2>
+<p>Older pipelines control job execution with <code>only:</code> and <code>except:</code>. Both still parse, but GitLab has deprecated them in favor of <code>rules:</code>, and for good reason — <code>only/except</code> can't express "run this job only if a variable is set AND the branch is main," while <code>rules:</code> evaluates a list of conditions top to bottom and stops at the first match. Each rule entry can set <code>if:</code>, <code>changes:</code>, <code>exists:</code>, or <code>when:</code>, and a rule with no condition acts as a catch-all. This is also how you implement "run on merge requests but not on pushes to feature branches without an open MR" — a common source of duplicate pipelines under the old syntax.</p>
+<div class="callout-warn">
+  <strong>Don't mix only/except with rules on the same job</strong>
+  <p>GitLab will reject a job that defines both. If you're migrating a legacy pipeline, convert a job fully before moving to the next one rather than trying to run the two systems side by side.</p>
+</div>
+<h2 id="extends-and-yaml-anchors">extends: and YAML anchors for DRY config</h2>
+<p><code>extends:</code> is GitLab's own inheritance mechanism: a job declares <code>extends: .some-hidden-job</code> (hidden jobs are prefixed with a dot and never run on their own) and merges in that job's keys, with the child's values winning on conflicts. It supports multiple parents and deep merges hash keys like <code>variables:</code>, which plain YAML anchors don't do. YAML anchors (<code>&amp;name</code> / <code>*name</code>) and the <code>&lt;&lt;:</code> merge key are the alternative — they work because <code>.gitlab-ci.yml</code> is just YAML, but the merge is shallow and GitLab has no visibility into it for linting. In practice, reach for <code>extends</code> first; use anchors only for small reusable snippets like a fixed list of <code>tags:</code>.</p>
+<h2 id="include-for-splitting-pipelines">include: for splitting pipelines across files</h2>
+<p>Once a pipeline covers more than one component, <code>include:</code> keeps <code>.gitlab-ci.yml</code> from becoming unreadable. You can pull in a <code>local</code> file from the same repo, a file from a <code>project</code> (a shared config repo other pipelines reuse), a <code>remote</code> URL, or a GitLab-maintained <code>template</code>. Included files are merged into the main pipeline as if they were pasted in place, so job names still need to be unique across all of them. This is the standard way to share a deploy job across a dozen microservice repos without copy-pasting it a dozen times — one canonical file, included everywhere.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Gitlab
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · .gitlab-ci.yml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>include:
+  - local: '.gitlab/ci/build.yml'
+  - project: 'platform/ci-templates'
+    ref: main
+    file: '/deploy/kubernetes.yml'
+  - template: 'Security/SAST.gitlab-ci.yml'
+
+stages: [build, test, deploy]
+
+variables:
+  DOCKER_DRIVER: overlay2
+
+test:
+  stage: test
+  needs: ["build"]
+  script: [npm test]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy:production:
+  extends: .deploy-base
+  stage: deploy
+  environment:
+    name: production
+    url: https://app.example.com
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths: [node_modules/]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG</code></pre>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>In the work I have done on gitlab ci/cd patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>When the work moves from design to production, the questions change. The gitlab is not the question; the failure mode of the patterns is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "gitlab_patterns" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gitlab
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: gitlab
-  template:
-    metadata:
-      labels:
-        app: gitlab</code></pre>
-</div>
-<h2 id="why-gitlab-is-the-on-call-s-best-friend">Why gitlab is the on-call's best friend</h2>
-<p>The performance of patterns in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="gitops-for-patterns">GitOps for patterns</h2>
-<p>Production patterns looks different from development patterns. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Gitlab
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring patterns first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add gitlab on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with patterns when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on gitlab ci/cd patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<h2 id="needs-for-dag-pipelines">needs: for DAG-based job ordering</h2>
+<p>Stage sequencing forces a job to wait for the entire previous stage to finish, even if the specific job it depends on finished minutes ago. <code>needs:</code> breaks that: a job listing <code>needs: ["build"]</code> starts as soon as <code>build</code> completes, ignoring the rest of that stage, turning the pipeline into a directed acyclic graph instead of a strict waterfall. It also controls artifact passing — a job only downloads artifacts from jobs it needs, not from everything upstream. The trade-off is that a DAG is harder to reason about visually than a stage-by-stage pipeline, so it's worth it mainly once a pipeline has enough independent branches that waiting on whole stages is costing real wall-clock time.</p>
+<h2 id="variables-and-protected-masked">Variables, protected and masked</h2>
+<p>CI/CD variables are set in the UI under Settings &gt; CI/CD &gt; Variables, in <code>variables:</code> blocks in the YAML, or passed in when a pipeline is triggered. Two flags matter for anything sensitive: <strong>Protected</strong> restricts a variable to pipelines running on protected branches or tags, so a feature-branch pipeline from a fork can't read production credentials. <strong>Masked</strong> replaces the value with <code>[MASKED]</code> in job logs, but only if the value satisfies GitLab's masking requirements (no whitespace, minimum length, restricted character set) — a value that fails those requirements silently isn't masked, which is a common way secrets leak into logs. Masking and protection are independent settings; a variable can be one, both, or neither.</p>
+<h2 id="environment-blocks">environment: blocks for deployment tracking</h2>
+<p>Adding <code>environment: { name: production, url: https://... }</code> to a deploy job does two things: it links the deployment to GitLab's Environments view so you can see what's currently deployed where and roll back from the UI, and it lets you gate the job with environment-level protected branch rules independent of the branch's own protection. Dynamic environments (using variables in the name, like <code>review/$CI_COMMIT_REF_SLUG</code>) are how review-app pipelines spin up a URL per merge request and tear it down with a matching <code>stop:</code> job when the MR closes.</p>
+<h2 id="caching-strategies">Caching with cache:key</h2>
+<p><code>cache:</code> persists files (typically dependency directories like <code>node_modules/</code> or <code>vendor/</code>) between pipeline runs to avoid reinstalling from scratch every time. The <code>key:</code> determines cache scope — a static key shares one cache across every branch, which is fast but means a dependency change on one branch can pollute the cache for others. Keying on <code>$CI_COMMIT_REF_SLUG</code> gives every branch its own cache at the cost of more cache storage; keying on a lockfile hash (<code>files: [package-lock.json]</code>) invalidates automatically only when dependencies actually change, which is usually the right default. Cache is best-effort, not guaranteed — don't rely on it for correctness, only for speed.</p>
+<h2 id="workflow-rules">workflow:rules for controlling whole-pipeline runs</h2>
+<p>Job-level <code>rules:</code> decide whether one job runs; top-level <code>workflow: rules:</code> decides whether the <em>pipeline</em> runs at all. The classic use is avoiding duplicate pipelines — without it, a push to a branch with an open merge request triggers both a branch pipeline and a merge-request pipeline for the same commit. Adding a <code>workflow:rules</code> block that only allows merge-request-event and default-branch pipelines eliminates the duplicate. It's evaluated once, before any jobs are considered, so it's also the place to skip pipelines entirely on branches you don't want CI running on, like documentation-only mirrors.</p>
+<p>None of these features are exotic — they're the difference between a pipeline that scales with the repo and one that gets copy-pasted into unmaintainable shape. Start with <code>rules:</code> and <code>workflow:rules</code> to control what runs, add <code>extends</code>/<code>include</code> once duplication shows up, and reach for <code>needs:</code> only when stage waiting is a measured bottleneck.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-cicd-github-actions-for-acumatica/">Acumatica CI/CD with GitHub Actions</a></li>
@@ -191,7 +169,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

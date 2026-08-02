@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Snowflake vs BigQuery — A Comparison | John Kihiu</title>
-<meta name="description" content="Snowflake vs BigQuery — A Comparison is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="How Snowflake's multi-cluster shared-data architecture and per-second compute pricing actually compare to BigQuery's serverless slot model and bytes-scanned pricing, and which one fits which workload.">
 <meta name="keywords" content="Acumatica snowflake, Acumatica bigquery, Acumatica warehouse, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/snowflake-vs-bigquery/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Snowflake vs BigQuery — A Comparison">
-<meta property="og:description" content="Snowflake vs BigQuery — A Comparison is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/snowflake-vs-bigquery.svg">
+<meta property="og:description" content="How Snowflake's multi-cluster shared-data architecture and per-second compute pricing actually compare to BigQuery's serverless slot model and bytes-scanned pricing, and which one fits which workload.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/snowflake-vs-bigquery/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="warehouse">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Snowflake vs BigQuery — A Comparison","description":"Snowflake vs BigQuery — A Comparison is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/snowflake-vs-bigquery.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/snowflake-vs-bigquery/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Snowflake vs BigQuery — A Comparison","description":"How Snowflake's multi-cluster shared-data architecture and per-second compute pricing actually compare to BigQuery's serverless slot model and bytes-scanned pricing, and which one fits which workload.","image":"https://kihiujohn.github.io/assets/og/snowflake-vs-bigquery.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/snowflake-vs-bigquery/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Snowflake vs BigQuery — A Comparison","item":"https://kihiujohn.github.io/blog/snowflake-vs-bigquery/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,44 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Snowflake vs BigQuery — A Comparison</span></nav>
     <span class="tag">Data / ML · Snowflake</span>
     <h1>Snowflake vs BigQuery — A Comparison</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Snowflake vs BigQuery — A Comparison is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Snowflake's multi-cluster shared-data architecture and per-second compute pricing actually compare to BigQuery's serverless slot model and bytes-scanned pricing, and which one fits which workload.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data pipelines in production are mostly about how to handle the slow failure modes. this is the pattern that handles the cases that don't show up in the demo data. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Observability: lineage, monitoring, alerts is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Snowflake and BigQuery get compared as if they're the same product with different logos, and the pricing pages don't help — one bills in credits, the other in bytes scanned or flat-rate slots, and neither number means anything until you map it to how your team actually queries data. The real differences are architectural: how compute is allocated, and who owns the tuning knobs. That's what decides which one fits your workload, not the feature checklist.</p>
+<h2 id="architecture-multi-cluster-vs-serverless-slots">Architecture: multi-cluster shared data vs serverless slots</h2>
+<p>Snowflake separates storage and compute into independent "virtual warehouses" — clusters of compute you explicitly create, size (X-Small to 6X-Large), and start/stop, all reading from the same underlying storage layer. You choose warehouse count and size; multiple warehouses can hit the same tables concurrently with no contention because each has its own compute. BigQuery has no user-visible warehouse concept: queries run against a pool of "slots" (units of CPU/RAM/IO) that Google allocates dynamically per query, either from an on-demand shared pool or from slots you've reserved and committed to. The practical difference: Snowflake makes you think about cluster sizing and idle-warehouse costs; BigQuery removes that decision but gives you less direct control over how much compute a given query gets.</p>
+<h2 id="pricing-credits-vs-bytes-scanned">Pricing: per-second credits vs bytes scanned or flat-rate</h2>
+<p>Snowflake bills compute per-second (with a 60-second minimum) based on warehouse size — an X-Small consumes 1 credit/hour, doubling per size tier, converted to a dollar rate by your account's credit price. Storage is billed separately, roughly per-TB/month. Cost scales with how long warehouses run, so idle warehouses that don't auto-suspend are the most common source of surprise bills. BigQuery's default on-demand pricing bills per query based on bytes scanned (roughly $6.25/TB as of recent pricing, first 1TB/month free), regardless of how long the query takes — a query that scans 2TB costs the same whether it finishes in 3 seconds or 3 minutes. For steady, high-volume usage, BigQuery also offers flat-rate/editions pricing (committed slots) that decouples cost from bytes scanned entirely.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM snowflake
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · SAME QUERY, DIFFERENT COST MODELS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Snowflake: cost = warehouse size × seconds running (regardless of bytes touched)
+ALTER WAREHOUSE reporting_wh SET WAREHOUSE_SIZE = 'SMALL' AUTO_SUSPEND = 60;
+SELECT region, SUM(revenue) FROM sales.fact_orders
+WHERE order_date >= '2026-01-01' GROUP BY region;
+
+-- BigQuery: cost = bytes scanned (regardless of how long the query takes)
+-- dry-run first to see the bytes estimate before running for real
+SELECT region, SUM(revenue) FROM `project.sales.fact_orders`
+WHERE order_date >= '2026-01-01' GROUP BY region;
+-- bq query --dry_run --use_legacy_sql=false '<query above>'</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on snowflake vs bigquery — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+<div class="callout-warn callout">
+  <strong>An idle Snowflake warehouse is the BigQuery equivalent of a full-table scan</strong>
+  <p>The two platforms' cost traps are mirror images. On Snowflake, the classic mistake is a warehouse that never auto-suspends, burning credits while idle. On BigQuery, the classic mistake is a `SELECT *` over a huge partitioned table with no date filter, which scans (and bills) the entire table on every run. Tune for the model you're actually on.</p>
 </div>
-<h2 id="why-snowflake-in-the-warehouse-beats-in-the-lake">Why snowflake in the warehouse beats in the lake</h2>
-<p>When the work moves from design to production, the questions change. The snowflake is not the question; the failure mode of the bigquery is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.snowflake > 0).groupBy("bigquery").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="schema-evolution-for-bigquery">Schema evolution for bigquery</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="cost-optimisation-for-snowflake">Cost optimisation for snowflake</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_snowflake') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-bigquery">The testing pyramid for bigquery</h2>
-<p>The performance of bigquery in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-snowflake">Backfills and rollbacks for snowflake</h2>
-<p>Production bigquery looks different from development bigquery. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM snowflake
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring bigquery first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add snowflake on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with bigquery when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="clustering-and-partitioning-who-does-the-work">Clustering and partitioning: who does the work</h2>
+<p>Snowflake automatically micro-partitions data on load and lets you define an explicit `CLUSTER BY` key for large tables that get filtered on a non-ingestion-order column; reclustering runs as a background service you pay for separately. BigQuery requires you to declare partitioning (usually by a date/timestamp column, via `PARTITION BY`) and clustering (`CLUSTER BY`, up to 4 columns) explicitly at table-creation time — there's no automatic partitioning if you didn't design the table with it. This is a meaningful operational difference: BigQuery pushes the schema-design decision earlier and makes it stickier (repartitioning means recreating the table), while Snowflake lets you bolt on a clustering key after the fact, at the cost of ongoing reclustering credits.</p>
+<h2 id="concurrency-and-isolation">Concurrency and workload isolation</h2>
+<p>Snowflake's multi-cluster warehouses let you isolate workloads cleanly by spinning up a separate warehouse per team or job — an ETL warehouse, a BI warehouse, an ad-hoc analyst warehouse — each billed and scaled independently, so a runaway analyst query can't starve the ETL pipeline. BigQuery's on-demand model shares a Google-managed slot pool across your whole project by default, which is simpler to operate but means heavy concurrent usage can hit rate limits or queue; the fix is reservations (committed slots) with assignment to specific projects or folders, which is effectively BigQuery's version of "give this team its own warehouse," just configured differently.</p>
+<h2 id="when-to-choose-which">When to choose which</h2>
+<p>Pick BigQuery when you're already on GCP, want zero infrastructure to manage (no warehouse sizing decisions at all), or have spiky/unpredictable query patterns where paying only for bytes scanned beats paying for idle compute. Pick Snowflake when you need fine-grained workload isolation across teams, want predictable per-second billing you can budget by warehouse, or your data platform spans multiple clouds (Snowflake runs on AWS, Azure, and GCP with the same interface, which BigQuery does not). Neither is "faster" in general — the workloads where each wins are different enough that the comparison to make is against your actual query patterns, not a benchmark blog post.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on snowflake vs bigquery — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The Snowflake-vs-BigQuery decision comes down to who you want holding the tuning knobs: Snowflake gives you explicit warehouses to size and isolate, billed by time; BigQuery gives you a managed slot pool, billed by bytes scanned or by commitment. Both scale to genuinely large workloads. The mistake is picking based on a pricing calculator without first mapping your actual query volume, concurrency, and table-design habits onto each model's cost trap.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.apache.org/" target="_blank" rel="noopener noreferrer">Apache data project documentation</a></li><li><a href="https://docs.getdbt.com/" target="_blank" rel="noopener noreferrer">dbt documentation</a></li><li><a href="https://www.nist.gov/privacy-framework" target="_blank" rel="noopener noreferrer">NIST Privacy Framework</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/redshift-vs-snowflake/">Redshift vs Snowflake — A Comparison</a></li>
@@ -179,7 +134,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

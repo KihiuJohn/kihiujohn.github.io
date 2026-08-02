@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Eloquent Optimisation — A Field Guide | John Kihiu</title>
-<meta name="description" content="Laravel Eloquent Optimisation — A Field Guide is the kind of work that pays for itself the first time you ship.">
+<meta name="description" content="Fixing Laravel N+1 queries with eager loading, when to reach for chunking over collections, and where Eloquent's convenience actually costs you query performance.">
 <meta name="keywords" content="Acumatica laravel, Acumatica eloquent, Acumatica performance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-eloquent-optimisation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Eloquent Optimisation — A Field Guide">
-<meta property="og:description" content="Laravel Eloquent Optimisation — A Field Guide is the kind of work that pays for itself the first time you ship.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-eloquent-optimisation.svg">
+<meta property="og:description" content="Fixing Laravel N+1 queries with eager loading, when to reach for chunking over collections, and where Eloquent's convenience actually costs you query performance.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-eloquent-optimisation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="performance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Eloquent Optimisation — A Field Guide","description":"Laravel Eloquent Optimisation — A Field Guide is the kind of work that pays for itself the first time you ship.","image":"https://kihiujohn.github.io/assets/og/laravel-eloquent-optimisation.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-eloquent-optimisation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Eloquent Optimisation — A Field Guide","description":"Fixing Laravel N+1 queries with eager loading, when to reach for chunking over collections, and where Eloquent's convenience actually costs you query performance.","image":"https://kihiujohn.github.io/assets/og/laravel-eloquent-optimisation.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-eloquent-optimisation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Eloquent Optimisation — A Field Guide","item":"https://kihiujohn.github.io/blog/laravel-eloquent-optimisation/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,77 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Eloquent Optimisation — A Field Guide</span></nav>
     <span class="tag">Laravel · Laravel</span>
     <h1>Laravel Eloquent Optimisation — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Laravel Eloquent Optimisation — A Field Guide is the kind of work that pays for itself the first time you ship.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Fixing Laravel N+1 queries with eager loading, when to reach for chunking over collections, and where Eloquent's convenience actually costs you query performance.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Laravel projects to know the patterns that work. They share a few traits: the package is well-maintained, the test suite is fast, the upgrade path is documented, and the pattern is the one the Laravel docs would recommend if the docs were a year ahead of the framework. This article is those patterns.</p>
-<h2 id="pitfalls-when-eloquent-is-not-the-bottleneck">Pitfalls when eloquent is not the bottleneck</h2>
-<p>Pitfalls when eloquent is not the bottleneck is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Eloquent's convenience is also its main performance trap: <code>$order->customer->name</code> reads exactly like a property access, which is precisely why it's easy to write inside a loop over 200 orders and not notice you just issued 200 separate queries. Almost every Eloquent performance problem in production traces back to one of a small handful of causes, and all of them are fixable without dropping down to raw SQL.</p>
+<h2 id="the-n-plus-1-query">The N+1 query, and why eager loading fixes it</h2>
+<p>The N+1 pattern: one query to fetch a list of models, then one additional query per model to fetch a related model, triggered lazily the first time the relationship is accessed. Laravel Debugbar or the query log will show this as a suspicious number of near-identical queries differing only by an ID. The fix is eager loading with <code>with()</code>, which issues one additional query (or a small constant number) for the related models regardless of how many parent rows there are.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(EloquentRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
+  <div class="code-header"><span class="code-lang">PHP · N+1 vs eager loading</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// N+1: one query for orders, then one query PER order for customer
+$orders = Order::all();
+foreach ($orders as $order) {
+    echo $order->customer->name;
+}
+
+// Fixed: two queries total, regardless of order count
+$orders = Order::with('customer')->get();
+foreach ($orders as $order) {
+    echo $order->customer->name;
 }</code></pre>
 </div>
-<h2 id="production-telemetry-for-laravel">Production telemetry for laravel</h2>
-<p>In the work I have done on laravel eloquent optimisation — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
-</div>
-<h2 id="what-laravel-eloquent-optimisation-a-field-guide-actually-solves-in-a-laravel-app">What Laravel Eloquent Optimisation — A Field Guide actually solves in a Laravel app</h2>
-<p>When the work moves from design to production, the questions change. The laravel is not the question; the failure mode of the eloquent is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('laravels', LaravelController::class);
-});</code></pre>
-</div>
-<h2 id="where-it-fits-in-the-laravel-request-lifecycle">Where it fits in the Laravel request lifecycle</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
 <div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
+  <strong>Catch N+1s before they reach production</strong>
+  <p>Laravel's <code>Model::preventLazyLoading()</code>, set in a service provider's <code>boot()</code> method (typically gated to non-production environments), throws an exception the moment code tries to lazy-load a relationship. Running this in local/CI turns silent N+1s into loud test failures instead of a slow endpoint someone notices weeks later.</p>
 </div>
-<h2 id="implementation-with-a-clean-laravel-pattern">Implementation with a clean Laravel pattern</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="select-only-what-you-need">Selecting only the columns you actually use</h2>
+<p><code>Order::all()</code> pulls every column, including large text or JSON columns you may not render. <code>select()</code> on the query, and <code>with('customer:id,name')</code> for constraining eager-loaded relationship columns, cuts the payload Eloquent has to hydrate into model instances — hydration cost is real for wide tables and large result sets, not just the wire transfer.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (LaravelJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PHP · constraining columns</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>$orders = Order::query()
+    ->select(['id', 'reference_number', 'customer_id', 'total', 'created_at'])
+    ->with(['customer:id,name'])
+    ->latest()
+    ->paginate(25);</code></pre>
 </div>
-<h2 id="testing-the-edge-cases">Testing the edge cases</h2>
-<p>The performance of eloquent in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="performance-considerations-on-production-hardware">Performance considerations on production hardware</h2>
-<p>Production eloquent looks different from development eloquent. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<h2 id="chunking-vs-loading-everything">chunk() and cursor() for large result sets</h2>
+<p><code>Model::all()</code> or an unbounded <code>get()</code> over a large table loads every matching row into memory as model instances simultaneously — fine for a few thousand rows, a real problem past a few hundred thousand. <code>chunk()</code> processes results in batches by re-querying with an offset each time, which is safe for most reporting/export jobs. <code>cursor()</code> uses a PHP generator to hydrate one model at a time from a single query, using far less memory than <code>chunk()</code> for read-only iteration, though it keeps one database connection open for the duration.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(EloquentRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
+  <div class="code-header"><span class="code-lang">PHP · chunk vs cursor</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// chunk(): safe when you're also writing/updating rows as you go
+Order::where('status', 'pending')->chunkById(500, function ($orders) {
+    foreach ($orders as $order) {
+        $order->recalculateTotal();
+        $order->save();
     }
+});
+
+// cursor(): lowest memory, read-only iteration, one query total
+foreach (Order::where('status', 'archived')->cursor() as $order) {
+    $exporter->write($order);
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring eloquent first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add laravel on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with eloquent when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="query-builder-vs-eloquent-overhead">When to drop to the query builder instead of Eloquent</h2>
+<p>Eloquent's model hydration (casting attributes, building relationships, firing model events) has real overhead compared to the plain query builder or raw SQL, which matters for reporting queries that return tens of thousands of rows purely for aggregation. <code>DB::table()</code> returns plain <code>stdClass</code> objects with none of that hydration cost — the right choice for a dashboard aggregate query that will never be an Eloquent model in the rest of the app anyway.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PHP · query builder for aggregation</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>$totals = DB::table('orders')
+    ->selectRaw('DATE(created_at) as day, SUM(total) as total')
+    ->where('created_at', '>=', now()->subDays(90))
+    ->groupBy('day')
+    ->orderBy('day')
+    ->get();</code></pre>
+</div>
+<h2 id="indexes-still-matter-most">The index is still doing more work than the query builder choice</h2>
+<p>None of the above helps if the underlying column isn't indexed — eager loading a relationship joined on an unindexed foreign key just moves the same slow table scan from N queries to one. <code>EXPLAIN</code> on the actual generated SQL (visible via Laravel's query log or Debugbar) is the tool that tells you whether the fix is an eager-load, a column selection, or genuinely a missing index — guessing which one applies without looking at the query plan wastes more time than it saves.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on laravel eloquent optimisation — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Most Eloquent performance problems are one of four things: an N+1 from missing eager loading, hydrating more columns or rows than the response needs, loading an entire table into memory instead of chunking or cursoring through it, or asking Eloquent to hydrate models for a query that only needed aggregated numbers. Fix them in that order of likelihood, and confirm with the actual query log rather than guessing — a missing index will still make a well-eager-loaded query slow.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-octane-production/">Laravel Octane in Production — A Field Guide</a></li>
@@ -185,7 +167,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Subscription Billing Automation | John Kihiu</title>
-<meta name="description" content="Subscription Billing Automation is the work that turns a collection of business systems into a coherent operation.">
+<meta name="description" content="How to automate subscription billing correctly: proration math, dunning retry schedules for failed payments, invoice generation, and integrating with Stripe-style billing APIs without losing revenue to silent failures.">
 <meta name="keywords" content="Acumatica subscription, Acumatica billing, Acumatica automation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/subscription-billing-automation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Subscription Billing Automation">
-<meta property="og:description" content="Subscription Billing Automation is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/subscription-billing-automation.svg">
+<meta property="og:description" content="How to automate subscription billing correctly: proration math, dunning retry schedules for failed payments, invoice generation, and integrating with Stripe-style billing APIs without losing revenue to silent failures.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/subscription-billing-automation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="automation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Subscription Billing Automation","description":"Subscription Billing Automation is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/subscription-billing-automation.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/subscription-billing-automation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Subscription Billing Automation","description":"How to automate subscription billing correctly: proration math, dunning retry schedules for failed payments, invoice generation, and integrating with Stripe-style billing APIs without losing revenue to silent failures.","image":"https://kihiujohn.github.io/assets/og/subscription-billing-automation.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/subscription-billing-automation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Subscription Billing Automation","item":"https://kihiujohn.github.io/blog/subscription-billing-automation/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,85 +86,77 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Subscription Billing Automation</span></nav>
     <span class="tag">Vertical SaaS · Subscription</span>
     <h1>Subscription Billing Automation</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Subscription Billing Automation is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to automate subscription billing correctly: proration math, dunning retry schedules for failed payments, invoice generation, and integrating with Stripe-style billing APIs without losing revenue to silent failures.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-18">Jun 18, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Go-to-market and customer success is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Every subscription business eventually builds the same five pieces of billing logic: proration when a customer changes plans mid-cycle, retry logic when a card gets declined, invoice generation that matches what was actually charged, webhook handling that keeps your database in sync with the payment processor, and reporting that reconciles the two. Get any one of these wrong and you either leak revenue or annoy customers with billing errors. I've built this stack around Stripe a few times now, and the failure modes are almost always the same: someone assumes billing is a solved problem because "we're just calling an API," then discovers three months later that half the failed-payment recoveries never happened because the retry job silently stopped running.</p>
+<h2 id="proration-is-arithmetic-not-guesswork">Proration is arithmetic, not guesswork</h2>
+<p>Proration means charging or crediting a customer for the unused portion of a billing period when they upgrade or downgrade mid-cycle. Stripe computes this for you if you let it — the mistake teams make is trying to reimplement the math themselves "to be safe," and getting the day-count convention wrong. Let the billing platform own the calculation; your job is deciding when to invoice immediately versus rolling the credit into the next cycle.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class SubscriptionExt : PXCacheExtension<Billing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · STRIPE SUBSCRIPTION UPDATE WITH PRORATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+async function changePlan(subscriptionId, newPriceId) {
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+  return stripe.subscriptions.update(subscriptionId, {
+    items: [{
+      id: subscription.items.data[0].id,
+      price: newPriceId,
+    }],
+    proration_behavior: 'create_prorations', // 'none' or 'always_invoice' are the alternatives
+    billing_cycle_anchor: 'unchanged',
+  });
+}
+
+// 'create_prorations' adds a line item to the NEXT invoice.
+// 'always_invoice' bills the proration immediately — use this for upgrades
+// where you want the cash now instead of waiting for the renewal.</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on subscription billing automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="dunning-the-failed-payment-retry-schedule">Dunning: the failed-payment retry schedule</h2>
+<p>Dunning is the process of retrying a failed card charge on a schedule instead of giving up after one attempt. Cards fail for boring reasons — insufficient funds on the day, a bank's fraud filter, an expired card the customer hasn't updated yet — and a fixed percentage of those will succeed on retry without you doing anything except waiting and trying again. Stripe's Smart Retries handles this natively via subscription settings, but if you're building your own dunning logic (common when billing runs through a custom invoicing service instead of Stripe subscriptions directly), the schedule matters more than the mechanism.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Don't retry immediately</strong>
+  <p>Retrying a declined card within minutes almost never works — the failure reason (insufficient funds, temporary hold) usually hasn't changed. Spacing retries across days gives the underlying cause time to resolve and avoids getting your merchant account flagged for excessive retry attempts.</p>
 </div>
-<h2 id="why-subscription-on-a-horizontal-platform-beats-from-scratch">Why subscription on a horizontal platform beats from-scratch</h2>
-<p>When the work moves from design to production, the questions change. The subscription is not the question; the failure mode of the billing is.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'subscription'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="channel-partner-programs-for-billing">Channel partner programs for billing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="marketplace-listing-for-subscription">Marketplace listing for subscription</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM subscription
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="soc-2-and-iso-27001-for-billing">SOC 2 and ISO 27001 for billing</h2>
-<p>The performance of billing in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Production billing looks different from development billing. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class SubscriptionExt : PXCacheExtension<Billing>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · DUNNING RETRY SCHEDULE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// A typical dunning cadence: retry on day 1, 3, 5, then cancel or downgrade.
+const RETRY_SCHEDULE_DAYS = [1, 3, 5];
+
+async function handleFailedInvoice(invoice) {
+  const attempt = invoice.attempt_count; // Stripe increments this per retry
+
+  if (attempt > RETRY_SCHEDULE_DAYS.length) {
+    // All retries exhausted — cancel or move to a restricted plan.
+    await stripe.subscriptions.update(invoice.subscription, {
+      pause_collection: { behavior: 'void' },
+    });
+    await notifyCustomer(invoice.customer_email, 'subscription_paused');
+    return;
+  }
+
+  // Stripe's automatic retry schedule (Smart Retries) handles the actual
+  // re-attempt timing. Your job on each `invoice.payment_failed` webhook
+  // is just to notify the customer and log where they are in the cycle.
+  await notifyCustomer(invoice.customer_email, 'payment_failed', { attempt });
 }</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring billing first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add subscription on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with billing when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="webhooks-are-the-source-of-truth-your-db-is-a-cache">Webhooks are the source of truth, your DB is a cache</h2>
+<p>The most common bug in homegrown billing systems: the app updates its own "subscription active" flag at checkout time, then never listens for what happens afterward. A payment can fail three days later during renewal, and the app has no idea because it never subscribed to `invoice.payment_failed` or `customer.subscription.updated`. Treat your local subscription status as a cache of what Stripe (or whichever processor) tells you via webhook, not as the primary record. Verify webhook signatures, and make the handler idempotent — Stripe retries webhook delivery, so the same event can arrive twice.</p>
+<div class="callout">
+  <strong>Idempotency keys prevent double invoices</strong>
+  <p>Pass an idempotency key on every subscription-mutating API call. If your job to "invoice everyone whose trial ended today" gets retried after a timeout, the key stops Stripe from creating a duplicate charge for the same customer.</p>
+</div>
+<h2 id="invoice-generation-that-matches-reality">Invoice generation that matches reality</h2>
+<p>An invoice should be generated from what was actually charged, not from what the plan's list price says. This sounds obvious until you have coupons, usage-based add-ons, and mid-cycle proration all landing on the same invoice. Pull invoice line items from Stripe's `invoice.finalized` event rather than reconstructing them from your own pricing table — the platform already did the reconciliation, and re-deriving it independently is how invoice totals drift from what customers were actually billed.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on subscription billing automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Subscription billing automation isn't hard because the individual pieces are complex — proration is arithmetic, retries are a cron schedule, invoices are a template. It's hard because each piece depends on treating the billing processor as the source of truth and your own database as a reflection of it. The moment you start maintaining parallel state — recalculating proration yourself, tracking payment status without listening to webhooks — you've created two systems that can disagree, and one of them is wrong. Lean on Stripe's (or your processor's) built-in retry and proration logic, make your webhook handlers idempotent, and reconcile against the processor's records rather than your own assumptions.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/saas-billing-automation/">SaaS Billing Automation — A Field Guide</a></li>
@@ -176,7 +167,6 @@ public class SubscriptionExt : PXCacheExtension<Billing>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

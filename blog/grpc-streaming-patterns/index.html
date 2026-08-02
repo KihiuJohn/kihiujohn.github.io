@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="gRPC Streaming Patterns">
 <meta property="og:description" content="gRPC Streaming Patterns is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether the.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/grpc-streaming-patterns.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/grpc-streaming-patterns/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,41 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design is a discipline, not a protocol. this is one of the parts of the discipline. The pattern that works is to push the API towards being a contract, the contract towards being a test, and the test towards being the source of truth. This article is the discipline.</p>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>Security: auth, authz, rate limiting is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most API discussions default to request/response because that's what REST offers. gRPC exposes four distinct RPC shapes, and picking the right one for a given problem — rather than defaulting to unary because it's familiar — is where a lot of gRPC's real value over REST shows up. Each mode is declared explicitly in the <code>.proto</code> file with the <code>stream</code> keyword, so the shape of the interaction is part of the contract, not something inferred from how the client happens to call an endpoint.</p>
+<h2 id="the-four-modes">The four modes, and what each is actually for</h2>
+<p><strong>Unary</strong> — one request, one response — is the REST-equivalent case and the right default for anything that fits a simple request/response model: fetching a record, running a calculation, submitting a form. <strong>Server-streaming</strong> — one request, a stream of responses — fits a case where a single request implies an ongoing or large series of results: subscribing to price updates, streaming a large query result set page by page instead of materializing it all in memory. <strong>Client-streaming</strong> — a stream of requests, one final response — fits uploading data incrementally, like a client sending chunks of a large file or a batch of telemetry events and getting one acknowledgment at the end. <strong>Bidirectional streaming</strong> — both sides stream independently over the same connection — fits genuinely two-way interactive use cases: a chat session, live collaborative editing, or a negotiation protocol where either side can send at any time.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">PROTOBUF · ALL FOUR MODES</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>service TelemetryService {
+  // Unary
+  rpc GetDeviceStatus (DeviceRequest) returns (DeviceStatus);
+
+  // Server streaming
+  rpc WatchDeviceEvents (DeviceRequest) returns (stream Event);
+
+  // Client streaming
+  rpc UploadReadings (stream Reading) returns (UploadSummary);
+
+  // Bidirectional streaming
+  rpc LiveDiagnostics (stream Command) returns (stream Response);
+}</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on grpc streaming patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+<h2 id="backpressure-is-your-problem-now">Backpressure becomes your problem, not the framework's</h2>
+<p>Once a method streams, whoever's consuming the stream has to keep up, or the sender needs to slow down — and that coordination doesn't happen automatically. gRPC implementations expose flow control at the HTTP/2 level, but application code still needs to handle the case where a server is producing events faster than a slow client can consume them: buffering indefinitely leaks memory, dropping silently loses data. Server-streaming and bidi-streaming methods should have an explicit strategy — bounded buffers, backpressure signals, or deliberate rate limiting on the producer side — rather than assuming the stream will always be consumed as fast as it's produced.</p>
+<h2 id="deadlines-per-call-not-per-stream">Deadlines apply per-call, and streams complicate them</h2>
+<p>A unary gRPC call typically has a deadline — the client says "fail this if it takes longer than N seconds" — and that model gets awkward for a stream that's supposed to stay open for minutes or hours, like a live subscription. Long-lived streaming RPCs generally shouldn't use a short fixed deadline; instead they rely on the connection's keepalive settings and application-level heartbeats to detect a dead peer, with the deadline reserved for the initial handshake or for a stream that's explicitly meant to be bounded in time.</p>
+<div class="callout-warn">
+  <strong>A stream that never completes still holds server resources</strong>
+  <p>Every open streaming RPC holds a goroutine/thread and buffer state on the server for as long as it's open. A client that opens a server-streaming subscription and never properly closes it (crashes without a clean disconnect, or a mobile app that backgrounds) can leak server-side resources if the server doesn't detect the dead connection via keepalive pings and clean up.</p>
 </div>
-<h2 id="why-grpc-is-not-rest-anymore">Why grpc is not REST anymore</h2>
-<p>When the work moves from design to production, the questions change. The grpc is not the question; the failure mode of the streaming is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /grpcs/{id}:
-    get:
-      operationId: getGrpc
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="idempotency-in-streaming">Idempotency in streaming</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="contract-testing-for-grpc">Contract testing for grpc</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GrpcResponse = {
-    id: string;
-    streaming: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="observability-tracing-streaming">Observability: tracing streaming</h2>
-<p>The performance of streaming in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="sdk-generation-for-grpc">SDK generation for grpc</h2>
-<p>Production streaming looks different from development streaming. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring streaming first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add grpc on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with streaming when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="cancellation-propagation">Cancellation has to propagate explicitly</h2>
+<p>When a client cancels a streaming call — closes the app, navigates away — the server needs to actually notice and stop doing work, not keep streaming into a void. gRPC surfaces context cancellation (Go's <code>context.Context</code>, similar mechanisms in other languages) specifically so a long-running streaming handler can check "is the client still there" periodically and abort expensive work — a database cursor scan, a downstream call — as soon as it's no longer needed. Code that ignores the cancellation signal keeps burning server resources on work nobody's listening for anymore.</p>
+<h2 id="choosing-the-mode-deliberately">Default to unary; reach for streaming when the shape actually calls for it</h2>
+<p>The most common mistake isn't picking the wrong streaming mode — it's reaching for streaming when unary would do, adding backpressure and cancellation complexity for no real benefit. If a client wants a snapshot, use unary and let it poll or use server-streaming with a subscription pattern only when it genuinely needs push updates. Streaming buys you efficiency and real-time behavior at the cost of connection lifecycle management that a stateless unary call never has to think about.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on grpc streaming patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>gRPC's four RPC modes map cleanly onto four real interaction shapes — request/response, subscribe, upload, and full duplex — but streaming modes trade simplicity for real operational complexity: backpressure, deadline handling, and cancellation propagation all become the application's responsibility. Default to unary, and reach for a streaming mode only when the interaction genuinely doesn't fit request/response.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
@@ -181,7 +137,6 @@ app.get('/api/grpcs/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

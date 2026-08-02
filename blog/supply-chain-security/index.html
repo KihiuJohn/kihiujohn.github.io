@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Supply Chain Security — A Field Guide | John Kihiu</title>
-<meta name="description" content="Supply Chain Security — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="A practical look at software supply chain security: how dependency compromise happens, what SLSA provenance actually proves, signing artifacts with Sigstore/cosign, and verifying lockfile integrity in CI.">
 <meta name="keywords" content="Acumatica security, Acumatica supply-chain, Acumatica slsa, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/supply-chain-security/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Supply Chain Security — A Field Guide">
-<meta property="og:description" content="Supply Chain Security — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/supply-chain-security.svg">
+<meta property="og:description" content="A practical look at software supply chain security: how dependency compromise happens, what SLSA provenance actually proves, signing artifacts with Sigstore/cosign, and verifying lockfile integrity in CI.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/supply-chain-security/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="ai">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="slsa">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Supply Chain Security — A Field Guide","description":"Supply Chain Security — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/supply-chain-security.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/supply-chain-security/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Supply Chain Security — A Field Guide","description":"A practical look at software supply chain security: how dependency compromise happens, what SLSA provenance actually proves, signing artifacts with Sigstore/cosign, and verifying lockfile integrity in CI.","image":"https://kihiujohn.github.io/assets/og/supply-chain-security.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/supply-chain-security/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Supply Chain Security — A Field Guide","item":"https://kihiujohn.github.io/blog/supply-chain-security/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,105 +86,80 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Supply Chain Security — A Field Guide</span></nav>
     <span class="tag">AI Agents · Security</span>
     <h1>Supply Chain Security — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Supply Chain Security — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A practical look at software supply chain security: how dependency compromise happens, what SLSA provenance actually proves, signing artifacts with Sigstore/cosign, and verifying lockfile integrity in CI.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>When to use it (and when not to) is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most supply chain attacks don't target your code — they target the dozens of transitive dependencies your code pulls in without anyone reviewing them. A compromised maintainer account, a typosquatted package name, a build step that fetches an unpinned script from the internet: any of these can smuggle malicious code into your production build without touching a single line you wrote. The response to this isn't "audit every dependency," which doesn't scale — it's building a chain of verifiable evidence from source to running artifact, so a compromise anywhere in that chain is detectable rather than invisible.</p>
+<h2 id="how-dependency-compromise-actually-happens">How dependency compromise actually happens</h2>
+<p>The realistic attack patterns are not exotic. A maintainer's npm token gets phished and a backdoored patch version gets published. A popular package gets abandoned and someone squats the name with a near-identical one (typosquatting: <code>corss-env</code> instead of <code>cross-env</code>). A CI pipeline pulls a build script over plain HTTP with no integrity check, and a man-in-the-middle swaps it. In every case, the code that runs in production was never reviewed by anyone on your team — it was trusted by default because it came through a package manager.</p>
+<h2 id="lockfile-integrity-in-ci">Lockfile integrity in CI</h2>
+<p>The cheapest defense against a compromised or accidentally-upgraded dependency is enforcing that CI installs exactly what the lockfile says, and fails loudly if `package.json` and the lockfile have drifted apart.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">BASH · CI LOCKFILE INTEGRITY CHECK</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># npm: fails if package.json and package-lock.json are out of sync,
+# and refuses to silently resolve a newer version of any dependency.
+npm ci --ignore-scripts
 
-def list_supply(query: str) -> str:
-    """List supply matching the query."""
-    response = requests.get(
-        f"https://api.example.com/supply",
-        params={"q": query}
-    )
-    return response.json()
+# yarn (classic): same intent — install exactly what's locked.
+yarn install --frozen-lockfile --ignore-scripts
 
-tools = [Tool(name="supply", func=list_supply, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+# --ignore-scripts blocks postinstall scripts from running during CI
+# install. Most supply-chain payloads execute via postinstall hooks,
+# so this alone closes a large fraction of real-world attacks.</code></pre>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-supply">Latency and cost tradeoffs for supply</h2>
-<p>In the work I have done on supply chain security — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+  <strong>npm audit is not a supply chain control</strong>
+  <p>`npm audit` checks known CVEs against a database — it says nothing about whether the package you're about to install is the one the maintainer actually published, or whether it was tampered with in transit. Integrity comes from the lockfile's recorded hashes, not from vulnerability scanning.</p>
 </div>
-<h2 id="prompt-patterns-that-work-for-chain">Prompt patterns that work for chain</h2>
-<p>When the work moves from design to production, the questions change. The supply is not the question; the failure mode of the chain is.</p>
+<h2 id="slsa-what-provenance-actually-proves">SLSA: what provenance actually proves</h2>
+<p>SLSA (Supply-chain Levels for Software Artifacts) is a framework for grading how verifiable the path from source code to built artifact is. The core idea is provenance: a signed, tamper-evident statement saying "this exact artifact was built from this exact source commit, by this build system, using these exact steps" — generated automatically by the build platform, not by a human attesting after the fact. At SLSA's higher levels, the build has to run in an isolated, non-interactive environment so that no one — including someone with source repo access — can slip an unreviewed change into the artifact without it showing up in the provenance.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="how-to-evaluate-supply-in-production">How to evaluate supply in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="the-role-of-chain-in-the-agent-loop">The role of chain in the agent loop</h2>
-<p>The performance of chain in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="what-supply-chain-security-a-field-guide-actually-does">What Supply Chain Security — A Field Guide actually does</h2>
-<p>Production chain looks different from development chain. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">YAML · GITHUB ACTIONS: BUILD PROVENANCE ATTESTATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>name: build-and-attest
+on: push
 
-def list_supply(query: str) -> str:
-    """List supply matching the query."""
-    response = requests.get(
-        f"https://api.example.com/supply",
-        params={"q": query}
-    )
-    return response.json()
+permissions:
+  id-token: write     # required to mint the signing identity
+  contents: read
+  attestations: write
 
-tools = [Tool(name="supply", func=list_supply, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --ignore-scripts && npm run build
+
+      # Generates and attaches SLSA provenance for the build artifact,
+      # signed via GitHub's OIDC-backed Sigstore integration.
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'dist/**'</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring chain first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add supply on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with chain when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="signing-artifacts-with-sigstore-and-cosign">Signing artifacts with Sigstore and cosign</h2>
+<p>Sigstore solves the "who signed this and can I trust the key" problem without requiring you to manage long-lived signing keys yourself. Instead of a private key you store and rotate, Sigstore issues a short-lived certificate tied to an OIDC identity (your CI provider's token, or a GitHub Actions workflow identity) at signing time, and records the signature in a public transparency log. `cosign` is the CLI most teams use to sign and verify container images and other artifacts against Sigstore.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">BASH · COSIGN SIGN AND VERIFY</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Sign a container image keylessly, using the CI job's OIDC identity
+cosign sign ghcr.io/acme/api:1.4.2
+
+# Verify the image was signed by a specific identity (e.g. your CI
+# workflow) before pulling it in a deploy pipeline
+cosign verify ghcr.io/acme/api:1.4.2 \
+  --certificate-identity "https://github.com/acme/api/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"</code></pre>
+</div>
+<div class="callout">
+  <strong>Verification belongs in the deploy gate, not just CI</strong>
+  <p>Signing an image is only useful if something refuses to deploy an unsigned or wrongly-signed one. Add a cosign verify step (or a Kubernetes admission controller like Kyverno/Sigstore Policy Controller) at the point of deployment, not just as a CI checkbox nobody enforces downstream.</p>
+</div>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on supply chain security — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>None of these controls — lockfile pinning, SLSA provenance, cosign signatures — prevent a determined attacker on their own. What they do is convert an invisible compromise into a detectable one: a tampered dependency fails an integrity check, an unsigned artifact fails a deploy gate, a build missing provenance can't claim to be the one your CI actually produced. Supply chain security is less about any single tool and more about closing the gaps where trust was previously implicit — the postinstall script nobody read, the image nobody verified, the artifact that could have come from anywhere.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
@@ -196,7 +170,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

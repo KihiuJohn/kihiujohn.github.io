@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Envoy as API Gateway — A Field Guide">
 <meta property="og:description" content="Envoy as API Gateway — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/envoy-api-gateway.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/envoy-api-gateway/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,68 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Envoy started as Lyft's service-mesh sidecar, but its listener/filter-chain/cluster model turned out to be just as good a fit for the edge as it is for east-west traffic — which is why it ended up as the data plane inside Istio, Gloo, Contour, and a fair number of hand-rolled gateways. Running it directly as an API gateway means dealing with its config model on its own terms: static bootstrap config for the parts that don't change, and xDS for the parts that do.</p>
+<h2 id="listeners-routes-and-clusters">Listeners, routes, and clusters</h2>
+<p>Envoy's config has three layers that matter for a gateway. A <strong>listener</strong> binds a port and decides what filter chain handles the connection (HTTP, TCP, TLS termination). A <strong>route configuration</strong> inside the HTTP connection manager filter matches incoming requests — by host, path, header — and decides which upstream to send them to. A <strong>cluster</strong> is that upstream: a named group of endpoints with a load-balancing policy and health-check config. The mental model is: listener accepts the connection, route picks the cluster, cluster picks the endpoint.</p>
+<p>For a small, static gateway you can write all three by hand in one YAML file. For anything that changes often — new backend added, new route deployed — you want xDS instead of editing YAML and restarting.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EnvoyApiExt : PXGraphExtension<EnvoyEntry>
-{
-    [PXOverride]
-    public virtual void Api(Envoy doc)
-    {
-        // Custom api logic for envoy api gateway
-        if (doc?.Api == null) return;
-        Base.Api(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · STATIC LISTENER + ROUTE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>static_resources:
+  listeners:
+  - name: ingress
+    address: { socket_address: { address: 0.0.0.0, port_value: 8443 } }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: api
+              domains: ["api.example.com"]
+              routes:
+              - match: { prefix: "/orders" }
+                route: { cluster: orders_service, timeout: 2s }
+  clusters:
+  - name: orders_service
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: orders_service
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: orders.internal, port_value: 8080 } } }</code></pre>
 </div>
-<h2 id="performance-and-observability-for-envoy">Performance and observability for envoy</h2>
-<p>In the work I have done on envoy as api gateway — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The envoy is not the question; the failure mode of the api is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for envoy
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="xds-and-dynamic-configuration">xDS and dynamic configuration</h2>
+<p>xDS is the family of discovery APIs (LDS, RDS, CDS, EDS — listener, route, cluster, endpoint discovery service) that let a control plane push config changes to Envoy over gRPC without a restart. This is what separates "Envoy as a static reverse proxy" from "Envoy as a real gateway platform": a control plane like Istio's istiod, Gloo Edge, or a hand-rolled control plane speaking the xDS protocol can add a new cluster or shift traffic weights and every connected Envoy instance picks it up within seconds. Envoy's own config for this is just a bootstrap file pointing at the control plane's gRPC address — the interesting logic lives in the control plane, not in Envoy itself.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>eventual consistency across xDS types matters</strong>
+  <p>CDS and EDS updates aren't atomic with RDS updates. A route can be pushed pointing at a cluster that hasn't arrived yet. Envoy handles the ordering (clusters and endpoints before routes that reference them) if your control plane follows the recommended CDS-then-EDS-then-LDS-then-RDS sequencing; get the order wrong and you'll see transient 503s during rollout.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+<h2 id="rate-limiting">Rate limiting</h2>
+<p>Envoy supports both local rate limiting (per-Envoy-instance token bucket, no external dependency) and global rate limiting (a gRPC call out to a rate-limit service, typically Envoy's own <code>ratelimit</code> reference implementation backed by Redis, so limits are enforced consistently across a fleet of gateway instances). Local rate limiting is cheap and fine for coarse protection against a single noisy client hitting one instance; global rate limiting is what you need if the limit is "1000 requests/minute per API key" and you're running more than one Envoy replica, since local buckets would let each replica give the client its own separate quota.</p>
+<h2 id="mtls-and-transport-security">mTLS and transport security</h2>
+<p>Terminating TLS at the listener is one job; using Envoy for mutual TLS between the gateway and backends (or between mesh sidecars) is another, and it's where Envoy's SDS (secret discovery service) earns its keep — certificates and keys are fetched from a secret provider at runtime instead of being baked into static config and rotated by redeploying. For north-south gateway traffic, terminate client TLS at the listener with a standard <code>DownstreamTlsContext</code>; for gateway-to-backend mTLS, an <code>UpstreamTlsContext</code> on the cluster with client cert validation gives you workload identity without the backend needing its own TLS termination logic.</p>
+<div class="callout-warn">
+  <strong>Certificate rotation without SDS is a scheduled outage</strong>
+  <p>If certs are loaded from static files at startup, rotating them means a config reload or restart. SDS with a short refresh interval avoids that, but only if the secret provider (a Kubernetes Secret via the SDS API, or an external CA integration) is actually wired up — dropping a cert file on disk and hoping Envoy notices is not SDS.</p>
 </div>
-<h2 id="the-api-edge-cases-i-have-shipped">The api edge cases I have shipped</h2>
-<p>The performance of api in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-envoy-changes">Migration path when envoy changes</h2>
-<p>Production api looks different from development api. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class EnvoyApiExt : PXGraphExtension<EnvoyEntry>
-{
-    [PXOverride]
-    public virtual void Api(Envoy doc)
-    {
-        // Custom api logic for envoy api gateway
-        if (doc?.Api == null) return;
-        Base.Api(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="observability">Observability</h2>
+<p>Envoy emits detailed stats (per-cluster request counts, upstream latency histograms, circuit-breaker trip counts) to StatsD, or a Prometheus-format endpoint, and supports distributed tracing via OpenTelemetry, Zipkin, or Jaeger exporters configured on the HTTP connection manager. The access log format is fully configurable per listener, which matters at a gateway more than anywhere else in the mesh — this is the one place that sees every request, so getting the log fields right (upstream cluster, response flags, duration) up front saves a lot of grep-through-JSON later when triaging a latency spike.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring api first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add envoy on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with api when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Concern</th><th>Envoy mechanism</th></tr>
+  <tr><td>Routing</td><td>Route config: domain/path match to cluster</td></tr>
+  <tr><td>Dynamic config</td><td>xDS (LDS/RDS/CDS/EDS) over gRPC</td></tr>
+  <tr><td>Per-instance rate limit</td><td>Local rate limit filter, token bucket</td></tr>
+  <tr><td>Fleet-wide rate limit</td><td>Global rate limit service (gRPC, Redis-backed)</td></tr>
+  <tr><td>Certificate rotation</td><td>SDS (secret discovery service)</td></tr>
+  <tr><td>Metrics</td><td>Stats sinks: StatsD, Prometheus</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on envoy as api gateway — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Envoy's learning curve is mostly the config model, not the runtime — once listeners, routes, and clusters click, xDS is just "the same three things, pushed instead of loaded from disk." Start with static config for a single service, add a control plane and dynamic discovery only once you have enough backends that hand-editing YAML on every deploy actually hurts.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/api-gateway-patterns/">API Gateway Patterns — A Field Guide</a></li>
@@ -187,7 +164,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

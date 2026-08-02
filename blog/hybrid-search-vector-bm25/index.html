@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Hybrid Search — Vector + BM25">
 <meta property="og:description" content="Hybrid Search — Vector + BM25 is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/hybrid-search-vector-bm25.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/hybrid-search-vector-bm25/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,82 +92,46 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real data teams, this is rarely the question. The question is the failure mode: what happens when the upstream schema changes, when the downstream consumer breaks, when the data quality test fails. This article is the patterns.</p>
-<h2 id="what-hybrid-search-vector-bm25-is-for">What Hybrid Search — Vector + BM25 is for</h2>
-<p>What Hybrid Search — Vector + BM25 is for is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Vector search and keyword search fail in opposite, complementary ways. Vector similarity finds semantically related results even when the wording is completely different, but it can miss an exact match on a rare product code, an error string, or a proper noun buried in a document. Keyword search (BM25 and its relatives) nails exact and near-exact term matches but has no concept of meaning — search for "car" and it won't find a document that only says "automobile." Hybrid search runs both and combines the results, and it consistently outperforms either alone on real-world query mixes.</p>
+<h2 id="why-neither-alone-is-enough">Why neither retrieval method alone is enough</h2>
+<p>BM25 is a term-frequency ranking function — it scores documents based on how often query terms appear, adjusted for document length and how rare each term is across the corpus. It's excellent at exact matches: SKUs, error codes, names, acronyms — anything where the literal string matters. It's weak at paraphrase and synonym handling, because it has no model of meaning, only of term overlap. Vector search embeds both the query and the documents into a shared numeric space using an embedding model, then finds documents whose vectors are closest to the query's vector by cosine similarity or dot product. This captures semantic relatedness well but can underperform on queries where the literal terms matter more than the general topic — a search for a specific part number can retrieve semantically "related" but wrong results if the embedding model wasn't trained to preserve exact-match significance for that kind of token.</p>
+<h2 id="reciprocal-rank-fusion">Reciprocal rank fusion: combining two ranked lists</h2>
+<p>The standard way to merge a BM25 ranking and a vector ranking into one result list is reciprocal rank fusion (RRF). Instead of trying to normalize and compare two different scoring scales directly (a BM25 score and a cosine similarity score aren't on the same scale and don't combine meaningfully by simple addition), RRF only looks at each document's <em>rank position</em> in each list and combines those.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM hybrid
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · RRF FORMULA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>RRF_score(doc) = sum over each ranked list L of:  1 / (k + rank_L(doc))
+
+-- k is a constant (commonly 60) that dampens the impact
+-- of very high ranks and keeps the score well-behaved
+-- for documents that only appear in one list
+
+-- Example: a document ranked #2 by BM25 and #5 by vector search,
+-- with k=60:
+-- score = 1/(60+2) + 1/(60+5) = 0.01613 + 0.01538 = 0.03151</code></pre>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>In the work I have done on hybrid search — vector + bm25, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Documents that rank well in <em>both</em> lists get the highest combined score, which is exactly the property you want — a result that's both a strong keyword match and a strong semantic match is almost certainly the right answer. A document appearing only in one list still contributes, just with a smaller score, so hybrid search doesn't simply throw away results that only one method found.</p>
+<h2 id="when-to-weight-one-side-more">When to weight one retrieval method more heavily</h2>
+<p>RRF treats both lists equally by default, but real query sets aren't uniform — a support search tool where users often paste exact error messages benefits from weighting BM25 higher; a conversational Q&A interface where users describe what they want in their own words benefits from weighting vector search higher. Most hybrid search implementations (Elasticsearch's hybrid queries, Weaviate, Qdrant, pgvector paired with Postgres full-text search) let you apply a weight to each side before or during fusion, and the right weight is something you tune against a labeled evaluation set for your actual query distribution, not a value to guess upfront.</p>
+<div class="callout">
+  <strong>Evaluate with a real query set, not intuition</strong>
+  <p>Hybrid search tuning without a held-out set of representative queries and relevance judgments is guesswork. Even a rough evaluation set of 50-100 real queries with manually judged relevant documents is enough to compare BM25-only, vector-only, and hybrid configurations meaningfully, and to catch a fusion weight that helps one query type while quietly hurting another.</p>
+</div>
+<h2 id="implementation-considerations">Implementation: two indexes, one merge step</h2>
+<p>In practice, hybrid search means maintaining two indexes over the same corpus — a full-text/inverted index for BM25 (Postgres full-text search, Elasticsearch, or a dedicated library like Lucene) and a vector index for embeddings (pgvector, a dedicated vector database, or a vector-capable extension of your existing search engine). Both need to stay in sync with the same underlying document set, which means your ingestion pipeline writes to both on every insert or update — a common failure mode is one index falling behind the other after a partial write failure, which silently degrades hybrid quality without an obvious error.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The hybrid is not the question; the failure mode of the search is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.hybrid > 0).groupBy("search").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_hybrid') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>The performance of search in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production search looks different from development search. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM hybrid
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <strong>Chunking strategy affects both sides differently</strong>
+  <p>How you split documents into chunks for embedding matters a lot for vector search quality (too large and the embedding is diluted, too small and you lose context) but matters much less for BM25, which just needs the term to appear somewhere in the chunk. If you're chunking primarily for the vector side, verify BM25 recall didn't quietly get worse from the same chunk boundaries splitting a keyword match across two chunks.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring search first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add hybrid on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with search when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Method</th><th>Strong at</th><th>Weak at</th></tr>
+  <tr><td>BM25 / keyword</td><td>Exact terms, codes, names, rare tokens</td><td>Synonyms, paraphrase, conceptual queries</td></tr>
+  <tr><td>Vector similarity</td><td>Semantic relatedness, natural language queries</td><td>Exact-match precision on literal strings</td></tr>
+  <tr><td>Hybrid (RRF)</td><td>Both — combines rank positions from each</td><td>Requires maintaining two indexes in sync</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on hybrid search — vector + bm25. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Hybrid search isn't a marginal improvement over either method alone — it fixes the specific failure modes each one has on its own, using reciprocal rank fusion to combine two rankings without needing to normalize incompatible scores. The implementation cost is real (two indexes, a fusion step, tuning against real queries) but for any search product where users mix exact-match and conceptual queries, it's usually worth it.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/vector-search-tuning/">Vector Search Tuning — A Field Guide</a></li>
@@ -179,7 +142,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GitHub Actions Matrix Strategies">
 <meta property="og:description" content="GitHub Actions Matrix Strategies is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/github-actions-matrix.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/github-actions-matrix/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,60 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="incident-response-for-github">Incident response for github</h2>
-<p>Incident response for github is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A build matrix runs the same job definition across a set of variable combinations — Node versions, operating systems, database backends — without copy-pasting the job. It's one of the more underused features in GitHub Actions, partly because the failure modes (one flaky combination blocking the whole matrix, ballooning minutes bills) aren't obvious until they happen.</p>
+<h2 id="the-basic-matrix-syntax">The basic matrix syntax</h2>
+<p><code>strategy.matrix</code> takes one or more variables, each with a list of values, and GitHub Actions runs the job once per combination — the Cartesian product of all the lists. A matrix with 3 Node versions and 2 operating systems produces 6 job runs, each with its own log and pass/fail status in the checks UI.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
+  <div class="code-header"><span class="code-lang">YAML · BASIC TEST MATRIX</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>jobs:
+  test:
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm test</code></pre>
 </div>
-<h2 id="what-github-actions-matrix-strategies-gives-you">What GitHub Actions Matrix Strategies gives you</h2>
-<p>In the work I have done on github actions matrix strategies, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="include-and-exclude-for-shaping-the-matrix">include and exclude for shaping the matrix</h2>
+<p>The full Cartesian product isn't always what you want — some combinations are redundant or invalid. <code>exclude</code> removes specific combinations from the generated set. <code>include</code> does two things: it can add extra standalone combinations not covered by the base lists, and when it matches an existing combination's keys, it adds extra variables to just that entry — useful for marking one combination as the "primary" one that also uploads a coverage report, without duplicating the whole matrix.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · INCLUDE/EXCLUDE EXAMPLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>strategy:
+  matrix:
+    node-version: [18, 20, 22]
+    os: [ubuntu-latest, windows-latest]
+    exclude:
+      - node-version: 18
+        os: windows-latest
+    include:
+      - node-version: 20
+        os: ubuntu-latest
+        upload-coverage: true</code></pre>
+</div>
+<h2 id="fail-fast-and-max-parallel">fail-fast and max-parallel</h2>
+<p><code>fail-fast</code> defaults to <code>true</code>, which cancels all other in-progress matrix jobs the moment one fails — good for saving minutes on a clearly broken change, bad when you actually want to see results across every combination (e.g., "does this fail on Windows specifically or everywhere"). Set <code>fail-fast: false</code> when the point of the matrix is diagnostic breadth. <code>max-parallel</code> caps how many matrix jobs run concurrently, which matters on self-hosted runners with limited capacity or when you're intentionally throttling load against a shared resource like a test database.</p>
+<div class="callout">
+  <strong>Turn off fail-fast when debugging cross-platform issues</strong>
+  <p>If a matrix job exists specifically to answer "which combinations break," fail-fast cancelling the rest of the matrix on the first failure defeats the purpose. Set <code>fail-fast: false</code> so every combination reports its own result.</p>
+</div>
+<h2 id="matrix-jobs-and-minutes-cost">Matrix jobs and minutes cost</h2>
+<p>Every matrix combination is a full job — full runner boot, full checkout, full dependency install — and GitHub Actions minutes billing (for private repos beyond the free tier) counts each one. A 4x4 matrix isn't 4x or 4x the work of a single job in wall-clock time if they run in parallel, but it is roughly 16x the billed minutes. Keep the matrix scoped to combinations that genuinely need independent verification — testing against every patch version of a runtime rarely finds bugs that testing the majors and the oldest-supported version won't.</p>
 <div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+  <strong>A failing matrix job still needs a clear required-check story</strong>
+  <p>If you use branch protection with required status checks, each matrix combination shows up as its own named check. Adding or removing matrix values changes which checks exist, which can silently break required-check configuration on a protected branch if it isn't updated alongside the matrix.</p>
 </div>
-<h2 id="the-implementation">The implementation</h2>
-<p>When the work moves from design to production, the questions change. The github is not the question; the failure mode of the actions is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "github_actions" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: github
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: github
-  template:
-    metadata:
-      labels:
-        app: github</code></pre>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>The performance of actions in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>Production actions looks different from development actions. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring actions first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add github on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with actions when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="dynamic-matrices-from-a-previous-job">Dynamic matrices generated by a previous job</h2>
+<p>The matrix values don't have to be hardcoded — a prior job can compute a JSON array (say, the list of changed packages in a monorepo) and expose it as a job output, which a downstream job consumes via <code>fromJSON()</code> in its matrix definition. This is how monorepo pipelines build a test matrix that only includes the packages actually affected by a given push, instead of testing everything on every change.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on github actions matrix strategies. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Matrix strategy earns its keep when you genuinely need to verify the same logic across multiple real-world variants — runtime versions, OSes, dependency versions. Keep the matrix as small as the actual support surface requires, set <code>fail-fast</code> deliberately rather than by default, and remember every added dimension multiplies billed minutes, not just coverage.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/github-actions-caching/">GitHub Actions Caching — A Field Guide</a></li>
@@ -191,7 +156,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GitHub Actions Caching — A Field Guide">
 <meta property="og:description" content="GitHub Actions Caching — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/github-actions-caching.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/github-actions-caching/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="why-github-is-the-on-call-s-best-friend">Why github is the on-call's best friend</h2>
-<p>Why github is the on-call's best friend is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The single biggest lever on GitHub Actions build time is usually not a faster runner — it's not redoing work the previous run already did. <code>actions/cache</code> is the mechanism, and the difference between a cache that actually hits and one that silently misses every run comes down to getting the key right.</p>
+<h2 id="how-actions-cache-actually-works">How actions/cache actually works</h2>
+<p>The action takes a <code>path</code> (or list of paths) to save and a <code>key</code> to save it under. On a cache hit — an exact key match — the paths are restored before your steps run. On a miss, the job runs normally and, if you're using <code>actions/cache</code> directly (not <code>cache: npm</code> style shortcuts), a new cache is saved under that key at the end of the job, but only if the job succeeds. Caches are scoped per repository and, for pull requests, fall back to caches from the base branch — a PR can read caches from <code>main</code> but a push to <code>main</code> can't read a PR's cache.</p>
+<h2 id="getting-the-cache-key-right">Getting the cache key right</h2>
+<p>The key should be built from something that changes exactly when the cached content should change — almost always a hash of the lockfile. Hashing <code>package-lock.json</code>, <code>yarn.lock</code>, or <code>Cargo.lock</code> means the cache invalidates precisely when dependencies change, not on every commit and not never. <code>restore-keys</code> gives you a fallback: if the exact key misses, it restores the most recent cache matching a key prefix, which is close enough to warm up incremental tools like a compiler cache even when the lockfile changed.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · NODE DEPENDENCY CACHE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>- uses: actions/checkout@v4
+
+- uses: actions/cache@v4
+  with:
+    path: ~/.npm
+    key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+    restore-keys: |
+      npm-${{ runner.os }}-
+
+- run: npm ci
+- run: npm test</code></pre>
 </div>
-<h2 id="gitops-for-actions">GitOps for actions</h2>
-<p>In the work I have done on github actions caching — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<div class="callout">
+  <strong>Use the built-in shortcut when your tool supports it</strong>
+  <p><code>actions/setup-node</code>, <code>actions/setup-python</code>, and similar setup actions have a <code>cache:</code> input (e.g. <code>cache: 'npm'</code>) that wraps this exact pattern for you — correct key hashing included. Reach for <code>actions/cache</code> directly only when caching something the setup action doesn't cover, like a build output directory or a compiler cache.</p>
+</div>
+<h2 id="what-belongs-in-the-cache-and-what-doesnt">What belongs in the cache, and what doesn't</h2>
+<p>Package manager download caches (npm, pip, Maven's <code>.m2</code>, Go's module cache) are the clearest win — they're pure downloaded content keyed cleanly off a lockfile hash. Build artifacts and compiler caches (Rust's <code>target/</code>, Docker layer caches via <code>actions/cache</code> plus buildx, ccache) also cache well but need care with the key, since they can grow large and stale entries just waste cache storage without speeding anything up. <code>node_modules</code> itself is a common one to avoid caching directly — reinstalling from a cached npm store via <code>npm ci</code> is usually faster and safer than restoring a potentially inconsistent <code>node_modules</code> tree.</p>
 <div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
+  <strong>Caches are not backups and not guaranteed</strong>
+  <p>GitHub evicts caches after 7 days of no access and enforces a per-repository size cap (10 GB total), evicting the least recently used caches once you're over. A workflow must succeed correctly on a full cache miss — never assume the cache will be there.</p>
 </div>
-<h2 id="the-deployment-pipeline-for-github">The deployment pipeline for github</h2>
-<p>When the work moves from design to production, the questions change. The github is not the question; the failure mode of the actions is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "github_actions" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="slos-and-error-budgets-for-actions">SLOs and error budgets for actions</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="incident-response-for-github">Incident response for github</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: github
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: github
-  template:
-    metadata:
-      labels:
-        app: github</code></pre>
-</div>
-<h2 id="what-github-actions-caching-a-field-guide-gives-you">What GitHub Actions Caching — A Field Guide gives you</h2>
-<p>The performance of actions in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>Production actions looks different from development actions. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<h2 id="cross-job-cache-scoping">Cross-job and cross-workflow scoping</h2>
+<p>Caches saved on a branch are visible to workflow runs on that branch and, for the default branch, to all branches as a fallback via <code>restore-keys</code>. This is why a cache warmed on <code>main</code> speeds up the first run on a new feature branch, but a cache built on a feature branch doesn't leak back into other unrelated branches. Matrix jobs each need their own key component (typically the matrix variable) or they'll fight over — and possibly corrupt — the same cache entry.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring actions first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add github on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with actions when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Cache candidate</th><th>Key basis</th><th>Notes</th></tr>
+  <tr><td>npm/yarn/pnpm store</td><td>lockfile hash</td><td>Use setup-node's built-in cache input</td></tr>
+  <tr><td>pip/poetry</td><td>requirements/poetry.lock hash</td><td>Use setup-python's built-in cache input</td></tr>
+  <tr><td>Docker layers</td><td>Dockerfile + context hash</td><td>Pair with buildx cache-from/cache-to</td></tr>
+  <tr><td>Compiler cache (ccache, sccache)</td><td>source hash or rolling key</td><td>Watch total size vs the 10 GB repo cap</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on github actions caching — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Cache keys built from a lockfile hash, with a sane <code>restore-keys</code> fallback, get you most of the win with none of the surprise. Prefer the setup actions' built-in <code>cache:</code> input where it exists, keep matrix jobs from sharing a key, and remember caches can and will be evicted — the workflow has to work correctly without one.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/github-actions-matrix/">GitHub Actions Matrix Strategies</a></li>
@@ -191,7 +144,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

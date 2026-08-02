@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kubernetes Autoscaling Patterns — A Field Guide | John Kihiu</title>
-<meta name="description" content="Kubernetes Autoscaling Patterns — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
+<meta name="description" content="How HPA, VPA, Cluster Autoscaler, and Karpenter actually behave in production Kubernetes clusters, why HPA and VPA fight each other on the same metric, and the real gotchas — thrashing, disruption budgets blocking scale-down, and Recreate-mode evictions.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica autoscaling, Acumatica hpa, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-autoscaling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Kubernetes Autoscaling Patterns — A Field Guide">
-<meta property="og:description" content="Kubernetes Autoscaling Patterns — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-autoscaling.svg">
+<meta property="og:description" content="How HPA, VPA, Cluster Autoscaler, and Karpenter actually behave in production Kubernetes clusters, why HPA and VPA fight each other on the same metric, and the real gotchas — thrashing, disruption budgets blocking scale-down, and Recreate-mode evictions.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-autoscaling/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="hpa">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Autoscaling Patterns — A Field Guide","description":"Kubernetes Autoscaling Patterns — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.","image":"https://kihiujohn.github.io/assets/og/kubernetes-autoscaling.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-autoscaling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Kubernetes Autoscaling Patterns — A Field Guide","description":"How HPA, VPA, Cluster Autoscaler, and Karpenter actually behave in production Kubernetes clusters, why HPA and VPA fight each other on the same metric, and the real gotchas — thrashing, disruption budgets blocking scale-down, and Recreate-mode evictions.","image":"https://kihiujohn.github.io/assets/og/kubernetes-autoscaling.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-autoscaling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Kubernetes Autoscaling Patterns — A Field Guide","item":"https://kihiujohn.github.io/blog/kubernetes-autoscaling/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,85 +86,76 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Kubernetes Autoscaling Patterns — A Field Guide</span></nav>
     <span class="tag">Vertical SaaS · Kubernetes</span>
     <h1>Kubernetes Autoscaling Patterns — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Kubernetes Autoscaling Patterns — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How HPA, VPA, Cluster Autoscaler, and Karpenter actually behave in production Kubernetes clusters, why HPA and VPA fight each other on the same metric, and the real gotchas — thrashing, disruption budgets blocking scale-down, and Recreate-mode evictions.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The vertical SaaS playbook in 2026 has stabilised. this is one of the parts of the playbook. The pattern is to use the horizontal platform for compliance, add the vertical layer for differentiation, and price the platform + the vertical together. This article is the playbook.</p>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>Vertical SaaS metrics that matter is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Kubernetes gives you four different autoscalers that all use the word "scale" and mean different things by it: the Horizontal Pod Autoscaler adds and removes pod replicas, the Vertical Pod Autoscaler resizes the resource requests of existing pods, the Cluster Autoscaler adds and removes nodes to fit pods that can't be scheduled, and Karpenter does the node job differently by provisioning capacity directly instead of managing fixed node groups. Most of the outages I've seen with autoscaling come not from any one of these misbehaving on its own, but from two of them fighting over the same signal without anyone having decided who wins.</p>
+<h2 id="hpa-mechanics-and-thrashing">HPA mechanics, and why it thrashes</h2>
+<p>The Horizontal Pod Autoscaler polls metrics — CPU and memory via metrics-server by default, or anything exposed through the custom or external metrics APIs (queue depth, request latency, a Prometheus query via the Prometheus Adapter) — and adjusts <code>replicas</code> on a Deployment or StatefulSet to keep the observed value near a target. The naive mental model is a thermostat, but a thermostat with a slow, noisy sensor: metrics-server refreshes on an interval, pods take time to become ready, and a burst of traffic can trigger a scale-up before the metric has settled, followed by a scale-down once the new pods start reporting lower per-pod load, followed by another scale-up once the reduced pod count pushes load back up. That oscillation is thrashing, and it's the single most common HPA complaint.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class KubernetesExt : PXCacheExtension<Autoscaling>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · HPA WITH STABILIZATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: checkout-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30</code></pre>
 </div>
-<h2 id="what-kubernetes-autoscaling-patterns-a-field-guide-is-for">What Kubernetes Autoscaling Patterns — A Field Guide is for</h2>
-<p>In the work I have done on kubernetes autoscaling patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The fix is the <code>behavior</code> block: a scale-down stabilization window makes the HPA look at the highest recommendation over the trailing window rather than reacting to the latest sample, so a brief dip doesn't immediately shed capacity you'll need again in two minutes. Most thrashing complaints I've debugged trace back to an HPA running on defaults with no <code>behavior</code> block set at all.</p>
+<h2 id="vpa-modes-and-the-recreate-eviction-problem">VPA modes, and why Recreate evicts pods</h2>
+<p>The Vertical Pod Autoscaler solves a different problem: getting the CPU/memory requests and limits right for a workload whose usage doesn't match what a human guessed at deploy time. It runs in one of four modes — <code>Off</code> (recommendations only, nothing applied), <code>Initial</code> (sets requests only at pod creation), <code>Recreate</code> (evicts and recreates running pods to apply new resource values), and <code>Auto</code> (currently behaves like Recreate). The gotcha is in the name: <code>Recreate</code> and <code>Auto</code> modes don't patch a running pod's resources in place — Kubernetes doesn't support that for most resource types — they evict the pod and let its controller recreate it with updated values. On a workload with few replicas or a short <code>terminationGracePeriodSeconds</code>, that eviction is a real disruption, not a free lunch.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Never point VPA and HPA at the same metric</strong>
+  <p>If VPA is resizing CPU requests on <code>Auto</code>/<code>Recreate</code> and HPA is also scaling on CPU utilization for the same workload, they compete: VPA changes the request, which changes what "100% utilization" even means, while HPA is simultaneously trying to add or remove replicas based on that same shifting baseline. The supported combination is VPA on memory (or <code>Off</code> mode for recommendations only) while HPA drives CPU-based horizontal scaling — or use VPA in <code>Initial</code> mode so it only sets sane starting requests without fighting a running HPA.</p>
 </div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>When the work moves from design to production, the questions change. The kubernetes is not the question; the failure mode of the autoscaling is.</p>
+<h2 id="cluster-autoscaler-and-what-blocks-scale-down">Cluster Autoscaler: easy to scale up, hard to scale down</h2>
+<p>Cluster Autoscaler watches for pods that fail to schedule because no node has enough free capacity, and adds nodes from a configured node group to fit them — that half is fairly mechanical. Scale-down is where it gets interesting: Cluster Autoscaler will only remove a node if every pod on it can be safely evicted and rescheduled elsewhere, and there's a long list of things that block that. A PodDisruptionBudget that would be violated by evicting a pod stops the drain outright. A pod using local storage (<code>emptyDir</code> with data the app cares about, or a hostPath volume) is treated as non-evictable by default. A pod without a controller (a bare Pod, not part of a Deployment/StatefulSet/Job) also blocks it, since Cluster Autoscaler can't be sure it'll come back. The practical result: clusters that scale up fine under load but never scale back down, quietly costing money on nodes nothing is actively blocking removal of — except one PDB somewhere set to <code>minAvailable: 100%</code>.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'kubernetes'
-  AND tenant_id = @TenantId;</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · PDB THAT WON'T BLOCK SCALE-DOWN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: checkout-api-pdb
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: checkout-api</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="karpenter-as-a-different-model">Karpenter: skipping node groups entirely</h2>
+<p>Karpenter takes a different approach to the same problem Cluster Autoscaler solves. Instead of scaling a predefined, fixed-shape node group (all the same instance type, managed as a unit), Karpenter watches for unschedulable pods and provisions exactly the node shape those pods need, directly from the cloud provider's API, at the moment it's needed. That means better bin-packing — it can pick from a wide range of instance types and sizes to match what's actually pending, rather than over-provisioning a uniform node group to cover the worst case — and it collapses the node-group-per-workload-shape sprawl that Cluster Autoscaler setups tend to accumulate over time. The trade-off is that Karpenter's consolidation behavior (actively repacking and terminating underutilized nodes, not just declining to remove them) is more aggressive by default, so workloads that are sensitive to being rescheduled need the same PDB and graceful-shutdown discipline as they would under Cluster Autoscaler, just triggered more often.</p>
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Karpenter still respects PDBs and do-not-evict annotations</strong>
+  <p>Karpenter's consolidation and drift-based node replacement honor PodDisruptionBudgets the same way Cluster Autoscaler does, and it respects the <code>karpenter.sh/do-not-disrupt</code> annotation on pods that genuinely can't tolerate being moved. The mistake teams make is assuming Karpenter's more aggressive bin-packing means it will ignore disruption safety — it won't, but it will find and act on optimization opportunities far more often than Cluster Autoscaler does, so a missing PDB shows up as an incident sooner rather than later.</p>
 </div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM kubernetes
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The performance of autoscaling in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>Production autoscaling looks different from development autoscaling. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class KubernetesExt : PXCacheExtension<Autoscaling>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring autoscaling first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add kubernetes on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with autoscaling when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on kubernetes autoscaling patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The autoscalers aren't competitors, they operate at different layers — HPA and VPA at the pod level, Cluster Autoscaler and Karpenter at the node level — but every incident I've traced back to autoscaling came from a layer being configured as if it were alone: HPA with no stabilization window fighting its own noisy metric, VPA in <code>Auto</code> mode resizing the exact metric HPA is scaling on, or a scale-down blocked for weeks by a PDB nobody remembered setting. Get the stabilization windows, the mode choices, and the disruption budgets right once, and the rest of it really does run itself.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/argo-workflows/">Argo Workflows — A Complete Guide</a></li>
@@ -176,7 +166,6 @@ public class KubernetesExt : PXCacheExtension<Autoscaling>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Feature Engineering Patterns — A Field Guide">
 <meta property="og:description" content="Feature Engineering Patterns — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/feature-engineering-patterns.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/feature-engineering-patterns/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,45 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="feature-implementation-walkthrough">Feature implementation walkthrough</h2>
-<p>Feature implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class FeatureEngineeringExt : PXGraphExtension<FeatureEntry>
-{
-    [PXOverride]
-    public virtual void Engineering(Feature doc)
-    {
-        // Custom engineering logic for feature engineering patterns
-        if (doc?.Engineering == null) return;
-        Base.Engineering(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on feature engineering patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>Feature engineering is where most of the accuracy gain in a tabular ML project actually comes from — not model choice. Swapping XGBoost for a neural net on the same raw columns rarely moves the needle as much as one well-constructed interaction feature or a correctly aggregated time window. This is a working set of patterns, not a survey of every technique.</p>
+<h2 id="aggregations-are-the-highest-leverage-feature">Aggregations are the highest-leverage feature type</h2>
+<p>For any entity with a history — a customer, a device, an account — rolling aggregations (count, sum, mean, min/max over a trailing window) tend to carry more signal than the raw event stream. "Number of failed logins in the last 24 hours" beats feeding a model the raw login timestamps and letting it infer the pattern. The key discipline is picking window lengths that map to something real about the domain (a billing cycle, a session, a business week) rather than an arbitrary round number.</p>
+<h2 id="avoid-target-leakage-in-time-based-features">Avoid target leakage in time-based features</h2>
+<p>The single most common feature engineering bug is computing an aggregate using data that wouldn't have been available at prediction time. A "customer lifetime value" feature computed over the customer's entire history, then used to predict an event from the middle of that history, leaks the future into the past. Every time-based feature needs an explicit as-of timestamp, and the aggregation window must end at or before that timestamp — this is exactly the point-in-time correctness problem that tools like Feast exist to solve at scale.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Leakage inflates offline metrics and destroys production accuracy</strong>
+  <p>A model trained on leaked features looks excellent in cross-validation and degrades sharply in production, because production never has access to the future. If offline AUC looks too good to be true for a hard problem, check for leakage before you check the model.</p>
 </div>
-<h2 id="performance-and-observability-for-feature">Performance and observability for feature</h2>
-<p>When the work moves from design to production, the questions change. The feature is not the question; the failure mode of the engineering is.</p>
+<h2 id="categorical-encoding-choices">Categorical encoding choices</h2>
+<p>One-hot encoding works fine for low-cardinality categoricals but blows up dimensionality for anything with hundreds of distinct values (zip codes, SKUs, merchant IDs). Target encoding (replacing a category with the mean of the target for that category) is more compact but needs to be fit only on training folds — computing it on the full dataset before a train/test split is another common leakage source. Tree-based models (gradient boosting, random forests) also handle raw categorical codes or frequency encoding reasonably well without one-hot expansion.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for feature
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · LEAKAGE-SAFE TARGET ENCODING</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from sklearn.model_selection import KFold
+import numpy as np
+
+def kfold_target_encode(df, col, target, n_splits=5):
+    encoded = np.zeros(len(df))
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    for train_idx, val_idx in kf.split(df):
+        means = df.iloc[train_idx].groupby(col)[target].mean()
+        encoded[val_idx] = df.iloc[val_idx][col].map(means)
+    return encoded</code></pre>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of engineering in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-engineering-edge-cases-i-have-shipped">The engineering edge cases I have shipped</h2>
-<p>Production engineering looks different from development engineering. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class FeatureEngineeringExt : PXGraphExtension<FeatureEntry>
-{
-    [PXOverride]
-    public virtual void Engineering(Feature doc)
-    {
-        // Custom engineering logic for feature engineering patterns
-        if (doc?.Engineering == null) return;
-        Base.Engineering(doc);
-    }
-}</code></pre>
-</div>
+<h2 id="feature-scaling-matters-less-than-people-think">Feature scaling matters less than people think — for some models</h2>
+<p>Gradient boosting and random forests are invariant to monotonic transformations of individual features, so scaling and normalization buy nothing there. Linear models, SVMs, and neural networks are scale-sensitive and need standardization or normalization or training will be slower and less stable. Knowing which family you're feeding the features to saves time spent scaling features that didn't need it.</p>
+<h2 id="feature-selection-as-a-discipline-not-an-afterthought">Feature selection as a discipline, not an afterthought</h2>
+<p>More features are not free — each one is a maintenance liability, a potential source of drift, and a slower inference path. Permutation importance and SHAP values are the two most reliable tools for identifying which engineered features actually contribute versus which are just adding noise the model happened to fit. Pruning a feature set down after the fact is normal and often improves generalization, not just speed.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring engineering first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add feature on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with engineering when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Pattern</th><th>Where it helps</th><th>Watch for</th></tr>
+  <tr><td>Rolling aggregations</td><td>Any entity with event history</td><td>Window must respect as-of time</td></tr>
+  <tr><td>Target encoding</td><td>High-cardinality categoricals</td><td>Must be fit per fold, not globally</td></tr>
+  <tr><td>Interaction features</td><td>Tree models, linear models</td><td>Combinatorial explosion if unbounded</td></tr>
+  <tr><td>Scaling/normalization</td><td>Linear models, neural nets</td><td>Unnecessary for tree ensembles</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on feature engineering patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The patterns that consistently pay off are domain-grounded aggregation windows, leakage-safe encoding fit per training fold, and pruning features based on measured importance rather than intuition. Model architecture is usually the smaller lever — the feature set is where the real accuracy gains live.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/feature-store-patterns/">Feature Store Patterns — A Field Guide</a></li>
@@ -187,7 +141,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

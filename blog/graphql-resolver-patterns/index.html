@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL Resolver Patterns">
 <meta property="og:description" content="GraphQL Resolver Patterns is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether the.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-resolver-patterns.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-resolver-patterns/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design is a discipline, not a protocol. this is one of the parts of the discipline. The pattern that works is to push the API towards being a contract, the contract towards being a test, and the test towards being the source of truth. This article is the discipline.</p>
-<h2 id="what-graphql-resolver-patterns-gives-you">What GraphQL Resolver Patterns gives you</h2>
-<p>What GraphQL Resolver Patterns gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A GraphQL server executes a query by calling one small function per field in the selection set, not one big function per request. Understanding resolvers at that granularity — what gets called, in what order, and with what arguments — explains most of the performance and structure problems people run into, and most of the fixes.</p>
+
+<h2 id="the-resolver-function-signature">The resolver function signature</h2>
+<p>Every resolver receives the same four arguments, regardless of GraphQL server implementation: <code>(parent, args, context, info)</code>. <code>parent</code> is the result of the resolver for the enclosing field (or the root value for top-level queries). <code>args</code> holds the arguments passed to this field in the query. <code>context</code> is a per-request object shared across every resolver invocation in that request — commonly used for the authenticated user, a database connection, and DataLoader instances. <code>info</code> carries metadata about the query itself: the field name, the AST, the schema. Most resolvers only ever touch the first three.</p>
+
+<h2 id="field-resolvers-and-default-resolution">Field resolvers and default resolution</h2>
+<p>Every field in a selection set is resolved independently. If you don't define a resolver for a field, the GraphQL engine falls back to a default resolver that just reads a same-named property off the parent object — that's why a plain object returned from a query resolver "just works" for its scalar fields without anyone writing <code>name: (parent) =&gt; parent.name</code> by hand. You only write a custom resolver when the field needs computation, a rename, or a separate data fetch:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>In the work I have done on graphql resolver patterns, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the resolver is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    resolver: string;
-    createdAt: Date;
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · RESOLVER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const resolvers = {
+  Query: {
+    user(parent, args, context, info) {
+      return context.services.users.findById(args.id);
+    },
+  },
+  User: {
+    // default resolver would work for name/email;
+    // this one is custom because posts isn't a property on the row
+    posts(parent, args, context) {
+      return context.loaders.postsByUserId.load(parent.id);
+    },
+  },
 };</code></pre>
 </div>
-<h2 id="security-auth-authz-rate-limiting">Security: auth, authz, rate limiting</h2>
-<p>The performance of resolver in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
+
+<h2 id="resolver-chains-for-nested-types">Resolver chains for nested types</h2>
+<p>A query like <code>{ user(id: "1") { name posts { title } } }</code> doesn't resolve in one pass. The engine first calls <code>Query.user</code>, which returns a user object. That object becomes the <code>parent</code> for every field under it: <code>name</code> resolves (default resolver, reads the property), and <code>posts</code> resolves via the custom resolver above, returning an array of post objects. Each of those post objects then becomes the <code>parent</code> for its own <code>title</code> field resolver. This chaining is what makes GraphQL's nested shape work without every type needing to know how to fetch its own relations upfront — each resolver only needs to know how to get from its parent to its own data.</p>
+
+<h2 id="context-for-per-request-state">Using context for per-request state</h2>
+<p>Because <code>context</code> is created fresh for each incoming request and passed to every resolver in that request's execution, it's the right place for anything that's per-request rather than global: the authenticated user (so a resolver can check <code>context.user.id</code> before returning private fields), a request-scoped database transaction, and — critically — DataLoader instances, which must not be shared across requests or you'll leak one user's batched cache into another's.</p>
+
+<h2 id="avoiding-n1-with-dataloader">Avoiding N+1 inside resolvers</h2>
+<p>If <code>User.posts</code> queries the database directly inside the resolver, a list of 50 users produces 50 separate post queries — the classic N+1 problem, since each user's resolver fires independently and has no visibility into its siblings. DataLoader solves this by batching: calls to <code>loader.load(id)</code> made within the same tick are collected and issued as a single batched query, then the individual results are handed back to each waiting resolver. The resolver itself doesn't change its shape — it still just calls <code>load()</code> — the batching happens underneath, keyed off <code>context.loaders</code> created once per request.</p>
+<div class="callout callout-warn">
+  <strong>DataLoader instances are not global singletons</strong>
+  <p>A DataLoader caches by key for the lifetime of the instance. Sharing one instance across requests means user A's query results can leak into user B's response via the cache. Always construct DataLoaders inside the per-request context factory, never at module scope.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production resolver looks different from development resolver. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
+
+<h2 id="thin-resolvers-vs-business-logic">Separating resolvers from business logic</h2>
+<p>A resolver's job is to translate between the GraphQL execution engine and your application's actual logic — not to contain that logic itself. A resolver with raw SQL, validation rules, and authorization checks embedded in its body is hard to reuse (a REST endpoint needing the same logic can't call it) and hard to test in isolation from the GraphQL layer. The pattern that scales is thin resolvers that delegate to a service layer:</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring resolver first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with resolver when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Resolver does</th><th>Service layer does</th></tr>
+  <tr><td>Reads args and context</td><td>Validates input, enforces business rules</td></tr>
+  <tr><td>Calls one service method</td><td>Talks to the database or other services</td></tr>
+  <tr><td>Shapes the return value if needed</td><td>Owns the actual domain logic</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql resolver patterns. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Keeping that boundary means the same "create order" logic backs both a GraphQL mutation resolver and, if you ever need it, a REST controller or a background job — the resolver is just one of possibly several callers, not the place the logic lives.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/graphql-caching-patterns/">GraphQL Caching Patterns</a></li>
@@ -181,7 +151,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

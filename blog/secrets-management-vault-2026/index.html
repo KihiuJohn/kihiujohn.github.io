@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Secrets Management with Vault 2026 | John Kihiu</title>
-<meta name="description" content="Secrets Management with Vault 2026 is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="Static secrets in a .env file are a liability the moment more than one person can read them. Here is how Vault's dynamic secrets, lease renewal, and Kubernetes auth actually work in production, and what running it yourself costs you.">
 <meta name="keywords" content="Acumatica vault, Acumatica secrets, Acumatica security, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/secrets-management-vault-2026/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Secrets Management with Vault 2026">
-<meta property="og:description" content="Secrets Management with Vault 2026 is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/secrets-management-vault-2026.svg">
+<meta property="og:description" content="Static secrets in a .env file are a liability the moment more than one person can read them. Here is how Vault's dynamic secrets, lease renewal, and Kubernetes auth actually work in production, and what running it yourself costs you.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/secrets-management-vault-2026/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="security">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Secrets Management with Vault 2026","description":"Secrets Management with Vault 2026 is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/secrets-management-vault-2026.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/secrets-management-vault-2026/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Secrets Management with Vault 2026","description":"Static secrets in a .env file are a liability the moment more than one person can read them. Here is how Vault's dynamic secrets, lease renewal, and Kubernetes auth actually work in production, and what running it yourself costs you.","image":"https://kihiujohn.github.io/assets/og/secrets-management-vault-2026.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/secrets-management-vault-2026/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Secrets Management with Vault 2026","item":"https://kihiujohn.github.io/blog/secrets-management-vault-2026/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +86,95 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Secrets Management with Vault 2026</span></nav>
     <span class="tag">Acumatica · Vault</span>
     <h1>Secrets Management with Vault 2026</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Secrets Management with Vault 2026 is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Static secrets in a .env file are a liability the moment more than one person can read them. Here is how Vault's dynamic secrets, lease renewal, and Kubernetes auth actually work in production, and what running it yourself costs you.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The first time I audited a codebase for secrets, I found a database password in a comment explaining why it had been rotated, three commits after it had actually been rotated — the old one, still valid, still readable by anyone with clone access. Static secrets fail this way constantly: they end up in `.env` files, CI logs, Slack messages, and shell history, and none of those places get cleaned up when the secret is supposed to change. Vault's actual pitch has nothing to do with encryption at rest, which most secret stores already do fine. It's that it can stop handing out secrets that live forever and start handing out ones that expire on their own.</p>
+<h2 id="static-vs-dynamic-secrets">Static secrets vs dynamic secrets</h2>
+<p>A static secret is a password, API key, or certificate that exists whether or not anyone is using it right now, and stays valid until a human or a script explicitly rotates it. A dynamic secret is generated on demand, scoped to one consumer, and expires automatically after a lease period whether anyone remembers to revoke it or not. The difference sounds academic until you think through the incident case: with a static database password shared across twelve services, revoking it after a leak means coordinating twelve deploys at the same time. With dynamic credentials, you revoke the lease — or just let it expire — and the blast radius is whatever that one lease could touch, for however long it was valid, typically minutes to hours rather than the lifetime of the credential.</p>
+<p>This is also why "secrets management" and "a place to put secrets" are different problems. A vault that just stores your existing static secrets more securely is strictly better than a `.env` file, but it doesn't change the failure mode — someone still has to remember to rotate the database password, and the credential is still good for as long as it takes someone to notice it leaked. Vault's secrets engines exist because generating the secret at request time, instead of storing one that was generated once, removes the human from that loop entirely.</p>
+<h2 id="database-secrets-engine">The database secrets engine, in practice</h2>
+<p>Vault's database secrets engine connects to your database with a privileged admin credential — one that only Vault ever sees — and creates a new, narrowly-scoped user on demand every time an application asks for one. You configure a connection and a role once, and after that every request for a credential produces a brand new username and password pair with a TTL attached.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class SecretsManagementExt : PXGraphExtension<SecretsEntry>
-{
-    [PXOverride]
-    public virtual void Management(Secrets doc)
-    {
-        // Custom management logic for secrets management vault
-        if (doc?.Management == null) return;
-        Base.Management(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · VAULT CLI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># enable the database secrets engine
+vault secrets enable database
+
+# tell Vault how to reach Postgres and manage the connection
+vault write database/config/orders-db \
+    plugin_name=postgresql-database-plugin \
+    connection_url="postgresql://{{username}}:{{password}}@db.internal:5432/orders" \
+    allowed_roles="orders-readonly,orders-readwrite" \
+    username="vault-admin" \
+    password="$(cat /run/secrets/vault_db_admin_pw)"
+
+# define a role: what SQL runs to create/revoke a leased user
+vault write database/roles/orders-readwrite \
+    db_name=orders-db \
+    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' \
+        VALID UNTIL '{{expiration}}'; GRANT SELECT, INSERT, UPDATE ON ALL TABLES \
+        IN SCHEMA public TO \"{{name}}\";" \
+    default_ttl="1h" \
+    max_ttl="24h"
+
+# an application requests a credential like this
+vault read database/creds/orders-readwrite
+# Key                Value
+# ---                -----
+# lease_id           database/creds/orders-readwrite/2xR9...
+# lease_duration     1h
+# username           v-orders-readwrite-a1b2c3
+# password            A1b2C3d4E5f6...</code></pre>
 </div>
-<h2 id="the-management-edge-cases-i-have-shipped">The management edge cases I have shipped</h2>
-<p>In the work I have done on secrets management with vault 2026, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Every application instance gets its own database user. When you're investigating unusual query activity, you're looking at a username tied to one specific lease and one specific pod, not a shared credential every service uses, which turns "which of our fifteen services did this" from a genuine question into a lookup.</p>
+<h2 id="rotation-and-lease-renewal">Rotation and lease renewal</h2>
+<p>Every dynamic secret in Vault comes back with a lease: a duration after which the secret is no longer guaranteed valid. The consuming application is expected to renew the lease before it expires if it still needs the credential, and Vault will refuse to renew past `max_ttl` no matter how many times you ask — that ceiling is what actually forces rotation, rather than relying on a renewal loop that could in theory run forever. If nothing renews the lease, Vault revokes it, which for the database engine means it drops the Postgres role it created. No revocation script to maintain, no cron job that "handles cleanup," because the expiry is enforced by the same system that issued the credential.</p>
+<div class="callout">
+  <strong>Renewal is opt-in, not automatic</strong>
+  <p>Vault doesn't push renewed credentials to your app — your app (or Vault Agent, running as a sidecar) has to ask for renewal before the lease runs out, and handle the case where renewal is refused because <code>max_ttl</code> was hit. Design for "credential disappears and I need a new one," not "credential lives forever unless something goes wrong."</p>
+</div>
+<p>Vault Agent exists specifically to take this off the application's plate. It runs alongside your service, authenticates to Vault on its own, fetches and renews leases in the background, and writes the current credential to a file or template your app reads — so the app code doesn't need a Vault SDK at all, just the discipline to re-read a file periodically or on a signal. For services you don't control the code of, or don't want to instrument, this is usually the difference between "we could use Vault here" and "we actually will."</p>
+<h2 id="how-services-authenticate">How services authenticate to Vault</h2>
+<p>Dynamic secrets only remove one hardcoded credential if getting them doesn't require a different hardcoded credential to authenticate to Vault in the first place. This is what the auth methods are for. Two show up constantly in production: AppRole, for services and CI systems that aren't running inside Kubernetes, and the Kubernetes auth method, for anything that is.</p>
+<p>The Kubernetes auth method lets a pod authenticate using its own service account token — the one the kubelet already mounts into every pod — with no separate secret to distribute at all. Vault verifies that token against the Kubernetes API, checks it against a configured role, and issues a Vault token scoped to that role's policies.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">BASH · VAULT CLI</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># enable and point Vault at the cluster's API
+vault auth enable kubernetes
+
+vault write auth/kubernetes/config \
+    kubernetes_host="https://kubernetes.default.svc:443" \
+    kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+# bind a Kubernetes service account to a Vault policy
+vault write auth/kubernetes/role/orders-api \
+    bound_service_account_names="orders-api" \
+    bound_service_account_namespaces="production" \
+    policies="orders-db-readwrite" \
+    ttl="1h"
+
+# the policy the role above grants
+vault policy write orders-db-readwrite - <<EOF
+path "database/creds/orders-readwrite" {
+  capabilities = ["read"]
+}
+EOF</code></pre>
+</div>
+<p>AppRole covers the case where there's no Kubernetes API to check against — a CI runner, a VM, an on-prem batch job. It splits authentication into a `role_id` (identifies which role you're claiming, not secret) and a `secret_id` (proves you're allowed to claim it, and can itself be short-lived or single-use). The `secret_id` still has to land somewhere at startup, which is the one part of this that never fully disappears — it just moves the problem from "the database password is static" to "one bootstrap credential, scoped to nothing but 'get a Vault token,' is static," which is a much smaller thing to get wrong.</p>
+<h2 id="running-it-yourself-vs-managed">Running Vault yourself vs a managed alternative</h2>
+<p>Vault itself is not the expensive part. The expensive part is everything around it: unsealing after a restart, storage backend choice and its own backup story, upgrade testing because Vault's own auth and secrets engines change behavior across major versions, and the fact that Vault becomes a single point of failure for every service that needs a database credential to start up. If Vault is down, nothing that leases short-lived credentials can start cleanly, which means Vault's own availability requirements are stricter than most of the things depending on it.</p>
+<p>The managed options — HCP Vault, or AWS Secrets Manager and Google Secret Manager if you don't need Vault's full feature set — trade some of that operational surface for less flexibility and, usually, a narrower set of secrets engines. AWS Secrets Manager's RDS integration covers a real chunk of what people reach for the database secrets engine for, without a cluster to unseal. The honest tradeoff: self-hosted Vault is worth it once you need dynamic secrets across more than one cloud, more than one database engine, or auth methods a managed service doesn't offer. Below that line, the operational cost of running Vault well usually exceeds what it saves you over a managed secrets store plus disciplined manual rotation.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Unsealing is not optional maintenance</strong>
+  <p>Vault starts sealed after every restart and refuses every request until it's unsealed with a quorum of unseal keys (or an auto-unseal mechanism backed by a cloud KMS). Auto-unseal via AWS KMS, GCP KMS, or Azure Key Vault removes the "someone needs to be on a call with a key share at 2am" scenario — set it up before you need it, not after the first restart during an incident.</p>
 </div>
-<h2 id="migration-path-when-secrets-changes">Migration path when secrets changes</h2>
-<p>When the work moves from design to production, the questions change. The secrets is not the question; the failure mode of the management is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for secrets
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-management-in-production">How to debug management in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-secrets-that-works">The version of secrets that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-secrets-management-with-vault-2026-matters-in-production">Why Secrets Management with Vault 2026 matters in production</h2>
-<p>The performance of management in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production management looks different from development management. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class SecretsManagementExt : PXGraphExtension<SecretsEntry>
-{
-    [PXOverride]
-    public virtual void Management(Secrets doc)
-    {
-        // Custom management logic for secrets management vault
-        if (doc?.Management == null) return;
-        Base.Management(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring management first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add secrets on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with management when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on secrets management with vault 2026. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The point of dynamic secrets isn't that they're uncrackable — a leaked short-lived credential is still a leaked credential for as long as its lease lasts. The point is that "as long as its lease lasts" is now measured in an hour instead of "until someone notices and rotates it manually," which for most teams is the actual gap between a non-event and an incident. Start with the database secrets engine on your highest-value datastore, put Vault Agent or the Kubernetes auth method in front of it so no application code has to change, and only take on running Vault yourself once you've confirmed a managed alternative genuinely can't cover what you need.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-2fa-and-password-policies/">Acumatica 2FA and Password Policies</a></li>
@@ -187,7 +185,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

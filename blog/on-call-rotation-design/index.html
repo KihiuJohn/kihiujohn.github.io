@@ -4,15 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>On-Call Rotation Design — A Field Guide | John Kihiu</title>
-<meta name="description" content="On-Call Rotation Design — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="Designing on-call rotations that don't burn engineers out: rotation length tradeoffs, follow-the-sun vs single-timezone coverage, escalation policy design, alert fatigue, and fair compensation.">
+
 <meta name="keywords" content="Acumatica sre, Acumatica oncall, Acumatica rotation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/on-call-rotation-design/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="On-Call Rotation Design — A Field Guide">
-<meta property="og:description" content="On-Call Rotation Design — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/on-call-rotation-design.svg">
+<meta property="og:description" content="Designing on-call rotations that don't burn engineers out: rotation length tradeoffs, follow-the-sun vs single-timezone coverage, escalation policy design, alert fatigue, and fair compensation.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/on-call-rotation-design/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +21,7 @@
 <meta property="article:tag" content="rotation">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"On-Call Rotation Design — A Field Guide","description":"On-Call Rotation Design — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/on-call-rotation-design.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/on-call-rotation-design/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"On-Call Rotation Design — A Field Guide","description":"Designing on-call rotations that don't burn engineers out: rotation length tradeoffs, follow-the-sun vs single-timezone coverage, escalation policy design, alert fatigue, and fair compensation.","image":"https://kihiujohn.github.io/assets/og/on-call-rotation-design.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/on-call-rotation-design/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"On-Call Rotation Design — A Field Guide","item":"https://kihiujohn.github.io/blog/on-call-rotation-design/"}]}
@@ -29,12 +29,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +66,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +87,53 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">On-Call Rotation Design — A Field Guide</span></nav>
     <span class="tag">Acumatica · Sre</span>
     <h1>On-Call Rotation Design — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">On-Call Rotation Design — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Designing on-call rotations that don't burn engineers out: rotation length tradeoffs, follow-the-sun vs single-timezone coverage, escalation policy design, alert fatigue, and fair compensation.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="call-implementation-walkthrough">Call implementation walkthrough</h2>
-<p>Call implementation walkthrough is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CallRotationExt : PXGraphExtension<CallEntry>
-{
-    [PXOverride]
-    public virtual void Rotation(Call doc)
-    {
-        // Custom rotation logic for call rotation design
-        if (doc?.Rotation == null) return;
-        Base.Rotation(doc);
-    }
-}</code></pre>
+    <p>A bad on-call rotation doesn't usually fail loudly — it fails as attrition. Good engineers leave teams over a rotation that pages them at 3am for things that could wait until morning, long before they'll say that's the reason in an exit interview. Designing a rotation well is mostly about a handful of structural decisions made once, carefully, rather than a pile of tooling.</p>
+<h2 id="rotation-length-tradeoffs">Rotation length: the core tradeoff</h2>
+<p>A one-week rotation is the default for a reason — long enough that handoffs don't dominate everyone's calendar, short enough that no one engineer absorbs a bad week's worth of pages for a full month. Shorter rotations (a few days) reduce individual burden per shift but multiply handoff overhead and context-switching, since context about an ongoing issue has to transfer more often. Longer rotations (two weeks or a month) reduce handoff friction but concentrate risk: if a bad incident lands mid-rotation, that person absorbs disproportionate pain, and a month-long rotation with a genuinely noisy service is a fast way to burn someone out.</p>
+<div class="callout">
+  <strong>Rotation length should scale with alert volume, not team size</strong>
+  <p>A service paging twice a month can sustain month-long rotations without anyone noticing. A service paging twice a night needs a much shorter rotation — or, more urgently, the alert volume needs to be the thing that actually gets fixed, since no rotation schedule solves a fundamentally too-noisy service.</p>
 </div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>In the work I have done on on-call rotation design — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="follow-the-sun-vs-single-timezone">Follow-the-sun vs. single-timezone rotations</h2>
+<p>Follow-the-sun coverage — handing the pager off between offices in different timezones so no one is ever paged at 3am local time — sounds obviously better and only actually works if you have real engineering presence in multiple timezones with enough depth to sustain a rotation in each, not just one remote engineer covering the gap alone. A single-timezone rotation with genuine off-hours paging is honest about its tradeoff: it's simpler to run and reason about, but someone will get paged at night, and that needs to be compensated and staffed for explicitly rather than treated as free.</p>
+<h2 id="escalation-policies">Escalation policy design</h2>
+<p>An escalation policy defines what happens when the primary on-call doesn't acknowledge a page within some window — it escalates to secondary, then to a manager, then potentially to a wider channel. The failure mode to design against is a policy that's too patient: a 15-minute wait before escalating to secondary sounds reasonable until the primary is asleep with their phone on silent and the incident burns 15 extra minutes for nothing. A tighter first-tier timeout (5 minutes) with an automatic escalation to a secondary who's also paged is more resilient than a long chain that assumes the first person will always respond.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · ESCALATION POLICY SHAPE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>escalation_policy:
+  - level: 1
+    target: primary_oncall
+    timeout_minutes: 5
+  - level: 2
+    target: secondary_oncall
+    timeout_minutes: 10
+  - level: 3
+    target: team_lead
+    timeout_minutes: 10
+  - level: 4
+    target: incident_commander_channel
+    notify: always  # regardless of ack, for visibility</code></pre>
+</div>
+<h2 id="primary-secondary-structure">Why a secondary matters, not just a primary</h2>
+<p>A rotation with only a primary and no secondary means the primary's phone dying, losing signal, or being in the shower during an incident has no backstop — the page just goes unanswered until someone notices. A secondary who's paged in parallel or after a short timeout, and who is explicitly expected to be reachable (not the person who happens to pick up), closes that gap. The secondary role is also where less experienced engineers can shadow real incidents with a safety net, which is a reasonable way to grow the rotation's bench depth over time.</p>
+<h2 id="alert-fatigue">Alert fatigue is a rotation design problem, not just a monitoring one</h2>
+<p>Alert fatigue happens when pages regularly turn out to be non-actionable — a flapping check, a threshold set too aggressively, an alert for something that self-resolves before anyone can respond. Once that happens a few times, on-call engineers start treating every page with less urgency, which is exactly the outcome you can't afford for the page that's real. The fix is not "tell people to take alerts seriously" — it's auditing which alerts actually led to action over the last quarter and deleting or tuning the ones that didn't, on a recurring basis, not as a one-time cleanup.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Track the ratio of pages to actionable incidents</strong>
+  <p>If fewer than half of pages in a given rotation resulted in a real fix or a real incident, that's a signal the alerting is miscalibrated, not that the on-call engineer needs to be more diligent. Review this ratio explicitly — it's the earliest measurable sign of fatigue building before people start quietly resenting the rotation.</p>
 </div>
-<h2 id="performance-and-observability-for-call">Performance and observability for call</h2>
-<p>When the work moves from design to production, the questions change. The call is not the question; the failure mode of the rotation is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for call
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>The performance of rotation in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-rotation-edge-cases-i-have-shipped">The rotation edge cases I have shipped</h2>
-<p>Production rotation looks different from development rotation. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class CallRotationExt : PXGraphExtension<CallEntry>
-{
-    [PXOverride]
-    public virtual void Rotation(Call doc)
-    {
-        // Custom rotation logic for call rotation design
-        if (doc?.Rotation == null) return;
-        Base.Rotation(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring rotation first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add call on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with rotation when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="compensating-on-call-engineers">Compensating on-call fairly</h2>
+<p>On-call is work, even in the weeks where nothing pages — the constraint of staying reachable, sober, and near a laptop has real cost, and treating it as an unpaid extension of the regular job is one of the more reliable ways to erode goodwill on a team. Common structures are a flat stipend per rotation week regardless of pages, additional hourly pay for actual incident response time, or comp time taken afterward. Whichever model, it should be explicit and consistent, not an informal "we'll figure it out" that ends up meaning nothing happens.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on on-call rotation design — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The rotation itself is the easy part to schedule — a spreadsheet or PagerDuty can handle that. The decisions that actually determine whether on-call is sustainable are rotation length matched to real alert volume, an escalation policy that doesn't wait too long on an unresponsive primary, a real secondary as backstop, active alert-fatigue triage, and fair, explicit compensation. Get those five right and the schedule mostly takes care of itself.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/alerting-best-practices/">Alerting Best Practices — A Field Guide</a></li>
@@ -187,7 +144,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

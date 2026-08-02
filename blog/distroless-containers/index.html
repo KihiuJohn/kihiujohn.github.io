@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Distroless Containers — A Field Guide">
 <meta property="og:description" content="Distroless Containers — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/distroless-containers.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/distroless-containers/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="ai">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,99 +92,47 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough AI agent projects to know the patterns that work. They share a few traits: the LLM is the thin layer, the tools are the thick layer, and the runbook is the only thing that saves you when the LLM hallucinates at 3 AM. This article is the patterns.</p>
-<h2 id="the-tool-registry-and-how-to-design-it-well">The tool registry and how to design it well</h2>
-<p>The tool registry and how to design it well is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_distroless(query: str) -> str:
-    """List distroless matching the query."""
-    response = requests.get(
-        f"https://api.example.com/distroless",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="distroless", func=list_distroless, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<h2 id="memory-context-and-state-management">Memory, context, and state management</h2>
-<p>In the work I have done on distroless containers — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
-</div>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>When the work moves from design to production, the questions change. The distroless is not the question; the failure mode of the containers is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>A distroless image contains your application and its runtime dependencies — and almost nothing else. No shell, no package manager, no coreutils, no libc-level utilities you didn't explicitly ask for. Google's <code>gcr.io/distroless</code> images are the reference implementation: a distroless base for Java, Node, Python, or a static Go/Rust binary, each stripped down to libc, certificates, timezone data, and the language runtime itself.</p>
+<h2 id="why-strip-the-shell">Why strip the shell</h2>
+<p>A normal Debian or Alpine-based image ships bash, coreutils, apt or apk, and dozens of small utilities nobody in production ever intentionally uses. Every one of those is attack surface: if an attacker gets remote code execution in your app, a shell and package manager give them a foothold to explore, download tools, and pivot. Without a shell, `docker exec -it container sh` doesn't work, and neither does a reverse shell payload that assumes `/bin/sh` exists. This doesn't make the app unhackable, but it removes an entire category of post-exploitation tooling for free.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Smaller images, fewer CVEs</strong>
+  <p>Distroless images are also just smaller — often tens of megabytes versus hundreds for a full Debian base — and fewer installed packages means fewer packages a vulnerability scanner (Trivy, Grype, Snyk) can flag. A lot of "CVE fatigue" in container scanning comes from OS packages the application never touches.</p>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-distroless">Latency and cost tradeoffs for distroless</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="building-for-distroless">Building for distroless with multi-stage builds</h2>
+<p>You almost never build directly on a distroless base — you need a compiler, package manager, or build toolchain to produce the artifact first. The standard pattern is a multi-stage Dockerfile: build in a full image, then copy only the compiled output into a distroless final stage.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-containers">Prompt patterns that work for containers</h2>
-<p>The performance of containers in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="how-to-evaluate-distroless-in-production">How to evaluate distroless in production</h2>
-<p>Production containers looks different from development containers. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">DOCKERFILE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>FROM golang:1.22 AS build
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -o /app ./cmd/server
 
-def list_distroless(query: str) -> str:
-    """List distroless matching the query."""
-    response = requests.get(
-        f"https://api.example.com/distroless",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="distroless", func=list_distroless, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /app /app
+USER nonroot:nonroot
+ENTRYPOINT ["/app"]</code></pre>
 </div>
+<p>Go and Rust are the easiest fits since they compile to static binaries with no runtime dependency. For Node or Python, use the language-specific distroless variant (`gcr.io/distroless/nodejs20-debian12`, `gcr.io/distroless/python3-debian12`) which bundles just enough of the runtime to execute your bundled code, and still nothing else.</p>
+<h2 id="debugging-without-a-shell">Debugging without a shell</h2>
+<p>The obvious cost: you can't `docker exec` in and poke around. Google ships `:debug` tag variants of most distroless images (e.g. `gcr.io/distroless/static-debian12:debug`) that include a minimal busybox shell for troubleshooting — use the debug tag locally or in staging, never in the production image. For production incident response, lean on structured logging shipped out of the container and `docker cp` for pulling files, rather than expecting to shell in live.</p>
+<div class="callout-warn callout">
+  <strong>Debug tags are not production images</strong>
+  <p>Swapping to a `:debug` tag to unblock an investigation and then forgetting to swap back reintroduces the exact shell-based attack surface distroless was meant to remove. Treat the debug tag as a local-only tool, and keep it out of the image your CI pipeline actually pushes.</p>
+</div>
+<h2 id="when-it-does-not-fit">When distroless doesn't fit</h2>
+<p>If your application legitimately needs to shell out — calling ImageMagick, ffmpeg, or another CLI tool as a subprocess — distroless is the wrong base unless you vendor that binary in yourself with its exact dependencies, which usually isn't worth the effort. It's also a poor fit for early-stage projects where local debugging speed matters more than hardened production posture. Distroless earns its keep once an application is stable and running at scale, where the shell was never actually being used — just sitting there as risk.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring containers first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add distroless on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with containers when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Base image</th><th>Includes a shell</th><th>Typical size</th></tr>
+  <tr><td>debian:bookworm</td><td>Yes</td><td>~120 MB</td></tr>
+  <tr><td>alpine:3.20</td><td>Yes (ash)</td><td>~7 MB</td></tr>
+  <tr><td>gcr.io/distroless/static-debian12</td><td>No</td><td>~2 MB</td></tr>
+  <tr><td>gcr.io/distroless/nodejs20-debian12</td><td>No</td><td>~70 MB (runtime included)</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on distroless containers — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Distroless is a small, mechanical change — swap the final stage of your Dockerfile — that removes a real class of container attack surface for close to zero runtime cost. The trade-off is debuggability, and the fix for that is discipline: debug tags stay out of production, and observability tooling replaces the reflex to shell in.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/container-registry-best-practices/">Container Registry Best Practices</a></li>
@@ -196,7 +143,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

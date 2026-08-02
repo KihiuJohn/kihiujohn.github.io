@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>n8n Webhook Patterns — A Field Guide | John Kihiu</title>
-<meta name="description" content="n8n Webhook Patterns — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
+<meta name="description" content="Practical n8n webhook trigger patterns: verifying Stripe and GitHub signatures, building idempotent handlers, choosing sync responses vs Respond to Webhook, and wiring error workflows.">
 <meta name="keywords" content="Acumatica n8n, Acumatica webhook, Acumatica patterns, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/n8n-webhook-patterns/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="n8n Webhook Patterns — A Field Guide">
-<meta property="og:description" content="n8n Webhook Patterns — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-webhook-patterns.svg">
+<meta property="og:description" content="Practical n8n webhook trigger patterns: verifying Stripe and GitHub signatures, building idempotent handlers, choosing sync responses vs Respond to Webhook, and wiring error workflows.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-webhook-patterns/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="workflow">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="patterns">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Webhook Patterns — A Field Guide","description":"n8n Webhook Patterns — A Field Guide is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-webhook-patterns.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-webhook-patterns/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Webhook Patterns — A Field Guide","description":"Practical n8n webhook trigger patterns: verifying Stripe and GitHub signatures, building idempotent handlers, choosing sync responses vs Respond to Webhook, and wiring error workflows.","image":"https://kihiujohn.github.io/assets/og/n8n-webhook-patterns.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-webhook-patterns/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n Webhook Patterns — A Field Guide","item":"https://kihiujohn.github.io/blog/n8n-webhook-patterns/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,101 +86,69 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n Webhook Patterns — A Field Guide</span></nav>
     <span class="tag">Workflow · N8n</span>
     <h1>n8n Webhook Patterns — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n Webhook Patterns — A Field Guide is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Practical n8n webhook trigger patterns: verifying Stripe and GitHub signatures, building idempotent handlers, choosing sync responses vs Respond to Webhook, and wiring error workflows.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation in production is 20% integration and 80% error handling. this is one of the parts of the error handling. The pattern that works is to push the workflow towards being observable, with a runbook for the failure modes that the integration tools don't cover.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The Webhook node is the easiest way to get n8n listening for incoming events, and that ease is exactly why it's misused: it's tempting to wire it straight to business logic and call it done. The workflows that hold up under real traffic add three things the default setup doesn't give you — signature verification so you know the request is genuinely from Stripe or GitHub, idempotency so a retried delivery doesn't double-process, and an explicit choice about whether to respond before or after the work finishes.</p>
+<h2 id="verifying-incoming-webhook-signatures">Verifying incoming webhook signatures</h2>
+<p>Every webhook endpoint is a public URL, and n8n's Webhook node will happily execute the workflow for anyone who finds it — there's no built-in requirement that the payload actually came from the provider it claims to. Stripe signs webhook payloads with an HMAC in the <code>Stripe-Signature</code> header; GitHub does the same with <code>X-Hub-Signature-256</code>. Verify it in a Code node immediately after the trigger, before any node touches the database or calls another API, and stop the workflow if verification fails.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · CODE NODE, VERIFY STRIPE SIGNATURE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const crypto = require('crypto');
+
+const signatureHeader = $input.first().json.headers['stripe-signature'];
+const rawBody = $input.first().json.body_raw; // configure Webhook node to pass raw body
+const secret = $env.STRIPE_WEBHOOK_SECRET;
+
+const [tPart, v1Part] = signatureHeader.split(',');
+const timestamp = tPart.split('=')[1];
+const expected = crypto
+  .createHmac('sha256', secret)
+  .update(`${timestamp}.${rawBody}`)
+  .digest('hex');
+
+if (expected !== v1Part.split('=')[1]) {
+  throw new Error('Invalid Stripe signature — rejecting webhook');
+}
+
+return $input.all();</code></pre>
+</div>
+<div class="callout-warn callout">
+  <strong>The Webhook node must pass the raw body</strong>
+  <p>HMAC verification needs the exact bytes that were signed. If n8n has already parsed the payload as JSON and re-serialized it, whitespace differences will break the signature check. Set the Webhook node's response mode to keep raw body access, or verify against the raw text before any JSON.parse happens.</p>
+</div>
+<h2 id="idempotency-for-retried-deliveries">Idempotency for retried deliveries</h2>
+<p>Stripe and GitHub both retry webhook deliveries on timeout or non-2xx response, which means your workflow will occasionally see the same event twice — sometimes minutes apart, sometimes after your workflow already fully processed it once. Every event from Stripe carries a unique <code>id</code> (e.g. <code>evt_1N...</code>); GitHub sends a delivery ID in the <code>X-GitHub-Delivery</code> header. Store processed event IDs in a table or key-value store and check it before doing any side-effecting work — the check-then-insert needs to happen inside the workflow, not as an afterthought, or you'll double-charge or double-notify on the retry.</p>
+<h2 id="respond-immediately-or-after-processing">Respond to Webhook immediately, or after processing</h2>
+<p>n8n gives you two shapes for responding to the caller: the Webhook node's own "Respond Immediately" setting, or an explicit <strong>Respond to Webhook</strong> node placed later in the workflow. If the provider expects a fast 2xx (Stripe times out around 20 seconds and will retry on timeout), don't make it wait for a slow downstream call — respond immediately with a 200, then continue the rest of the workflow asynchronously. If you need to return a computed result to the caller synchronously (an internal API-style webhook, not a third-party notification), place Respond to Webhook after the processing nodes so the response carries real data.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · WEBHOOK NODE, RESPOND IMMEDIATELY + ASYNC CONTINUATION</span><button class="copy-btn" type="button">Copy</button></div>
 <pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Nn", "type": "n8n-nodes-base.nn"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Nn"}]]}
-    }
-}</code></pre>
+  "name": "Stripe Webhook",
+  "type": "n8n-nodes-base.webhook",
+  "parameters": {
+    "path": "stripe/invoice-paid",
+    "responseMode": "responseNode",
+    "options": { "rawBody": true }
+  }
+}
+// downstream: Respond to Webhook node fires a 200 immediately,
+// a parallel branch continues to verify signature, check idempotency,
+// then update the invoice record</code></pre>
 </div>
-<h2 id="why-nn-fails-at-3-am-and-what-to-do">Why nn fails at 3 AM and what to do</h2>
-<p>In the work I have done on n8n webhook patterns — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
-</div>
-<h2 id="ordering-and-sequencing-in-webhook">Ordering and sequencing in webhook</h2>
-<p>When the work moves from design to production, the questions change. The nn is not the question; the failure mode of the webhook is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleNn(event) {
-    try {
-        const result = await processWebhook(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="error-workflows-for-what-slips-through">Error workflows for what slips through</h2>
+<p>Every workflow that handles external input needs a designated error workflow attached in its settings — n8n will route unhandled node failures there instead of just failing silently or returning a generic 500 to the provider. A minimal error workflow logs the failed execution ID, the triggering payload, and posts a notification (Slack, email, whatever your team actually looks at) so a bad deploy or a malformed payload from a provider gets noticed in minutes, not discovered when a customer complains that their payment never triggered fulfillment.</p>
 <div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+  <strong>Test retries, not just the happy path</strong>
+  <p>Stripe's CLI (<code>stripe trigger</code>) and GitHub's webhook redelivery UI both let you resend a real event on demand. Use them to confirm your idempotency check actually blocks a duplicate — a workflow that only gets tested with fresh, unique payloads will pass every manual test and still double-process in production.</p>
 </div>
-<h2 id="the-runbook-for-nn">The runbook for nn</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        nn: item.json.nn,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>The performance of webhook in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="what-n8n-webhook-patterns-a-field-guide-is-for">What n8n Webhook Patterns — A Field Guide is for</h2>
-<p>Production webhook looks different from development webhook. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Nn", "type": "n8n-nodes-base.nn"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Nn"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring webhook first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add n8n on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with webhook when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on n8n webhook patterns — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>A webhook trigger that only handles the well-formed, first-delivery, friendly case is a demo, not a production integration. Verify the signature before trusting the payload, de-duplicate on the provider's event ID before doing side-effecting work, decide deliberately whether the response should fire before or after processing, and give every webhook workflow an error workflow to catch what you didn't anticipate.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/webhook-fanout-patterns/">Webhook Fanout Patterns — A Field Guide</a></li>
@@ -192,7 +159,6 @@ return items.map(item =&gt; ({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

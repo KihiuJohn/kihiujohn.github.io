@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GRR vs NRR — A Field Guide">
 <meta property="og:description" content="GRR vs NRR — A Field Guide is the work that turns a product into a business. The code is one thing; the business is the company that ships the code, sells it, supports it, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/grr-vs-nrr.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/grr-vs-nrr/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="saas">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,83 +92,43 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have worked with enough SaaS founders to know the metrics that matter. this is one of them, but only if you measure it correctly. The common misinterpretations are the ones that get the team off-track. This article is the correct measurements and the common traps.</p>
-<h2 id="how-nrr-distorts-the-picture">How nrr distorts the picture</h2>
-<p>How nrr distorts the picture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Gross revenue retention and net revenue retention answer different questions, and conflating them is the single most common mistake I see in SaaS board decks. GRR tells you how much revenue you keep. NRR tells you how much revenue you keep <em>plus</em> grow from your existing base. Both are legitimate metrics; the trouble starts when a company reports only NRR because it is the flattering one and lets a real retention problem hide behind expansion revenue.</p>
+<h2 id="the-formulas">The formulas, precisely</h2>
+<p>Start with a cohort of customers and their monthly recurring revenue at the start of the period. <strong>Gross revenue retention</strong> is starting MRR, minus churn, minus downgrades, divided by starting MRR — and it is capped at 100%, because GRR never includes expansion:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · FORMULAS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>GRR = (Starting MRR - Churned MRR - Downgrade MRR) / Starting MRR
+NRR = (Starting MRR - Churned MRR - Downgrade MRR + Expansion MRR) / Starting MRR
+
+-- GRR is capped at 100% (it only measures loss)
+-- NRR has no upper cap (expansion can push it well past 100%)</code></pre>
 </div>
-<h2 id="cohort-cuts-that-reveal-the-truth">Cohort cuts that reveal the truth</h2>
-<p>In the work I have done on grr vs nrr — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p><strong>Net revenue retention</strong> adds expansion MRR — upsells, seat growth, add-on modules — back into the numerator. That's the only difference, but it changes what the number can tell you. NRR can exceed 100% if expansion outpaces churn and downgrades; GRR structurally cannot, because it only measures what you lost.</p>
+<h2 id="why-both-numbers-matter">Why you need both, not one</h2>
+<p>A SaaS company can post 115% NRR while its GRR sits at 82%. That combination means the product is leaking customers or shrinking accounts fast, and the headline number is being rescued by a handful of large accounts expanding. Investors who only see NRR will miss this. GRR is the metric that isolates the health of the core product experience — onboarding, support, whether the thing does what it promised — independent of your expansion motion (pricing tiers, seat-based growth, cross-sell). If GRR is weak, no amount of expansion sales fixes the underlying churn problem; it just buys time.</p>
 <div class="callout callout-warn">
-  <strong>MRR is the headline</strong>
-  <p>A SaaS company that grows 20% MoM but churns 10% MoM is dying. A SaaS company that grows 5% MoM with 1% churn is a goldmine. The growth rate is the headline; the churn rate is the story.</p>
+  <strong>NRR alone can hide a leaky bucket</strong>
+  <p>A handful of enterprise accounts expanding 3x can offset dozens of small accounts churning to zero. The blended NRR looks great. Segment by cohort and account size before trusting a single NRR figure — otherwise you are optimizing for whichever ten accounts happen to be growing.</p>
 </div>
-<h2 id="the-cohort-retention-curve-for-grr">The cohort retention curve for grr</h2>
-<p>When the work moves from design to production, the questions change. The grr is not the question; the failure mode of the nrr is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def calculate_nrr(df):
-    starting_mrr = df[df.month == df.cohort_month].mrr.sum()
-    ending_mrr = df[df.month == df.max_month].mrr.sum()
-    return ending_mrr / starting_mrr</code></pre>
-</div>
-<h2 id="when-grr-is-a-leading-indicator-vs-a-lagging-one">When grr is a leading indicator vs a lagging one</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="reading-the-benchmarks">What good looks like</h2>
+<p>Public SaaS benchmarks (Bessemer's state-of-the-cloud reports and similar annual surveys) generally put best-in-class NRR in the 120%+ range for enterprise-heavy, expansion-driven products, and "healthy" GRR in the low-to-mid 90s. SMB-focused products with lower price points and higher logo churn typically post lower numbers on both — GRR in the 80s and NRR closer to 100% is common and not alarming for that segment. The right benchmark depends heavily on customer size and contract length; comparing a self-serve SMB tool's GRR to an enterprise platform's GRR is comparing different businesses, not different execution.</p>
+<h2 id="cohort-not-blended">Measure by cohort, not blended</h2>
+<p>A blended monthly NRR across your whole customer base smooths out exactly the signal you need. The useful view is a cohort retention curve: take everyone who started in a given month, and track what fraction of their original MRR remains (or grows) in each subsequent month. Plotted across several cohorts, this shows whether retention is improving release over release, or whether a product change in a particular quarter quietly made churn worse. A single trailing-twelve-month NRR number cannot show you that — it is already an average of effects that may be moving in opposite directions.</p>
 <div class="callout">
-  <strong>The cohort is the unit</strong>
-  <p>Cohort analysis is the only way to see the truth. A monthly aggregate lies. The right pattern is to look at the cohort retention curve.</p>
+  <strong>Downgrades are not churn, but they behave like churn</strong>
+  <p>A customer who drops from 50 seats to 10 hasn't churned in most definitions, but the revenue impact on GRR is identical to losing four out of five similarly-sized accounts. Track downgrade MRR separately from full churn — the causes and the fixes are usually different (a feature gap vs. a champion leaving the company).</p>
 </div>
-<h2 id="what-grr-vs-nrr-a-field-guide-actually-measures">What GRR vs NRR — A Field Guide actually measures</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Cohort retention
-WITH cohort AS (
-  SELECT customer_id, DATE_TRUNC('month', started_at) AS cohort_month
-  FROM customers
-)
-SELECT cohort_month, nrr, COUNT(*) AS retained
-FROM cohort
-GROUP BY 1, 2;</code></pre>
-</div>
-<h2 id="why-the-metric-matters-for-your-business">Why the metric matters for your business</h2>
-<p>The performance of nrr in saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Pricing is the lever</strong>
-  <p>A 10% price increase is a 10% revenue increase, with no extra cost. The right pattern is to raise prices every year for new customers and grandfather the old ones.</p>
-</div>
-<h2 id="how-to-calculate-it-correctly">How to calculate it correctly</h2>
-<p>Production nrr looks different from development nrr. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  DATE_TRUNC('month', started_at) AS month,
-  COUNT(DISTINCT customer_id) AS new_customers,
-  SUM(mrr) AS new_mrr
-FROM customers
-WHERE started_at &gt;= CURRENT_DATE - INTERVAL '12 months'
-GROUP BY 1
-ORDER BY 1;</code></pre>
-</div>
+<h2 id="which-one-to-lead-with">Which one to lead with, and when</h2>
+<p>For internal decision-making, lead with GRR. It tells the product and customer success teams whether the core offering is retaining value on its own merits. For investor updates and board decks, report both, explicitly labeled, and be ready to explain the gap between them if it's large. A wide GRR-to-NRR spread isn't automatically bad — it can mean you have a strong expansion motion — but it deserves an explanation rather than letting the higher number stand in for the whole story.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring nrr first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add grr on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with nrr when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Metric</th><th>Includes expansion?</th><th>Capped at 100%?</th><th>Tells you</th></tr>
+  <tr><td>GRR</td><td>No</td><td>Yes</td><td>How well you retain revenue you already have</td></tr>
+  <tr><td>NRR</td><td>Yes</td><td>No</td><td>Net revenue trajectory of the existing base, including growth</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on grr vs nrr — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>GRR and NRR are not competing metrics — they're a diagnostic pair. NRR tells you whether the existing base is growing in revenue terms; GRR tells you whether that growth is masking churn. Report both, cut them by cohort and account size before drawing conclusions, and treat a wide gap between them as a question to answer rather than a footnote to skip.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.saasmetricsboard.com/" target="_blank" rel="noopener noreferrer">SaaS Metrics Standards Board</a></li><li><a href="https://www.bvp.com/cloud-index" target="_blank" rel="noopener noreferrer">Bessemer Cloud Index</a></li><li><a href="https://www.ftc.gov/business-guidance" target="_blank" rel="noopener noreferrer">FTC business guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/nrr-calculation/">Net Revenue Retention — A Field Guide</a></li>
@@ -180,7 +139,6 @@ ORDER BY 1;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

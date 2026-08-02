@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GitHub Actions Self-Hosted Runners">
 <meta property="og:description" content="GitHub Actions Self-Hosted Runners is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/github-actions-self-hosted-runners.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/github-actions-self-hosted-runners/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,50 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Production DevOps for this looks different from CI/CD demos. The patterns that survive 18 months of operation are the ones that are simple enough for a tired on-call engineer to debug at 2 AM. This article is the field-tested patterns, with the failure modes that don't show up in a demo.</p>
-<h2 id="slos-and-error-budgets-for-actions">SLOs and error budgets for actions</h2>
-<p>SLOs and error budgets for actions is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Self-hosted runners trade GitHub's managed, disposable VMs for machines you control — useful when you need specific hardware, access to an internal network, or you're trying to cut minutes-based billing on a high-volume repo. That control comes with operational and security responsibilities GitHub-hosted runners quietly absorb for you, and the security ones in particular are easy to get wrong on a public repository.</p>
+
+<h2 id="registering-a-runner">Registering a runner</h2>
+<p>A self-hosted runner starts as a downloadable agent you run on your own machine or container. You register it against a repository, organization, or enterprise by running <code>./config.sh --url https://github.com/org/repo --token &lt;registration-token&gt;</code>, which authenticates the machine and adds it to the pool. From there <code>./run.sh</code> starts the listener that polls for queued jobs matching the runner's labels. Nothing about the runner itself is managed by GitHub past that point — OS patching, tool versions, disk cleanup, and process supervision are all on you.</p>
+
+<h2 id="ephemeral-vs-persistent">Ephemeral vs. persistent runners</h2>
+<p>A persistent runner stays registered and reuses the same filesystem and environment across many jobs — faster to start, but state leaks between runs: leftover build artifacts, cached credentials, or a poisoned dependency from a previous job can affect the next one. An ephemeral runner (<code>config.sh --ephemeral</code>) deregisters itself and exits after a single job, so each run starts from a clean image. Ephemeral costs you the startup time of provisioning a fresh environment per job, but it removes an entire class of "why does this only fail on this runner" bugs and is the safer default for anything untrusted.</p>
+
+<h2 id="runner-groups-and-labels">Runner groups and labels for routing</h2>
+<p>Runner groups control which repositories or organizations are allowed to use a given set of runners — useful for separating, say, a pool with access to internal systems from a general-purpose pool open to every repo in the org. Labels are the finer-grained routing mechanism: a workflow's <code>runs-on: [self-hosted, linux, gpu]</code> targets any runner carrying all three labels, which lets you pin specific jobs to machines with the hardware or network access they actually need, rather than every job racing for the same pool.</p>
+
+<h2 id="autoscaling-with-arc">Autoscaling with actions-runner-controller</h2>
+<p>Running a fixed pool of always-on VMs wastes capacity outside peak hours and starves it during a deploy storm. <a href="https://github.com/actions/actions-runner-controller">actions-runner-controller (ARC)</a> runs on Kubernetes and scales runner pods up and down based on queued job demand, using GitHub's webhook events or polling to know when to add capacity. It's the standard way to get self-hosted economics without babysitting a fixed fleet.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="incident-response-for-github">Incident response for github</h2>
-<p>In the work I have done on github actions self-hosted runners, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="what-github-actions-self-hosted-runners-gives-you">What GitHub Actions Self-Hosted Runners gives you</h2>
-<p>When the work moves from design to production, the questions change. The github is not the question; the failure mode of the actions is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "github_actions" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">YAML · ARC AUTOSCALING RUNNER SET</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
 metadata:
-  name: github
+  name: internal-linux-runners
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: github
+  githubConfigUrl: https://github.com/my-org
+  githubConfigSecret: gha-runner-token
+  minRunners: 0
+  maxRunners: 20
   template:
-    metadata:
-      labels:
-        app: github</code></pre>
+    spec:
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:latest</code></pre>
 </div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The performance of actions in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
+
+<h2 id="the-fork-pr-risk">The fork PR risk on public repos</h2>
+<p>This is the one that gets teams burned. GitHub-hosted runners for public repos run pull requests from forks with reduced permissions and no access to secrets by default, precisely because anyone can open a PR and have your CI execute arbitrary code from it. Point a self-hosted runner at a public repo's default <code>pull_request</code> trigger and you've handed arbitrary code execution, on your own infrastructure, to anyone who opens a PR — the workflow runs on a machine that can potentially reach your internal network, your cache, whatever else lives next to it.</p>
+<div class="callout-warn">
+  <strong>pull_request_target plus self-hosted is worse</strong>
+  <p><code>pull_request_target</code> runs with the base repo's permissions and secrets rather than the fork's, specifically so maintainers can do things like label PRs automatically. Combine that trigger with a self-hosted runner on a public repo and a forked PR can potentially exfiltrate secrets or pivot into your network using a job that was granted full trust. If you must build on forks with self-hosted runners, gate the run behind a required reviewer approval, and never check out and directly execute code from the fork inside a <code>pull_request_target</code> job.</p>
 </div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>Production actions looks different from development actions. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Github
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring actions first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add github on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with actions when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on github actions self-hosted runners. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<h2 id="network-and-firewall-considerations">Network and firewall considerations</h2>
+<p>Part of the appeal of self-hosted runners is reaching resources a hosted runner never could — an internal artifact registry, a database behind a VPN, an on-prem deployment target. That means the runner itself becomes a bridge between GitHub's job queue and your internal network, so it needs outbound access to GitHub (for polling and job data) and whatever internal resources the job touches, but ideally nothing more. Treat the runner host like any other service with network access to sensitive systems: least-privilege security groups, no inbound exposure, and monitoring on what it actually connects to during a job.</p>
+
+<p>Self-hosted runners are worth it for hardware needs, internal network access, or cost at scale — but only with ephemeral runners as the default, labels and runner groups keeping jobs on the right pool, and a hard rule against running them against untrusted pull requests on public repositories.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/github-actions-caching/">GitHub Actions Caching — A Field Guide</a></li>
@@ -191,7 +146,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

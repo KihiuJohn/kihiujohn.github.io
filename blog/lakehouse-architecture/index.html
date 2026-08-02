@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lakehouse Architecture — A Field Guide | John Kihiu</title>
-<meta name="description" content="Lakehouse Architecture — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="How lakehouse architecture combines data lake storage with warehouse-style transactions and schema enforcement, using open table formats like Delta Lake, Iceberg, and Hudi.">
 <meta name="keywords" content="Acumatica lakehouse, Acumatica architecture, Acumatica data, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/lakehouse-architecture/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Lakehouse Architecture — A Field Guide">
-<meta property="og:description" content="Lakehouse Architecture — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/lakehouse-architecture.svg">
+<meta property="og:description" content="How lakehouse architecture combines data lake storage with warehouse-style transactions and schema enforcement, using open table formats like Delta Lake, Iceberg, and Hudi.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/lakehouse-architecture/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="data">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Lakehouse Architecture — A Field Guide","description":"Lakehouse Architecture — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/lakehouse-architecture.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/lakehouse-architecture/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Lakehouse Architecture — A Field Guide","description":"How lakehouse architecture combines data lake storage with warehouse-style transactions and schema enforcement, using open table formats like Delta Lake, Iceberg, and Hudi.","image":"https://kihiujohn.github.io/assets/og/lakehouse-architecture.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/lakehouse-architecture/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Lakehouse Architecture — A Field Guide","item":"https://kihiujohn.github.io/blog/lakehouse-architecture/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,50 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Lakehouse Architecture — A Field Guide</span></nav>
     <span class="tag">Data / ML · Lakehouse</span>
     <h1>Lakehouse Architecture — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Lakehouse Architecture — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How lakehouse architecture combines data lake storage with warehouse-style transactions and schema enforcement, using open table formats like Delta Lake, Iceberg, and Hudi.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data engineering is a discipline, not a stack. this is one of the parts of the discipline. The pattern that works is to push the data towards being a contract, the tests towards being the source of truth, and the pipeline towards being boring and recoverable. This article is the discipline.</p>
-<h2 id="cost-optimisation-for-lakehouse">Cost optimisation for lakehouse</h2>
-<p>Cost optimisation for lakehouse is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The lakehouse pitch is simple: keep data in cheap object storage the way a data lake does, but get the transactional guarantees, schema enforcement, and query performance of a warehouse on top of it. Delta Lake, Apache Iceberg, and Apache Hudi are the three table formats that made this actually work, by adding a transaction log and metadata layer over plain Parquet files sitting in S3, GCS, or Azure Blob.</p>
+<h2 id="what-a-lake-was-missing">What a plain data lake was missing</h2>
+<p>A traditional data lake is just files in object storage — Parquet, ORC, or CSV, organized into directories, queried by whatever engine you point at them. That's cheap and flexible, but it has no concept of a transaction: two jobs writing to the same table at once can corrupt it, there's no schema enforcement so a bad write can silently introduce a column-type mismatch, and there's no way to see a consistent snapshot of a table while it's being updated. Warehouses solved all of this decades ago with ACID transactions, but at the cost of proprietary storage you can't cheaply query with arbitrary engines. The lakehouse closes that gap by adding a metadata/transaction layer on top of the same open file formats the lake already used.</p>
+<h2 id="the-transaction-log-is-the-mechanism">The transaction log is the actual mechanism</h2>
+<p>Delta Lake, Iceberg, and Hudi all solve this the same fundamental way: a table isn't just "the files in this directory," it's a versioned log of which files belong to which version of the table. Delta Lake keeps a JSON+Parquet transaction log (<code>_delta_log</code>) of every add/remove file operation. Iceberg tracks table state through a chain of metadata and manifest files, with no dependency on a specific engine's log format. Hudi does something similar with its own timeline and indexing structure, and additionally supports upsert-optimized storage layouts (copy-on-write vs. merge-on-read) more explicitly than the other two. The practical effect for all three: readers get a consistent snapshot, writers get atomic commits, and you get time travel — querying the table as it looked at a previous version or timestamp.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM lakehouse
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · Delta Lake time travel</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>-- Read the table as of a previous version
+SELECT * FROM orders VERSION AS OF 42;
+
+-- Or as of a timestamp
+SELECT * FROM orders TIMESTAMP AS OF '2026-07-01 00:00:00';
+
+-- MERGE for upserts, not possible on plain Parquet without this layer
+MERGE INTO orders t
+USING staged_orders s
+ON t.order_id = s.order_id
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *;</code></pre>
 </div>
-<h2 id="the-testing-pyramid-for-architecture">The testing pyramid for architecture</h2>
-<p>In the work I have done on lakehouse architecture — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-lakehouse">Backfills and rollbacks for lakehouse</h2>
-<p>When the work moves from design to production, the questions change. The lakehouse is not the question; the failure mode of the architecture is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.lakehouse > 0).groupBy("architecture").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="what-lakehouse-architecture-a-field-guide-is-for">What Lakehouse Architecture — A Field Guide is for</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="schema-enforcement-and-evolution">Schema enforcement and evolution</h2>
+<p>All three formats enforce schema on write by default, rejecting a write that doesn't match the table's expected columns and types — the thing a raw Parquet-files-in-a-folder lake has no way to do. They also support schema evolution: adding a nullable column, widening a type, or renaming a field, tracked in the metadata rather than requiring a full table rewrite. This is what makes a lakehouse usable as the single source of truth for both ad hoc analytics and production ETL, instead of needing a separate curated warehouse layer just for the schema guarantees.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Picking a format is mostly about the compute ecosystem, not features</strong>
+  <p>Delta Lake has the deepest integration with Databricks/Spark; Iceberg has the widest engine support (Spark, Trino, Flink, Snowflake, BigQuery all read Iceberg natively) and is the closest thing to a vendor-neutral standard; Hudi leans hardest into incremental/streaming upsert workloads. If you're not on Databricks and want to avoid lock-in, Iceberg is usually the safer default choice today.</p>
 </div>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_lakehouse') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
+<h2 id="compute-storage-separation">Why separating compute from storage is the real win</h2>
+<p>The other half of the lakehouse pitch is that storage (cheap object storage) is decoupled from compute (Spark, Trino, Flink, or a warehouse's own engine querying the same files). A traditional warehouse bundles the two, so you pay warehouse-storage prices for cold data nobody's actively querying, and scaling compute independently of storage isn't always straightforward. With a lakehouse, the data sits in S3 at object storage prices regardless of which engine is reading it, and you can point three different query engines at the same Iceberg table without duplicating the data three times.</p>
+<div class="callout-warn callout">
+  <strong>Small files and compaction are still your problem</strong>
+  <p>Streaming or frequent small writes to a lakehouse table produce many small Parquet files, which hurts read performance regardless of which table format you're using. All three formats support compaction (Delta's <code>OPTIMIZE</code>, Iceberg's rewrite procedures, Hudi's clustering), but none of them do it for you automatically — you need a scheduled compaction job, or read performance degrades over months without anyone noticing until a query that used to take seconds takes minutes.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>The performance of architecture in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>Production architecture looks different from development architecture. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM lakehouse
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring architecture first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add lakehouse on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with architecture when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="when-a-warehouse-is-still-simpler">When a plain warehouse is still the simpler answer</h2>
+<p>A lakehouse is the right call when you have large volumes of semi-structured or unstructured data, need multiple engines querying the same data, or are already paying warehouse-storage costs for data that's mostly cold. If your workload is a few terabytes of clean structured data queried almost exclusively by one BI tool, a managed warehouse (BigQuery, Snowflake, Redshift) with none of the table-format decisions is often genuinely less operational overhead — the lakehouse buys you flexibility and cost control at the price of managing compaction, file layout, and catalog infrastructure yourself.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on lakehouse architecture — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The lakehouse works because Delta Lake, Iceberg, and Hudi all solve the same problem the same way: a transaction log and metadata layer over open file formats, giving object storage the ACID guarantees and schema enforcement that used to require a proprietary warehouse. The trade-off is that compaction, catalog management, and format choice become your responsibility instead of a vendor's — worth it once you're running enough scale or enough different query engines that the flexibility pays for the extra operational surface.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.apache.org/" target="_blank" rel="noopener noreferrer">Apache data project documentation</a></li><li><a href="https://docs.getdbt.com/" target="_blank" rel="noopener noreferrer">dbt documentation</a></li><li><a href="https://www.nist.gov/privacy-framework" target="_blank" rel="noopener noreferrer">NIST Privacy Framework</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-data-mesh-pattern/">Acumatica Data Mesh Pattern</a></li>
@@ -179,7 +140,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

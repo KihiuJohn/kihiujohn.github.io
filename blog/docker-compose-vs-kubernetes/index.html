@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Docker Compose vs Kubernetes — A Comparison">
 <meta property="og:description" content="Docker Compose vs Kubernetes — A Comparison is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/docker-compose-vs-kubernetes.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/docker-compose-vs-kubernetes/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,94 +92,52 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>The cloud in 2026 is more capable than it was in 2020. Serverless, edge functions, managed Kubernetes, managed databases. this is one of the patterns that the cloud makes possible. This article is the pattern.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Docker
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="why-docker-is-the-on-call-s-best-friend">Why docker is the on-call's best friend</h2>
-<p>In the work I have done on docker compose vs kubernetes — a comparison, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="gitops-for-compose">GitOps for compose</h2>
-<p>When the work moves from design to production, the questions change. The docker is not the question; the failure mode of the compose is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "docker_compose" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="the-deployment-pipeline-for-docker">The deployment pipeline for docker</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Compose and Kubernetes solve overlapping but different problems, and the comparison usually gets framed wrong as "which is better" instead of "which failure modes do you actually need to handle." Compose orchestrates containers on one host. Kubernetes orchestrates containers across a cluster of hosts, with a scheduler, a reconciliation loop, and a much larger set of moving parts to operate.</p>
+<h2 id="the-core-difference-single-host-vs-cluster">Single host vs. cluster is the real dividing line</h2>
+<p>Compose has no concept of a node — it starts and stops containers on the one Docker daemon it's talking to. If that host dies, everything on it is down until someone intervenes. Kubernetes distributes pods across multiple nodes and, when a node fails, its scheduler reschedules the affected pods onto healthy nodes automatically. That's the single biggest capability gap, and it's also the capability that costs you a control plane, etcd, kubelets, and a much bigger operational surface to secure and upgrade.</p>
+<h2 id="self-healing-and-scaling">Self-healing and autoscaling are Kubernetes-native, not Compose-native</h2>
+<p>Kubernetes constantly reconciles actual state against desired state: a pod that crashes gets restarted, a node that dies gets its workload rescheduled elsewhere, and a Horizontal Pod Autoscaler can add replicas based on CPU or custom metrics without a human involved. Compose's `restart:` policy handles container crashes on the same host, but there's no cluster-aware rescheduling, no built-in autoscaling, and no equivalent of a Kubernetes Deployment's rolling update strategy with configurable surge and unavailability limits — a Compose rolling update is a script you write, not a primitive you configure.</p>
 <div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
+  <strong>Kubernetes also means more YAML to reason about</strong>
+  <p>The same three-service app that's 40 lines in a docker-compose.yml is easily 300+ lines of Kubernetes manifests once you add Deployments, Services, Ingress, ConfigMaps, and Secrets — before you introduce Helm or Kustomize to manage that sprawl. That complexity buys real capability, but it's not free, and teams underestimate the ongoing cost of maintaining it.</p>
 </div>
-<h2 id="slos-and-error-budgets-for-compose">SLOs and error budgets for compose</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="networking-and-service-discovery">Networking and service discovery differ structurally</h2>
+<p>In Compose, services on the same network resolve each other by service name via Docker's embedded DNS — simple, and sufficient for a handful of services. Kubernetes Services provide the same name-based discovery but layered over a cluster-wide network (via a CNI plugin like Calico or Cilium) that has to route traffic between pods that could be on any node, plus an Ingress controller for anything reaching the cluster from outside. The Kubernetes model scales to hundreds of services across dozens of nodes; the Compose model doesn't need to, because it was never meant to.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
+  <div class="code-header"><span class="code-lang">YAML · same service, two worlds</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># docker-compose.yml — single host
+services:
+  api:
+    image: registry.example.com/api:1.8.2
+    restart: unless-stopped
+    ports: ["3000:3000"]
+
+# kubernetes — cluster, needs a Deployment + Service (abridged)
+apiVersion: apps/v1
 kind: Deployment
-metadata:
-  name: docker
+metadata: { name: api }
 spec:
   replicas: 3
-  selector:
-    matchLabels:
-      app: docker
   template:
-    metadata:
-      labels:
-        app: docker</code></pre>
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/api:1.8.2</code></pre>
 </div>
-<h2 id="incident-response-for-docker">Incident response for docker</h2>
-<p>The performance of compose in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
-</div>
-<h2 id="what-docker-compose-vs-kubernetes-a-comparison-gives-you">What Docker Compose vs Kubernetes — A Comparison gives you</h2>
-<p>Production compose looks different from development compose. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Docker
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
+<h2 id="the-honest-decision-framework">Choosing between them honestly</h2>
+<p>Compose is the right tool when your workload fits on one host (or a small number of independently-managed hosts), your team is small, and operational simplicity matters more than automatic failover. Kubernetes earns its complexity when you genuinely need multi-node scheduling, want autoscaling driven by real metrics, or are running enough services that manual coordination becomes the bottleneck. A managed Kubernetes offering (EKS, GKE, AKS) removes the control-plane operational burden but not the manifest complexity — that part is unavoidable either way.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring compose first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add docker on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with compose when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Capability</th><th>Docker Compose</th><th>Kubernetes</th></tr>
+  <tr><td>Multi-host scheduling</td><td>No</td><td>Yes</td></tr>
+  <tr><td>Automatic node-failure recovery</td><td>No</td><td>Yes</td></tr>
+  <tr><td>Built-in autoscaling</td><td>No</td><td>Yes (HPA/VPA)</td></tr>
+  <tr><td>Rolling updates</td><td>Manual</td><td>Native (Deployment strategy)</td></tr>
+  <tr><td>Operational complexity</td><td>Low</td><td>High</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on docker compose vs kubernetes — a comparison. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Neither tool is strictly better — Compose is the right amount of orchestration for a single host, and Kubernetes is the right amount for a real cluster with failure and scaling requirements Compose was never built to handle. Pick based on which failure modes you actually need to survive, not on which one shows up more in job postings.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/docker-compose-production/">Docker Compose in Production</a></li>
@@ -191,7 +148,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

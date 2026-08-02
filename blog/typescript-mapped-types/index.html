@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TypeScript Mapped Types — A Field Guide | John Kihiu</title>
-<meta name="description" content="TypeScript Mapped Types — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
+<meta name="description" content="A practical guide to TypeScript mapped types: the { [K in keyof T]: ... } syntax, key remapping with as, the +readonly/-readonly and +?/-? modifiers, and building your own Getters, Partial, and Readonly from scratch.">
 <meta name="keywords" content="Acumatica typescript, Acumatica mapped, Acumatica types, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/typescript-mapped-types/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="TypeScript Mapped Types — A Field Guide">
-<meta property="og:description" content="TypeScript Mapped Types — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/typescript-mapped-types.svg">
+<meta property="og:description" content="A practical guide to TypeScript mapped types: the { [K in keyof T]: ... } syntax, key remapping with as, the +readonly/-readonly and +?/-? modifiers, and building your own Getters, Partial, and Readonly from scratch.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/typescript-mapped-types/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="types">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"TypeScript Mapped Types — A Field Guide","description":"TypeScript Mapped Types — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.","image":"https://kihiujohn.github.io/assets/og/typescript-mapped-types.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/typescript-mapped-types/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"TypeScript Mapped Types — A Field Guide","description":"A practical guide to TypeScript mapped types: the { [K in keyof T]: ... } syntax, key remapping with as, the +readonly/-readonly and +?/-? modifiers, and building your own Getters, Partial, and Readonly from scratch.","image":"https://kihiujohn.github.io/assets/og/typescript-mapped-types.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/typescript-mapped-types/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"TypeScript Mapped Types — A Field Guide","item":"https://kihiujohn.github.io/blog/typescript-mapped-types/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,113 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">TypeScript Mapped Types — A Field Guide</span></nav>
     <span class="tag">Modern Web · Typescript</span>
     <h1>TypeScript Mapped Types — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">TypeScript Mapped Types — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A practical guide to TypeScript mapped types: the { [K in keyof T]: ... } syntax, key remapping with as, the +readonly/-readonly and +?/-? modifiers, and building your own Getters, Partial, and Readonly from scratch.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-20">Jun 20, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The modern web stack in 2026 has stabilised. The framework matters less than the architecture; the architecture is what makes the app scale. this is one of the patterns that the architecture has to get right. This article is the architecture.</p>
-<h2 id="when-typescript-is-the-wrong-tool">When typescript is the wrong tool</h2>
-<p>When typescript is the wrong tool is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Mapped types are how TypeScript lets you build a new object type by transforming every property of an existing one, instead of writing the same shape out by hand three different ways. Once the syntax clicks, you stop writing one-off interfaces for every variant of a type and start writing a single transformation that produces all of them. This is the mechanism behind <code>Partial</code>, <code>Readonly</code>, <code>Pick</code>, and <code>Record</code> in the standard lib — and once you can write those yourself, most of what looks like "advanced TypeScript" in library type definitions stops being mysterious.</p>
+<h2 id="the-basic-syntax">The basic syntax</h2>
+<p>A mapped type has one job: iterate over the keys of a type and produce a value for each one. The shape is <code>{ [K in keyof T]: SomeTransformOf<T[K]> }</code>. <code>keyof T</code> gives you the union of T's property names, <code>K in</code> iterates over that union the way a <code>for...in</code> loop would at runtime, and whatever you write after the colon decides what each resulting property looks like.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
+  <div class="code-header"><span class="code-lang">TypeScript</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
+
+// Reimplementing Partial&lt;T&gt; from scratch
+type MyPartial&lt;T&gt; = {
+  [K in keyof T]?: T[K];
+};
+
+// Reimplementing Readonly&lt;T&gt; from scratch
+type MyReadonly&lt;T&gt; = {
+  readonly [K in keyof T]: T[K];
+};
+
+type DraftProduct = MyPartial&lt;Product&gt;;
+// { id?: number; name?: string; price?: number }
+
+type FrozenProduct = MyReadonly&lt;Product&gt;;
+// { readonly id: number; readonly name: string; readonly price: number }</code></pre>
 </div>
-<h2 id="build-vs-buy-for-mapped">Build vs buy for mapped</h2>
-<p>In the work I have done on typescript mapped types — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="testing-typescript-in-isolation">Testing typescript in isolation</h2>
-<p>When the work moves from design to production, the questions change. The typescript is not the question; the failure mode of the mapped is.</p>
+<p>That's genuinely all <code>Partial</code> and <code>Readonly</code> are in <code>lib.es5.d.ts</code> — a mapped type with a modifier tacked onto the property. There's no special compiler magic beyond what mapped types already give you.</p>
+<h2 id="modifiers-adding-and-removing-readonly-and-optional">Modifiers: adding and removing readonly and optional</h2>
+<p>The <code>?</code> and <code>readonly</code> modifiers can be added or stripped explicitly with <code>+</code> and <code>-</code> prefixes. Writing <code>readonly</code> alone (as above) implies <code>+readonly</code>; writing <code>-readonly</code> removes it even if the source type already has it. The same applies to <code>+?</code>/<code>-?</code> for optionality. This is what lets you write a type that goes the opposite direction from <code>Partial</code> and <code>Readonly</code>: one that unlocks a type instead of locking it down.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useTypescript(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">TypeScript</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>interface Config {
+  readonly apiUrl?: string;
+  readonly retries?: number;
+}
+
+// Strip both readonly and optional — the inverse of Partial&lt;Readonly&lt;T&gt;&gt;
+type Concrete&lt;T&gt; = {
+  -readonly [K in keyof T]-?: T[K];
+};
+
+type ResolvedConfig = Concrete&lt;Config&gt;;
+// { apiUrl: string; retries: number }</code></pre>
+</div>
+<p>This matters in practice more than it looks: config objects are frequently defined as fully optional and readonly for the caller, but once you've merged them with defaults internally, every field really is required and mutable. <code>Concrete&lt;T&gt;</code> expresses that without redeclaring the interface.</p>
+<div class="callout">
+  <strong>Modifiers only add or remove — they don't transform</strong>
+  <p><code>+readonly</code>/<code>-readonly</code> and <code>+?</code>/<code>-?</code> control the property's modifiers, not its value type. To change the actual type of each property (e.g. wrap it in a function, or convert it to a string), you do that in the value position after the colon, which is a separate step from the modifier syntax.</p>
+</div>
+<h2 id="key-remapping-with-as">Key remapping with `as`</h2>
+<p>TypeScript 4.1 added the ability to rename keys during the mapping, using an <code>as</code> clause right after the <code>in</code> clause: <code>{ [K in keyof T as NewKeyType]: T[K] }</code>. <code>NewKeyType</code> is usually a template literal type built from <code>K</code>, and this is the piece that makes it possible to generate a whole family of derived method names — getters, setters, event handler names — from a single object shape.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TypeScript</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>interface Person {
+  name: string;
+  age: number;
+  email: string;
+}
+
+// Turn every property into a getXxx() method
+type Getters&lt;T&gt; = {
+  [K in keyof T as `get${Capitalize&lt;string &amp; K&gt;}`]: () =&gt; T[K];
+};
+
+type PersonGetters = Getters&lt;Person&gt;;
+// {
+//   getName: () =&gt; string;
+//   getAge: () =&gt; number;
+//   getEmail: () =&gt; string;
+// }
+
+function buildGetters&lt;T extends object&gt;(obj: T): Getters&lt;T&gt; {
+  const result = {} as Getters&lt;T&gt;;
+  for (const key of Object.keys(obj) as (keyof T)[]) {
+    const getterName = `get${String(key).charAt(0).toUpperCase()}${String(key).slice(1)}`;
+    (result as any)[getterName] = () =&gt; obj[key];
+  }
+  return result;
 }</code></pre>
 </div>
-<h2 id="the-state-of-typescript-mapped-types-a-field-guide-in-2026">The state of TypeScript Mapped Types — A Field Guide in 2026</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
-</div>
-<h2 id="why-the-modern-approach-beats-the-old-way">Why the modern approach beats the old way</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<p>The <code>string & K</code> cast in the template literal is there because <code>keyof T</code> can in principle include <code>number</code> or <code>symbol</code> keys, and template literal types only accept <code>string</code>, <code>number</code>, <code>bigint</code>, <code>boolean</code>, <code>null</code>, or <code>undefined</code> as interpolated types — intersecting with <code>string</code> narrows <code>K</code> down to the string keys only, at the type level. The runtime implementation in <code>buildGetters</code> is unrelated code that has to actually produce the object the type describes; TypeScript won't generate it for you.</p>
+<p><code>as</code> can also filter keys out entirely, by mapping a key to <code>never</code>. A property that maps to <code>never</code> is dropped from the resulting type, which is the mechanism <code>Omit&lt;T, K&gt;</code> is built on internally.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
+  <div class="code-header"><span class="code-lang">TypeScript</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Drop keys whose value type is a function — useful for stripping
+// methods off a class instance type to get a plain data shape
+type DataOnly&lt;T&gt; = {
+  [K in keyof T as T[K] extends Function ? never : K]: T[K];
 };</code></pre>
 </div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>The performance of mapped in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
+<div class="callout-warn callout">
+  <strong>Remapped keys still have to be valid property keys</strong>
+  <p>The type produced by the <code>as</code> clause must be assignable to <code>string | number | symbol</code>. If you build a template literal from a union that includes something incompatible, or forget the <code>string &amp;</code> narrowing on a generic <code>keyof T</code>, you'll get a compiler error pointing at the <code>as</code> clause rather than at the property itself — worth knowing so you don't go hunting in the wrong place.</p>
 </div>
-<h2 id="how-it-integrates-with-the-rest-of-the-stack">How it integrates with the rest of the stack</h2>
-<p>Production mapped looks different from development mapped. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring mapped first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add typescript on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with mapped when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="homomorphic-mapped-types-and-why-modifiers-carry-over">Homomorphic mapped types and why modifiers carry over</h2>
+<p>A mapped type of the exact shape <code>{ [K in keyof T]: ... }</code>, with no key remapping, is called <em>homomorphic</em> — it copies over whatever modifiers the source properties already had (<code>readonly</code>, <code>?</code>) by default, on top of anything you add explicitly. That's why <code>Partial&lt;T&gt;</code> preserves a source property's existing <code>readonly</code> instead of stripping it, even though <code>Partial</code> only mentions <code>?</code> in its definition. As soon as you add an <code>as</code> clause to remap keys, the mapped type stops being homomorphic, and modifiers are no longer carried over automatically — each property starts from a clean slate and you have to add back whatever modifiers you actually want.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on typescript mapped types — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Mapped types boil down to one loop — <code>[K in keyof T]</code> — plus three knobs on top of it: modifiers to add or strip <code>readonly</code>/<code>?</code>, an <code>as</code> clause to rename or drop keys, and whatever transformation you write in the value position. <code>Partial</code>, <code>Readonly</code>, <code>Pick</code>, <code>Record</code>, and <code>Omit</code> are all thin, specific instances of that same loop, which is why writing your own — a <code>Getters&lt;T&gt;</code>, a <code>Concrete&lt;T&gt;</code>, a <code>DataOnly&lt;T&gt;</code> — is rarely more than a few lines once you know where each piece goes. The syntax looks dense the first time you see it; it stops looking dense the first time you write one from scratch instead of copying it from a library.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/react-19-typescript/">React 19 + TypeScript — A Field Guide</a></li>
@@ -178,7 +203,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

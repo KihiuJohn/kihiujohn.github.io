@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Idempotency for ERP Event Handlers">
 <meta property="og:description" content="Idempotency for ERP Event Handlers is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/idempotency-erp-events.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/idempotency-erp-events/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>ERP event handlers — whether it's Acumatica business events, a webhook consumer, or a message queue subscriber — will eventually receive the same event more than once. Networks retry, message brokers guarantee at-least-once delivery rather than exactly-once, and a consumer that crashes after processing but before acknowledging will see its message redelivered. If your handler isn't idempotent, that duplicate delivery becomes a duplicate invoice, a double stock adjustment, or a customer charged twice.</p>
+<h2 id="why-at-least-once-delivery-is-the-default">Why at-least-once delivery is the norm, not the exception</h2>
+<p>Exactly-once delivery across a network is a famously hard problem — most messaging systems (SQS, Service Bus, Kafka with default settings, webhook retries from any SaaS platform) explicitly guarantee at-least-once instead, because guaranteeing exactly-once would require coordination that kills throughput and availability. This means your handler <em>will</em> see the same logical event twice under normal operation, not just as a rare edge case: a consumer that processes a message and crashes before sending the acknowledgment causes the broker to redeliver it, a webhook sender that times out waiting for your 200 response retries the same payload, and a manual reprocessing of a dead-letter queue resends events that may have partially succeeded the first time.</p>
+<h2 id="the-idempotency-key-pattern">The idempotency key pattern</h2>
+<p>The fix is to make handling the same event twice produce the same result as handling it once. The mechanism is an idempotency key: a unique identifier for the logical operation (not the delivery attempt) that you check against a record of already-processed operations before doing any work. If the event has a natural unique ID (Acumatica business events include one; most webhook payloads include an event ID), use it directly. If not, derive one deterministically from the event's content — for example, hashing the source system's document reference plus the operation type.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IdempotencyErpExt : PXGraphExtension<IdempotencyEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Idempotency doc)
-    {
-        // Custom erp logic for idempotency erp event
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · IDEMPOTENCY TABLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE ProcessedEvents (
+    EventId       VARCHAR(100) PRIMARY KEY,
+    ProcessedAt   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    Outcome       VARCHAR(20) NOT NULL  -- 'succeeded' / 'failed'
+);
+
+-- Handler logic, pseudocode:
+-- BEGIN TRANSACTION
+--   IF EXISTS (SELECT 1 FROM ProcessedEvents WHERE EventId = @eventId)
+--     RETURN  -- already handled, skip silently (or return cached result)
+--   -- do the actual work: create AP bill, adjust inventory, etc.
+--   INSERT INTO ProcessedEvents (EventId, Outcome) VALUES (@eventId, 'succeeded')
+-- COMMIT</code></pre>
 </div>
-<h2 id="the-erp-edge-cases-i-have-shipped">The erp edge cases I have shipped</h2>
-<p>In the work I have done on idempotency for erp event handlers, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The critical detail is that the insert into the processed-events table and the actual business operation (creating the bill, adjusting inventory) need to happen in the <em>same transaction</em>. If you record the event as processed before doing the work, a crash between those two steps means the retry never happens and the event is silently lost. If you do the work first and record it second, a crash between those steps means a retry re-executes the business operation — exactly the duplicate you were trying to prevent.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Idempotency key scope matters</strong>
+  <p>Key the idempotency record on something that uniquely identifies the logical operation, not the delivery attempt. If your key includes a retry counter or delivery timestamp, every retry gets a different key and looks like a new event — which defeats the entire mechanism. Use the source event's own ID, or a deterministic hash of its immutable content.</p>
 </div>
-<h2 id="migration-path-when-idempotency-changes">Migration path when idempotency changes</h2>
-<p>When the work moves from design to production, the questions change. The idempotency is not the question; the failure mode of the erp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for idempotency
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-erp-in-production">How to debug erp in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="idempotent-by-design-vs-idempotency-keys">Naturally idempotent operations vs. ones that need a key</h2>
+<p>Some operations are idempotent by nature and don't need a tracking table at all — setting a field to an absolute value ("set status to Closed") produces the same end state no matter how many times it runs. Others are inherently non-idempotent by nature — "increment inventory count by 10" or "create a new AP bill" — and these are exactly the ones that need explicit deduplication, because running them twice changes the outcome. Before reaching for an idempotency table, check whether you can reframe the operation as absolute rather than relative; it's often less code than building deduplication infrastructure.</p>
+<h2 id="handling-partial-failures">What happens when the handler fails partway through</h2>
+<p>A handler that touches multiple systems — say, creating an AP bill in the ERP and then notifying a downstream approval system — can fail after the first step succeeds but before the second completes. On retry, naive idempotency (checking "have I seen this event ID before") would skip the whole handler and never send the notification. The more robust approach tracks state per sub-step, not just per event, so a retry can resume from where it actually failed rather than either re-doing everything or skipping everything.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="the-version-of-idempotency-that-works">The version of idempotency that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="why-idempotency-for-erp-event-handlers-matters-in-production">Why Idempotency for ERP Event Handlers matters in production</h2>
-<p>The performance of erp in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production erp looks different from development erp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IdempotencyErpExt : PXGraphExtension<IdempotencyEntry>
-{
-    [PXOverride]
-    public virtual void Erp(Idempotency doc)
-    {
-        // Custom erp logic for idempotency erp event
-        if (doc?.Erp == null) return;
-        Base.Erp(doc);
-    }
-}</code></pre>
+  <strong>TTL your idempotency records, don't keep them forever</strong>
+  <p>An unbounded processed-events table grows forever and the index lookup gets slower over time for no benefit — most delivery systems don't retry an event more than a few days after the original send. A retention window of 7-30 days (matching your message broker's maximum redelivery window, with margin) keeps the table small while still covering every realistic retry scenario.</p>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring erp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add idempotency on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with erp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Operation type</th><th>Idempotent by default?</th><th>Needs dedup key?</th></tr>
+  <tr><td>Set status = "Closed"</td><td>Yes — absolute value</td><td>No</td></tr>
+  <tr><td>Increment stock by N</td><td>No — relative change</td><td>Yes</td></tr>
+  <tr><td>Create AP bill from event</td><td>No — new record each time</td><td>Yes</td></tr>
+  <tr><td>Upsert by natural key</td><td>Usually yes</td><td>No, if the upsert key is stable</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on idempotency for erp event handlers. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Treat at-least-once delivery as the guaranteed behavior of any event pipeline, not an edge case to handle later. Record the idempotency key and the business effect in the same transaction, prefer operations that are naturally idempotent when the design allows it, and give the dedup table a retention window instead of letting it grow forever.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/event-driven-architecture-erp/">Event-Driven Architecture for ERP — A Field Guide</a></li>
@@ -187,7 +147,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

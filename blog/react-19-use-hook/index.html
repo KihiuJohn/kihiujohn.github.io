@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>React 19 use() Hook — A Field Guide | John Kihiu</title>
-<meta name="description" content="React 19 use() Hook — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="How React 19's use() hook differs from every other hook — callable conditionally, reads promises or context — and the mistake of passing it a new promise on every render.">
 <meta name="keywords" content="Acumatica react, Acumatica use, Acumatica async, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/react-19-use-hook/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="React 19 use() Hook — A Field Guide">
-<meta property="og:description" content="React 19 use() Hook — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/react-19-use-hook.svg">
+<meta property="og:description" content="How React 19's use() hook differs from every other hook — callable conditionally, reads promises or context — and the mistake of passing it a new promise on every render.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/react-19-use-hook/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="async">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"React 19 use() Hook — A Field Guide","description":"React 19 use() Hook — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/react-19-use-hook.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/react-19-use-hook/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"React 19 use() Hook — A Field Guide","description":"How React 19's use() hook differs from every other hook — callable conditionally, reads promises or context — and the mistake of passing it a new promise on every render.","image":"https://kihiujohn.github.io/assets/og/react-19-use-hook.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/react-19-use-hook/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"React 19 use() Hook — A Field Guide","item":"https://kihiujohn.github.io/blog/react-19-use-hook/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,70 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">React 19 use() Hook — A Field Guide</span></nav>
     <span class="tag">Modern Web · React</span>
     <h1>React 19 use() Hook — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">React 19 use() Hook — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How React 19's use() hook differs from every other hook — callable conditionally, reads promises or context — and the mistake of passing it a new promise on every render.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-24">Jun 24, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The web platform in 2026 is more capable than it was in 2020. Container queries, view transitions, the popover API, server components — the modern web is enough to build a rich UI without a 200KB framework. this is the pattern that uses the platform.</p>
-<h2 id="build-vs-buy-for-use">Build vs buy for use</h2>
-<p>Build vs buy for use is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p><code>use()</code> is the odd one out in React 19's hook lineup: it's the first hook that doesn't follow the Rules of Hooks. You can call it conditionally, inside a loop, or after an early return — something that would break the fiber's hook order if you tried it with <code>useState</code> or <code>useEffect</code>. That's possible because <code>use()</code> isn't tracking hook call order the way stateful hooks do; it's reading a value that's resolved elsewhere, either a promise or a context.</p>
+<h2 id="not-a-normal-hook">Why use() can break the rules</h2>
+<p><code>useState</code> and friends rely on being called in the same order on every render, because React matches each call to a slot in the fiber's internal linked list purely by position. <code>use()</code> doesn't need that guarantee — reading a promise or a context value doesn't require persistent per-render slot tracking the way state does. That's what unlocks calling it inside an <code>if</code> block:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<h2 id="testing-react-in-isolation">Testing react in isolation</h2>
-<p>In the work I have done on react 19 use() hook — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="the-state-of-react-19-use-hook-a-field-guide-in-2026">The state of React 19 use() Hook — A Field Guide in 2026</h2>
-<p>When the work moves from design to production, the questions change. The react is not the question; the failure mode of the use is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useReact(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">TSX · CONDITIONAL use()</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { use } from 'react';
+import { ThemeContext } from './theme-context';
+
+function Banner({ messagePromise, show }: {
+  messagePromise: Promise&lt;string&gt;;
+  show: boolean;
+}) {
+  if (!show) {
+    return null; // early return before any hook call — fine for use()
+  }
+
+  const theme = use(ThemeContext);       // reading context
+  const message = use(messagePromise);   // reading a promise
+
+  return &lt;div className={theme.bannerClass}&gt;{message}&lt;/div&gt;;
 }</code></pre>
 </div>
-<h2 id="why-the-modern-approach-beats-the-old-way">Why the modern approach beats the old way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="two-use-cases">The two things use() reads</h2>
+<p>First, promises: <code>use(promise)</code> suspends the component until the promise resolves, then returns the resolved value (or, if it rejects, throws so the nearest error boundary can catch it). This is what pairs with Suspense boundaries for data fetching without a library's own suspense-mode plumbing.</p>
+<p>Second, context: <code>use(SomeContext)</code> reads the nearest provider's value, same as <code>useContext(SomeContext)</code> would — except <code>use()</code> can be called conditionally, which <code>useContext</code> never could. For a component that only needs a context value in one branch of a conditional, <code>use()</code> removes the awkwardness of calling <code>useContext</code> unconditionally at the top and then just not using the result in the other branch.</p>
 <div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
+  <strong>use() still needs a Suspense boundary and an error boundary above it</strong>
+  <p>Reading a promise with <code>use()</code> doesn't give you a loading state to check the way a data-fetching hook's <code>isLoading</code> flag would — the component just suspends. Wrap it in <code>&lt;Suspense fallback=...&gt;</code> for the pending case, and an error boundary above that for the rejected case. Without both, an unresolved or failed promise takes down more of the tree than you intended.</p>
 </div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="the-new-promise-every-render-trap">Don't create a new promise on every render</h2>
+<p>The mistake that catches people first: calling <code>use(fetch(url))</code> or any other expression that constructs a fresh promise inline. Every render creates a new promise, so React has no way to recognize "this is the same request, just check if it resolved" — it sees a brand-new unresolved promise every time and suspends again, indefinitely.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
+  <div class="code-header"><span class="code-lang">TSX · WRONG VS RIGHT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// Wrong: a new promise is created on every render — infinite suspend loop
+function Bad({ id }: { id: string }) {
+  const data = use(fetch(`/api/items/${id}`).then((r) =&gt; r.json()));
+  return &lt;p&gt;{data.name}&lt;/p&gt;;
+}
+
+// Right: the promise is created once, cached by id, and reused across renders
+const cache = new Map&lt;string, Promise&lt;Item&gt;&gt;();
+function getItem(id: string) {
+  if (!cache.has(id)) {
+    cache.set(id, fetch(`/api/items/${id}`).then((r) =&gt; r.json()));
+  }
+  return cache.get(id)!;
+}
+
+function Good({ id }: { id: string }) {
+  const data = use(getItem(id)); // stable promise identity per id
+  return &lt;p&gt;{data.name}&lt;/p&gt;;
+}</code></pre>
 </div>
-<h2 id="how-it-integrates-with-the-rest-of-the-stack">How it integrates with the rest of the stack</h2>
-<p>The performance of use in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
-</div>
-<h2 id="performance-bundle-size-runtime-and-accessibility">Performance: bundle size, runtime, and accessibility</h2>
-<p>Production use looks different from development use. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring use first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add react on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with use when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<p>The stable promise can come from a module-level cache like the one above, a router loader that runs once per navigation, or a parent component that created it in response to an event (not during its own render). The common thread is that the promise's identity has to survive across the re-renders of the component calling <code>use()</code> on it.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on react 19 use() hook — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p><code>use()</code> is less a "new way to fetch data" and more a new rule for how components read async values and context: called wherever you need it, including conditionally, but only ever fed a promise whose identity is stable across renders. Get that part right, wrap it in Suspense and an error boundary, and it composes cleanly with the rest of React 19's async-oriented feature set — Actions, transitions, and Suspense's own retry behavior all end up leaning on the same primitive.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/react-19-suspense/">React 19 Suspense Patterns</a></li>
@@ -178,7 +160,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

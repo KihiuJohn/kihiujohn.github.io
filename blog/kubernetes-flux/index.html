@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flux CD for GitOps — A Field Guide | John Kihiu</title>
-<meta name="description" content="Flux CD for GitOps — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
+<meta name="description" content="How Flux v2's separate controllers — source, kustomize, helm, notification — reconcile a cluster from Git, and how that composable architecture compares to Argo CD's single Application CRD and built-in UI.">
 <meta name="keywords" content="Acumatica kubernetes, Acumatica flux, Acumatica gitops, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/kubernetes-flux/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Flux CD for GitOps — A Field Guide">
-<meta property="og:description" content="Flux CD for GitOps — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/kubernetes-flux.svg">
+<meta property="og:description" content="How Flux v2's separate controllers — source, kustomize, helm, notification — reconcile a cluster from Git, and how that composable architecture compares to Argo CD's single Application CRD and built-in UI.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/kubernetes-flux/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="devops">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="gitops">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Flux CD for GitOps — A Field Guide","description":"Flux CD for GitOps — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.","image":"https://kihiujohn.github.io/assets/og/kubernetes-flux.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-flux/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Flux CD for GitOps — A Field Guide","description":"How Flux v2's separate controllers — source, kustomize, helm, notification — reconcile a cluster from Git, and how that composable architecture compares to Argo CD's single Application CRD and built-in UI.","image":"https://kihiujohn.github.io/assets/og/kubernetes-flux.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/kubernetes-flux/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Flux CD for GitOps — A Field Guide","item":"https://kihiujohn.github.io/blog/kubernetes-flux/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,100 +86,82 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Flux CD for GitOps — A Field Guide</span></nav>
     <span class="tag">DevOps · Kubernetes</span>
     <h1>Flux CD for GitOps — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Flux CD for GitOps — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Flux v2's separate controllers — source, kustomize, helm, notification — reconcile a cluster from Git, and how that composable architecture compares to Argo CD's single Application CRD and built-in UI.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production environments to know the patterns that work. They share a few traits: simple enough to debug, observable enough to alert, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="what-flux-cd-for-gitops-a-field-guide-gives-you">What Flux CD for GitOps — A Field Guide gives you</h2>
-<p>What Flux CD for GitOps — A Field Guide gives you is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>How Flux v2's separate controllers — source, kustomize, helm, notification — reconcile a cluster from Git, and how that composable architecture compares to Argo CD's single Application CRD and built-in UI. I've run both in production, and the choice mostly comes down to whether you want a UI dashboard by default or a set of small controllers you wire together yourself.</p>
+<h2 id="flux-v2-is-four-controllers-not-one">Flux v2 is four controllers, not one</h2>
+<p>The thing that surprises people coming from Argo CD is that "Flux" isn't a single binary or a single CRD — it's a set of independent controllers that each reconcile one concern. The source-controller watches Git repositories, Helm repositories, and OCI registries and produces artifacts other controllers consume. The kustomize-controller applies Kustomize overlays from those artifacts. The helm-controller manages Helm releases. The notification-controller handles alerting and webhook receivers. Each one is a separate reconciler with its own CRDs, its own logs, and its own failure domain — a source-controller outage stalls new artifact fetches but doesn't touch already-applied resources, which is a very different blast radius than a single monolithic sync loop.</p>
+<h2 id="source-crds-vs-kustomization-and-helmrelease">Source CRDs vs. Kustomization and HelmRelease</h2>
+<p>Flux splits "where does the config come from" from "what do I do with it." <code>GitRepository</code>, <code>HelmRepository</code>, and <code>OCIRepository</code> are Source CRDs — they just describe where to pull from and how often, and the source-controller produces a versioned artifact when something changes. <code>Kustomization</code> and <code>HelmRelease</code> are the objects that actually drive reconciliation: a Kustomization points at a GitRepository source and applies a path from it with kustomize-controller; a HelmRelease points at a HelmRepository or OCIRepository and installs/upgrades a chart with helm-controller. This separation is why you can point five different Kustomizations at the same GitRepository without five separate git clones — the source is fetched once and reused.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Flux
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
-</div>
-<h2 id="the-implementation">The implementation</h2>
-<p>In the work I have done on flux cd for gitops — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The cache is the lie</strong>
-  <p>Every cache is a lie waiting to be caught. The cost of the lie is the time you spend debugging "works on my machine" or "works after the cache expires." Document every cache.</p>
-</div>
-<h2 id="the-ci-cd-pipeline-integration">The CI/CD pipeline integration</h2>
-<p>When the work moves from design to production, the questions change. The flux is not the question; the failure mode of the gitops is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code># Terraform
-resource "flux_gitops" "this" {
-  name = var.name
-  tags = var.tags
-  lifecycle {
-    create_before_destroy = true
-  }
-}</code></pre>
-</div>
-<h2 id="observability-metrics-logs-traces">Observability: metrics, logs, traces</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The on-call is the test</strong>
-  <p>A DevOps practice that survives a bad on-call rotation is a good practice. A practice that breaks under the on-call is broken.</p>
-</div>
-<h2 id="security-secrets-rbac-network-policies">Security: secrets, RBAC, network policies</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>apiVersion: apps/v1
-kind: Deployment
+  <div class="code-header"><span class="code-lang">YAML · gitrepository-and-kustomization.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
 metadata:
-  name: flux
+  name: platform-config
+  namespace: flux-system
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: flux
-  template:
-    metadata:
-      labels:
-        app: flux</code></pre>
+  interval: 1m
+  url: https://github.com/acme/platform-config
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: payments-namespace
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: "./clusters/prod/payments"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: platform-config
+  targetNamespace: payments</code></pre>
 </div>
-<h2 id="cost-optimisation">Cost optimisation</h2>
-<p>The performance of gitops in devops is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
 <div class="callout">
-  <strong>Logs are the last resort</strong>
-  <p>If you are reading logs to debug, your metrics and traces are not good enough. The right signal is a metric or a trace; logs are for the deep-dive when neither helps.</p>
+  <strong>prune: true is doing real work</strong>
+  <p>With pruning on, deleting a manifest from the Git path removes the matching resource from the cluster on the next reconcile. That's the GitOps guarantee working correctly, but it means a manifest moved or renamed in Git without care can delete a live resource — treat renames as delete-then-create, not a no-op.</p>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Production gitops looks different from development gitops. The difference is rarely the algorithm; the difference is the failure handling.</p>
+<h2 id="helmrelease-drives-chart-installs">HelmRelease drives chart installs the same way</h2>
+<p>A HelmRelease works the same shape as a Kustomization but for Helm charts: it references a HelmRepository or OCIRepository as its source, names a chart and version, and carries a <code>values</code> block that overrides the chart's defaults. helm-controller reconciles it exactly like `helm upgrade --install` would, but continuously — drift in the cluster (someone `kubectl edit`-ing a Deployment the chart owns) gets reverted on the next reconciliation instead of silently persisting.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>name: Flux
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t app:"$GITHUB_SHA" .
-      - run: docker push registry.example.com/app:"$GITHUB_SHA"</code></pre>
+  <div class="code-header"><span class="code-lang">YAML · helmrelease.yaml</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ingress-nginx
+  namespace: flux-system
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: ingress-nginx
+      version: "4.11.x"
+      sourceRef:
+        kind: HelmRepository
+        name: ingress-nginx
+  values:
+    controller:
+      replicaCount: 2
+      service:
+        type: LoadBalancer</code></pre>
 </div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring gitops first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add flux on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with gitops when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="flux-vs-argo-cd-architecturally">Flux vs. Argo CD, architecturally</h2>
+<p>Argo CD centers on a single <code>Application</code> CRD: one object describes a source, a destination, and sync policy, and the whole thing is application-centric — you think in terms of "this app, deployed here, from this repo." It ships a UI by default, which is a big part of its appeal for teams that want a visual diff of what's out of sync before they approve a sync. Flux takes the Unix-philosophy route: separate composable controllers, each doing one reconciliation job, wired together through CRDs that reference each other, with no UI shipped in the core product — you get visibility through `flux get all`, `flux logs`, Prometheus metrics the controllers expose, or a separate project like Weave GitOps if you want a dashboard. Neither is "more GitOps" than the other; the real trade-off is whether you want an opinionated application-centric tool with a UI included, or a toolkit of composable reconcilers you assemble yourself.</p>
+<div class="callout callout-warn">
+  <strong>No UI by default is a real operational cost</strong>
+  <p>Without Weave GitOps or a similar add-on, diagnosing "why hasn't this deployed" in Flux means reading `flux get kustomizations`, `flux get helmreleases`, and controller logs across four separate components. That's fine once your team knows the CLI, but it's a slower onboarding curve than Argo CD's UI for anyone new to the cluster.</p>
+</div>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on flux cd for gitops — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Flux v2's real shape is four independent controllers — source, kustomize, helm, notification — reconciling Source CRDs into Kustomizations and HelmReleases, rather than one tool doing everything. That buys composability and a smaller blast radius per failure, at the cost of no built-in UI and a CLI-first debugging workflow. Argo CD trades that composability for a single Application CRD and a dashboard out of the box. Pick Flux if you want controllers you can reason about independently and don't mind living in `flux get`; pick Argo CD if a visual sync-diff for your team matters more than architectural purity.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/kubernetes-argo-cd/">Argo CD for GitOps — A Field Guide</a></li>
@@ -191,7 +172,6 @@ jobs:
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

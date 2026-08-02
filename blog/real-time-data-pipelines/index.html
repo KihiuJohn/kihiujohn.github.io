@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Real-Time Data Pipelines — A Field Guide | John Kihiu</title>
-<meta name="description" content="Real-Time Data Pipelines — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.">
+<meta name="description" content="How real-time data pipelines actually work in production: streaming ingestion with Kafka-style logs, stateful stream processing, exactly-once vs at-least-once trade-offs, and why late-arriving data breaks more pipelines than volume does.">
 <meta name="keywords" content="Acumatica realtime, Acumatica pipelines, Acumatica data, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/real-time-data-pipelines/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Real-Time Data Pipelines — A Field Guide">
-<meta property="og:description" content="Real-Time Data Pipelines — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/real-time-data-pipelines.svg">
+<meta property="og:description" content="How real-time data pipelines actually work in production: streaming ingestion with Kafka-style logs, stateful stream processing, exactly-once vs at-least-once trade-offs, and why late-arriving data breaks more pipelines than volume does.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/real-time-data-pipelines/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="data">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Real-Time Data Pipelines — A Field Guide","description":"Real-Time Data Pipelines — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same.","image":"https://kihiujohn.github.io/assets/og/real-time-data-pipelines.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/real-time-data-pipelines/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Real-Time Data Pipelines — A Field Guide","description":"How real-time data pipelines actually work in production: streaming ingestion with Kafka-style logs, stateful stream processing, exactly-once vs at-least-once trade-offs, and why late-arriving data breaks more pipelines than volume does.","image":"https://kihiujohn.github.io/assets/og/real-time-data-pipelines.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/real-time-data-pipelines/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Real-Time Data Pipelines — A Field Guide","item":"https://kihiujohn.github.io/blog/real-time-data-pipelines/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,71 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Real-Time Data Pipelines — A Field Guide</span></nav>
     <span class="tag">Data / ML · Realtime</span>
     <h1>Real-Time Data Pipelines — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Real-Time Data Pipelines — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How real-time data pipelines actually work in production: streaming ingestion with Kafka-style logs, stateful stream processing, exactly-once vs at-least-once trade-offs, and why late-arriving data breaks more pipelines than volume does.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data pipelines in production are mostly about how to handle the slow failure modes. this is the pattern that handles the cases that don't show up in the demo data. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="the-pipeline-architecture">The pipeline architecture</h2>
-<p>The pipeline architecture is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A real-time pipeline is not a batch pipeline running more often — it's a different set of guarantees. Batch ETL gets to assume the data is complete before it processes anything; a streaming pipeline has to produce correct-enough answers continuously while data is still arriving, some of it late, some of it out of order, some of it duplicated because a producer retried. Most of the actual engineering in "real-time data" is in handling those three problems, not in the transport layer that moves bytes around.</p>
+<h2 id="the-log-is-the-source-of-truth">The log is the source of truth</h2>
+<p>The pattern underneath almost every modern streaming architecture is the append-only log — Kafka, Redpanda, Kinesis, Pulsar all implement some variant of it. Producers append events; consumers read from an offset and track their own position. This decouples producers from consumers completely: a consumer that's down for an hour doesn't lose data, it just resumes from where it left off, and you can add a new consumer reading the same stream from the beginning without touching the producer. The log is also what makes replay possible — if a downstream bug corrupted three days of aggregates, you fix the bug and reprocess from the retained log instead of trying to patch the damage after the fact.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM real
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">Python · consumer with manual offset commit</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from kafka import KafkaConsumer
+
+consumer = KafkaConsumer(
+    "orders.events",
+    bootstrap_servers="kafka:9092",
+    group_id="fraud-scoring",
+    enable_auto_commit=False,   # commit only after successful processing
+    auto_offset_reset="earliest",
+)
+
+for msg in consumer:
+    try:
+        process(msg.value)
+        consumer.commit()  # advance offset only on success
+    except Exception:
+        log.exception("processing failed, will retry on next poll")
+        break</code></pre>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>In the work I have done on real-time data pipelines — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="at-least-once-vs-exactly-once">At-least-once vs exactly-once</h2>
+<p>True exactly-once delivery across a network is not achievable in the general case — what streaming frameworks like Kafka Streams or Flink actually give you is exactly-once <em>processing semantics</em>, achieved by making the side effects idempotent (transactional writes, deduplication keys) rather than by magically preventing redelivery. In practice, at-least-once delivery plus an idempotent consumer (upsert on a unique event ID instead of insert) gets you the same correctness with far less operational complexity than a distributed transaction across producer, broker, and consumer. Decide this early — retrofitting idempotency after you've shipped a pipeline that assumes each event arrives exactly once is a much bigger job than designing for duplicates from day one.</p>
+<div class="callout">
+  <strong>Idempotency key, not "trust the queue"</strong>
+  <p>Give every event a stable, unique ID at the producer, and make every consumer write a dedup check (or an upsert keyed on that ID) before applying it. This one habit removes an entire class of "why did this counter double" incidents caused by consumer retries or rebalances.</p>
+</div>
+<h2 id="windowing-and-late-data">Windowing and late data</h2>
+<p>Streaming aggregation happens over windows — "orders per minute," "rolling 5-minute error rate" — and the hard part isn't computing the window, it's deciding when to close it. Event time (when something actually happened) and processing time (when your pipeline saw it) diverge constantly: a mobile client buffers events offline and replays them an hour later, a retry arrives after a network blip. Frameworks like Flink handle this with watermarks — a heuristic for "how late can data be before we stop waiting and emit the result" — and allow late data to trigger a correction to an already-emitted window rather than silently dropping it. If your pipeline closes windows purely on wall-clock arrival time, you will quietly undercount anything that shows up late, and nothing will alert you to it because there's no error, just a number that's slightly wrong.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · Flink windowed aggregation with watermark</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE orders (
+  order_id STRING,
+  amount   DECIMAL(10,2),
+  event_time TIMESTAMP(3),
+  WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
+) WITH (...);
+
+SELECT
+  window_start,
+  window_end,
+  SUM(amount) AS revenue
+FROM TABLE(
+  TUMBLE(TABLE orders, DESCRIPTOR(event_time), INTERVAL '1' MINUTE)
+)
+GROUP BY window_start, window_end;</code></pre>
+</div>
+<h2 id="backpressure-and-consumer-lag">Backpressure and consumer lag</h2>
+<p>The metric that tells you a real-time pipeline is actually healthy is consumer lag — the gap between the latest offset in the log and the offset your consumer has processed — not throughput. A pipeline can process a million events a minute and still be "real-time" in name only if lag is climbing, because that means the gap between when something happened and when your system reflects it is growing without bound. Lag climbs for boring reasons: a downstream database that's slower than the ingest rate, a consumer doing synchronous I/O per event instead of batching, or simply under-provisioned consumer parallelism relative to partition count. Alert on lag trend, not absolute throughput.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Partition count is a ceiling you set once</strong>
+  <p>Consumer parallelism in Kafka-style systems is bounded by partition count — you can't have more active consumers in a group than partitions. Under-provisioning partitions early is a common mistake because repartitioning later means downtime or a careful migration, not a config change.</p>
 </div>
-<h2 id="data-quality-and-testing">Data quality and testing</h2>
-<p>When the work moves from design to production, the questions change. The real is not the question; the failure mode of the time is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.real > 0).groupBy("time").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="performance-cost-latency-freshness">Performance: cost, latency, freshness</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
-</div>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_real') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of time in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="why-real-in-the-warehouse-beats-in-the-lake">Why real in the warehouse beats in the lake</h2>
-<p>Production time looks different from development time. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM real
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring time first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add real on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with time when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on real-time data pipelines — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Real-time pipelines earn their complexity when the business genuinely needs sub-minute freshness — fraud scoring, live inventory, operational alerting. The core engineering problems are the same regardless of which broker or framework you pick: treat the log as the durable source of truth so consumers can fail and resume safely, make processing idempotent instead of chasing exactly-once delivery, handle late-arriving data with watermarks rather than pretending events always arrive in order, and watch consumer lag as your primary health signal. Get those four right and the specific technology choice becomes a much smaller decision.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/observability-data-pipelines/">Observability for Data Pipelines</a></li>
@@ -179,7 +161,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

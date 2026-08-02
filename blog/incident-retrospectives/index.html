@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Incident Retrospectives — A Field Guide">
 <meta property="og:description" content="Incident Retrospectives — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/incident-retrospectives.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/incident-retrospectives/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>Testing strategy and what to cover is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IncidentRetrospectivesExt : PXGraphExtension<IncidentEntry>
-{
-    [PXOverride]
-    public virtual void Retrospectives(Incident doc)
-    {
-        // Custom retrospectives logic for incident retrospectives
-        if (doc?.Retrospectives == null) return;
-        Base.Retrospectives(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>In the work I have done on incident retrospectives — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+    <p>A retrospective (or postmortem) is the single highest-leverage step in incident response, and the one teams skip most readily once the fire is out. The point isn't the document — it's forcing a structured look at why the incident happened and why it took as long as it did to detect and fix, before the details fade and the team moves on to the next thing.</p>
+<h2 id="blameless-is-a-mechanism-not-a-slogan">Blameless is a mechanism, not a mood</h2>
+<p>"Blameless postmortem" gets used as a vague cultural aspiration, but it's actually a specific analytical stance: assume the person who took an action that contributed to the incident made a reasonable decision given what they knew, what tools they had, and what pressures they were under at the time. The question isn't "why did they do that" (which implies fault) but "what made that action seem reasonable in the moment, and what would need to change so a similarly reasonable person wouldn't make the same call again." This isn't about being nice — it's that blame-focused retrospectives make people defensive and less forthcoming about what actually happened, which produces worse retrospectives and, over time, engineers who route around the process instead of engaging with it.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>"Human error" is rarely a root cause worth stopping at</strong>
+  <p>If the retrospective's conclusion is "the engineer ran the wrong command," ask why the system made that command easy to run in a dangerous way, why there was no confirmation step, or why staging and production looked similar enough to confuse. Human error is almost always the proximate cause, not the root one — the system let the error happen and didn't catch it.</p>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>When the work moves from design to production, the questions change. The incident is not the question; the failure mode of the retrospectives is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for incident
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="the-retrospectives-edge-cases-i-have-shipped">The retrospectives edge cases I have shipped</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="the-timeline-is-the-foundation">The timeline is the foundation everything else is built on</h2>
+<p>A retrospective without an accurate timeline is speculation. This is why having a scribe capture events in real time during the incident (not reconstructed afterward from memory) matters so much — reconstructed timelines reliably compress the confusing, uncertain middle part of an incident into something that sounds cleaner and more decisive than it actually was, which hides exactly the detection and diagnosis delays you most need to learn from. The timeline should include when the problem started (not just when it was noticed), when it was detected, when the right people were engaged, when the cause was identified, and when it was actually fixed — each gap between these is a distinct thing to potentially improve.</p>
+<h2 id="detection-time-is-usually-the-biggest-lever">Detection time is usually the biggest lever, not fix time</h2>
+<p>Teams instinctively focus retrospectives on "how do we fix this class of bug faster next time," but in most incidents the largest chunk of total impact duration is the gap between the problem starting and someone noticing — not the time it took to fix once found. An incident that took 5 minutes to fix but 40 minutes to detect has a monitoring and alerting problem, not primarily an engineering-quality problem, and the retrospective's action items should reflect that. Look at the timeline gaps explicitly before deciding where to invest follow-up work.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Action items need owners and dates or they don't happen</strong>
+  <p>A retrospective that ends with a list of "we should improve monitoring" style bullets and no assigned owner or deadline reliably produces zero follow-through. Each action item needs a specific owner, a specific and checkable outcome, and a due date — treated with the same rigor as any other committed work, or tracked in the same backlog the team already uses.</p>
 </div>
-<h2 id="migration-path-when-incident-changes">Migration path when incident changes</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="what-goes-in-the-document">What the document actually needs, at minimum</h2>
+<p>A useful retrospective doesn't need to be long: a brief summary, the customer/business impact (quantified if possible), the timeline, the root cause analysis (ideally using a technique like the "5 whys" to push past the first, most obvious explanation), and a short list of concrete action items with owners. Longer documents with extensive narrative rarely get read by anyone beyond the people who wrote them; a tight, scannable one is more likely to actually inform future decisions.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-retrospectives-in-production">How to debug retrospectives in production</h2>
-<p>The performance of retrospectives in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="the-version-of-incident-that-works">The version of incident that works</h2>
-<p>Production retrospectives looks different from development retrospectives. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class IncidentRetrospectivesExt : PXGraphExtension<IncidentEntry>
-{
-    [PXOverride]
-    public virtual void Retrospectives(Incident doc)
-    {
-        // Custom retrospectives logic for incident retrospectives
-        if (doc?.Retrospectives == null) return;
-        Base.Retrospectives(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · MINIMAL RETRO TEMPLATE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>## Summary
+One paragraph: what broke, for how long, who was affected.
+
+## Impact
+Quantified where possible: users affected, revenue impact,
+SLA breach, duration of degraded service.
+
+## Timeline (UTC)
+14:02 - Deploy of service X v2.14 begins
+14:07 - Error rate begins climbing (not yet noticed)
+14:22 - Alert fires, on-call paged
+14:25 - IC declared, incident channel opened
+14:41 - Root cause identified: missing feature flag default
+14:48 - Rollback deployed
+14:52 - Error rate back to baseline
+
+## Root cause
+(5 whys or equivalent — push past the first explanation)
+
+## Action items
+- [ ] Add default value validation to feature flag config
+      loader (Owner: J. Doe, Due: next sprint)
+- [ ] Reduce alert threshold latency from 15min to 5min
+      (Owner: SRE team, Due: 2 weeks)</code></pre>
 </div>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring retrospectives first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add incident on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with retrospectives when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Timeline gap</th><th>What it tells you</th></tr>
+  <tr><td>Start to detection</td><td>Monitoring/alerting quality</td></tr>
+  <tr><td>Detection to engagement</td><td>On-call/paging process quality</td></tr>
+  <tr><td>Engagement to root cause</td><td>Observability and debugging tooling</td></tr>
+  <tr><td>Root cause to fix</td><td>Deployment speed and rollback readiness</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on incident retrospectives — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>A good retrospective is blameless in its analytical method, built on a real-time timeline rather than a reconstructed one, and honest about where the biggest gap actually was — usually detection, not the fix itself. Keep the document short, assign owners and dates to every action item, and treat those items as committed work, not aspirations.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.cncf.io/projects/" target="_blank" rel="noopener noreferrer">CNCF documentation</a></li><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://sre.google/books/" target="_blank" rel="noopener noreferrer">Google SRE books</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/incident-command-system/">Incident Command System — A Field Guide</a></li>
@@ -187,7 +157,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

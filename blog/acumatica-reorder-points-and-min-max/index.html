@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acumatica Reorder Points and Min/Max | John Kihiu</title>
-<meta name="description" content="How to configure Acumatica inventory reorder points, min/max stock levels, safety stock, and the replenishment engine that creates POs automatically.">
+<meta name="description" content="How Min/Max replenishment actually triggers a reorder in Acumatica Inventory, manual vs. forecast-driven parameters, and why MRP does not top up to Max the way Inventory Replenishment does.">
 <meta name="keywords" content="Acumatica customization, Acumatica inventory, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/acumatica-reorder-points-and-min-max/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Acumatica Reorder Points and Min/Max">
-<meta property="og:description" content="How to configure Acumatica inventory reorder points, min/max stock levels, safety stock, and the replenishment engine that creates POs automatically.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/acumatica-reorder-points-and-min-max.svg">
+<meta property="og:description" content="How Min/Max replenishment actually triggers a reorder in Acumatica Inventory, manual vs. forecast-driven parameters, and why MRP does not top up to Max the way Inventory Replenishment does.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/acumatica-reorder-points-and-min-max/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -20,7 +19,7 @@
 <meta property="article:tag" content="inventory">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Reorder Points and Min/Max","description":"How to configure Acumatica inventory reorder points, min/max stock levels, safety stock, and the replenishment engine that creates POs automatically.","image":"https://kihiujohn.github.io/assets/og/acumatica-reorder-points-and-min-max.svg","datePublished":"2025-11-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-reorder-points-and-min-max/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Acumatica Reorder Points and Min/Max","description":"How Min/Max replenishment actually triggers a reorder in Acumatica Inventory, manual vs. forecast-driven parameters, and why MRP does not top up to Max the way Inventory Replenishment does.","image":"https://kihiujohn.github.io/assets/og/acumatica-reorder-points-and-min-max.svg","datePublished":"2025-11-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/acumatica-reorder-points-and-min-max/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Acumatica Reorder Points and Min/Max","item":"https://kihiujohn.github.io/blog/acumatica-reorder-points-and-min-max/"}]}
@@ -28,12 +27,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -65,7 +64,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -86,32 +85,29 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Acumatica Reorder Points and Min/Max</span></nav>
     <span class="tag">Acumatica · Inventory</span>
     <h1>Acumatica Reorder Points and Min/Max</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to configure Acumatica inventory reorder points, min/max stock levels, safety stock, and the replenishment engine that creates POs automatically.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Min/Max replenishment actually triggers a reorder in Acumatica Inventory, manual vs. forecast-driven parameters, and why MRP does not top up to Max the way Inventory Replenishment does.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2025-11-20">Nov 20, 2025</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Min/max and reorder points are the settings customers ask about first and revisit least. They live on the Item Warehouse Details tab of the stock item — one Replenishment Source, one Replenishment Method, a Min and a Max — and once they are typed in during go-live, nobody looks at them again until the warehouse is either sitting on six months of dead stock or explaining a stockout to a customer. Neither is a bug. Both are the predictable result of static settings applied to demand that is not static.</p>
-<h2 id="where-the-settings-actually-live">Where the settings actually live</h2>
-<p>Replenishment configuration sits on the Item Warehouse Details record for a stock item at a specific warehouse — the same place you set costing and valuation per site. Each combination of item and warehouse gets its own Replenishment Source (Purchased, Manufactured, or Transferred from another warehouse), its own Replenishment Method, and its own set of quantities. This matters because the same SKU can be min/max in one branch warehouse and reorder-point-driven in a distribution center, and that is intentional — a fast-moving regional warehouse and a slow consignment site should not share a replenishment strategy just because they share an item.</p>
-<p>Replenishment Method has three real options. <strong>None</strong> means the system will never suggest a purchase or transfer for that item at that warehouse — someone has to plan it manually, which is correct for one-off or engineered-to-order items. <strong>Min/Max</strong> is the simple threshold model. <strong>Reorder Point</strong> pulls in lead time and usage to size a buffer instead of a flat number.</p>
-<h2 id="min-max-the-simple-case">Min/Max: the simple case</h2>
-<p>Min/Max is a threshold, not a forecast. When the available quantity — on-hand plus on-order, minus allocations — drops to or below Min, the replenishment engine suggests an order that brings the item back up to Max. That is the entire model. It does not know about lead time, it does not know about seasonality, and it does not care whether last month's usage was double this month's.</p>
-<p>That simplicity is a feature for the right items. Stable, low-variability SKUs — the ones that sell roughly the same quantity every week — do not need a lead-time-aware buffer; a well-tuned Min/Max pair gets the reorder timing close enough, and it is trivial for a planner to sanity-check at a glance. The failure mode shows up on items that are not stable: a Min set for average demand gets blown through in a single large order, and the warehouse is short until the next PO lands.</p>
-<h2 id="reorder-point-and-safety-stock">Reorder Point and safety stock</h2>
-<p>Reorder Point-based replenishment is the same trigger mechanic — order when available quantity hits the threshold — but the threshold itself is calculated instead of typed in by feel. It factors in Lead Time (days), average daily usage, and a Safety Stock quantity that absorbs variability in either demand or the vendor's actual delivery time. If you're using EOQ (Economic Order Quantity) instead of a fixed Max, the suggested order quantity is sized to balance ordering cost against carrying cost rather than just topping up to a round number.</p>
-<p>This method earns its complexity on items where demand is genuinely variable, or where the vendor's lead time is long enough that a stockout during replenishment is expensive. Safety stock is the part people under-tune: set it too low and you have reinvented Min/Max with extra steps; set it too high and you are carrying inventory that only protects against a demand spike that never comes.</p>
-<h2 id="mrp-vs-manual-requirement-planning">MRP versus manual requirement planning</h2>
-<p>Neither Min/Max nor Reorder Point settings do anything by themselves — they are inputs that a planning process reads. Customers running the Material Requirements Planning module get purchase and production suggestions generated by MRP Preview and MRP Recalculation, which net demand across sales orders, forecasts, and existing supply before applying these thresholds. Customers not on MRP typically work from the simpler Purchase Requirements and Transfer Requirements inquiries, which react more directly to the Min/Max or reorder point numbers without the multi-level netting.</p>
-<p>The practical difference matters when you're diagnosing why a suggested PO looks wrong. On MRP, a suggestion can be suppressed or resized because of a sales order pegged against existing supply, not because the replenishment settings are broken. On the simpler inquiries, what you see is closer to a direct read of the threshold math.</p>
-<div class="callout callout-warn">
-  <strong>Stale settings are the real defect, not the formula</strong>
-  <p>Min/Max and reorder point values set once at go-live and never revisited are the single most common cause of chronic stockouts or overstock I see in the field. Demand patterns shift, a vendor's lead time changes after a supplier switch, and nobody updates the item record to match. Put a recurring review on the calendar — quarterly for A items, less often for C items — rather than trusting numbers that were correct eighteen months ago.</p>
+    <p>Min/Max is the replenishment setting everyone configures at go-live and almost nobody revisits, and the most expensive mistakes I see with it aren't about picking the wrong numbers — they're about people misunderstanding what the mechanism actually does, especially once MRP is in the picture. This is a practical walkthrough of how Min/Max replenishment triggers in Acumatica Inventory, how the parameters get set, and the MRP-versus-Inventory-Replenishment mix-up that causes more confused support tickets than any bad formula.</p>
+<h2 id="how-min-max-actually-triggers">How Min/Max actually triggers a replenishment calculation</h2>
+<p>Acumatica's Inventory Replenishment supports the Min/Max method as one of its replenishment approaches, and the model is a threshold, not a forecast: it keeps stock for an item at a given warehouse somewhere between a minimum quantity (the reorder point) and a maximum quantity. When the available quantity for that item at that warehouse hits or falls below the reorder point, the system calculates a replenishment quantity — sized to bring the item back up to the maximum by filling the gap between the max, the on-hand quantity, and whatever is already on supply (on order but not yet received). It doesn't add a flat amount and it doesn't ask why the level dropped; it just closes the gap to Max.</p>
+<p>That's the entire trigger logic. It's deliberately simple, and the simplicity is the point for the right items: a stable, low-variability SKU doesn't need anything smarter than "reorder to Max when you hit the floor," and a planner can sanity-check the numbers on sight. Where it gets people is treating a fixed Min/Max pair as permanent — demand shifts, and a Min sized for last year's average gets blown through in one large order.</p>
+<h2 id="manual-vs-forecast-driven-parameters">Manual entry versus forecast-driven auto-calculation</h2>
+<p>The three numbers that drive this — safety stock, maximum quantity, reorder point — can be entered two ways. You can type them in manually per stock item, which is the default at go-live and remains the right call for items with erratic or one-off demand where no formula should be trusted over a planner's judgment. Or they can be auto-calculated from a demand forecast model built on sales history, which is where Acumatica's forecasting can save a planner from re-tuning hundreds of SKUs by hand every quarter.</p>
+<p>The catch with forecast-driven auto-calc is the obvious one, but it still catches people: it only works with enough sales history behind it. A brand-new item, or one that just went through a supplier or packaging change that resets its sales trail, has nothing for the forecast model to learn from — auto-calculated parameters on a thin history are garbage in, garbage out, and will hand you a Min/Max pair that looks calculated and authoritative but is really just noise. For new items, start with manually entered parameters based on a comparable existing SKU or a manager's estimate, and only let the forecast model take over once there's a real sales history to calculate from.</p>
+<div class="callout">
+  <strong>Review cadence still matters either way</strong>
+  <p>Manual or forecast-driven, these parameters go stale. A vendor lead-time change or a demand shift won't update a manually entered Min/Max on its own, and a forecast model retrains on a rolling window that can lag a sudden shift too. Put a recurring review on the calendar rather than assuming either method is "set and forget."</p>
 </div>
-<h2 id="tying-it-to-abc-classification">Tying it to ABC classification</h2>
-<p>Not every item deserves the same level of tuning attention. High-value, high-velocity A items are worth the effort of reorder-point-with-safety-stock, reviewed frequently, because a stockout is expensive and overstock ties up real capital. C items — low value, low velocity — can usually tolerate a loose Min/Max buffer reviewed once or twice a year; the carrying cost of being slightly wrong is trivial. Applying the same review cadence to both is wasted effort in one direction and negligence in the other.</p>
-<p>A generic inquiry over <code>INSiteStatus</code> joined to <code>INItemSiteSettings</code> is a fast way to surface items where on-hand plus on-order has dropped below the reorder point or Min, without waiting for the next MRP run:</p>
+<h2 id="mrp-vs-inventory-replenishment">MRP versus Inventory Replenishment: not the same subsystem</h2>
+<p>This is the distinction that causes the most confusion, and it's worth being explicit about because the two subsystems look like they should behave the same way and don't. Material Requirements Planning (MRP) in Acumatica does support safety stock and a reorder point — but MRP does <strong>not</strong> reorder up to a maximum quantity the way Inventory Replenishment's Min/Max method does. They are two separate subsystems with different behavior, not two views onto the same calculation.</p>
+<p>Concretely, here's what breaks: someone configures Max on a stock item, assumes MRP will "top up to Max" once the reorder point is breached the same way Min/Max replenishment would, and then is confused when an MRP-generated purchase suggestion comes back sized differently than expected — sometimes smaller, sometimes not generated at all when they expected one. MRP is netting demand against safety stock and reorder point across sales orders, forecasts, and existing supply; it isn't reading Max as a fill target the way the Inventory Replenishment engine does. If your planning process runs through MRP Preview and MRP Recalculation, the Max field on the stock item is not driving MRP's suggested quantities the way it drives a Min/Max replenishment run outside of MRP.</p>
+<p>The practical takeaway: know which subsystem is actually generating your purchase suggestions before you tune parameters to influence it. Tuning Max to shape MRP output is tuning a number that subsystem doesn't use for that purpose.</p>
+<h2 id="a-quick-way-to-check-what-needs-attention">A quick way to check what needs attention</h2>
+<p>A generic inquiry over the item's site status joined to its replenishment settings is a fast way to surface items where available quantity has dropped to or below the reorder point, without waiting for the next scheduled replenishment or MRP run:</p>
 <div class="code-block">
   <div class="code-header"><span class="code-lang">SQL · REPLENISHMENT SHORTAGE CHECK</span><button class="copy-btn" type="button">Copy</button></div>
 <pre><code>SELECT
@@ -139,15 +135,17 @@ WHERE ic.ReplenishmentMethod IN ('M', 'R')
 ORDER BY AvailableQty ASC;</code></pre>
 </div>
 <p>Treat the field and table names as illustrative — verify the actual DAC and generic-inquiry field mappings in your build before wiring this into a dashboard, since exact naming can shift slightly by version.</p>
-<h2 id="choosing-a-method">Choosing a method</h2>
+<h2 id="wrapping-up">Wrapping up</h2>
 <table>
-  <tr><th>Method</th><th>Best for</th><th>Weak point</th></tr>
-  <tr><td>Min/Max</td><td>Stable demand, simple review, low SKU count per planner</td><td>Ignores lead time and seasonality</td></tr>
-  <tr><td>Reorder Point + Safety Stock</td><td>Variable demand, longer or inconsistent vendor lead times</td><td>Needs accurate lead-time and usage data to be worth the complexity</td></tr>
-  <tr><td>MRP / Requirement Planning</td><td>Multi-level BOMs, dependent demand, sales-order-driven netting</td><td>Heavier to configure and explain to planners</td></tr>
+  <tr><th>Question</th><th>What decides it</th></tr>
+  <tr><td>Should this item use Min/Max?</td><td>Stable, low-variability demand — the threshold-to-Max model is simple and good enough</td></tr>
+  <tr><td>Manual or forecast-driven parameters?</td><td>Forecast-driven only once there's enough sales history; manual for new or erratic items</td></tr>
+  <tr><td>Is MRP generating the suggestion, or Inventory Replenishment?</td><td>Know which subsystem runs first — MRP nets safety stock and reorder point but does not fill to Max</td></tr>
+  <tr><td>Why does the PO look wrong?</td><td>Check which subsystem produced it before assuming the Min/Max/reorder point numbers are broken</td></tr>
 </table>
-<p>That is the working approach I use on Acumatica inventory replenishment. The same patterns show up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and they are the things that keep a warehouse from either running dry or drowning in stock nobody ordered. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Min/Max replenishment in Acumatica Inventory is a simple mechanism — hit the reorder point, fill the gap to Max — and it's a good fit for stable demand whether the parameters are typed in by hand or calculated from a forecast with enough history behind it. The mistake that costs the most time isn't a badly tuned number, it's assuming MRP behaves like Inventory Replenishment's Min/Max method. It doesn't: MRP nets demand against safety stock and reorder point, but it will not top a stock item up to Max the way the Min/Max method does. Know which subsystem is actually producing your purchase suggestions before you tune parameters expecting it to behave like the other one.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-in-module-extension-patterns/">Acumatica Inventory Module — Extension Patterns</a></li>
@@ -159,7 +157,6 @@ ORDER BY AvailableQty ASC;</code></pre>
     </div>
 
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Next.js 15 Server Actions | John Kihiu</title>
-<meta name="description" content="Next.js 15 Server Actions is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta name="description" content="How Server Actions actually work under the hood in Next.js 15, form patterns with useActionState and useFormStatus, validation and revalidation, and why every action is a public endpoint you must secure.">
 <meta name="keywords" content="Acumatica nextjs, Acumatica server-actions, Acumatica rsc, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/nextjs-15-server-actions/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Next.js 15 Server Actions">
-<meta property="og:description" content="Next.js 15 Server Actions is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/nextjs-15-server-actions.svg">
+<meta property="og:description" content="How Server Actions actually work under the hood in Next.js 15, form patterns with useActionState and useFormStatus, validation and revalidation, and why every action is a public endpoint you must secure.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/nextjs-15-server-actions/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="rsc">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Server Actions","description":"Next.js 15 Server Actions is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-server-actions.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-server-actions/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Server Actions","description":"How Server Actions actually work under the hood in Next.js 15, form patterns with useActionState and useFormStatus, validation and revalidation, and why every action is a public endpoint you must secure.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-server-actions.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-server-actions/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Next.js 15 Server Actions","item":"https://kihiujohn.github.io/blog/nextjs-15-server-actions/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,83 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Next.js 15 Server Actions</span></nav>
     <span class="tag">Modern Web · Nextjs</span>
     <h1>Next.js 15 Server Actions</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Next.js 15 Server Actions is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Server Actions actually work under the hood in Next.js 15, form patterns with useActionState and useFormStatus, validation and revalidation, and why every action is a public endpoint you must secure.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>On real production apps, this is not the question. The question is the failure mode: what happens when the API is down, when the bundle is 2MB, when the user is on a 3G connection. This article is about making this work in the version of the framework that you actually have deployed, with the failure modes that the docs don't cover.</p>
-<h2 id="common-pitfalls-when-adopting-next">Common pitfalls when adopting next</h2>
-<p>Common pitfalls when adopting next is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A Server Action looks like a normal async function you call from a component, but that's a compiler illusion. Under the hood, Next.js compiles it into a POST endpoint with a stable, hashed ID, and the "function call" from your client component is actually a <code>fetch</code> to that endpoint with the arguments serialized in the body. Once that clicks, a lot of the sharper edges of Server Actions — why they need to be idempotent-safe, why they're a public attack surface, why you validate inside them — stop being surprising.</p>
+<h2 id="how-they-work-under-the-hood">The RPC mechanics</h2>
+<p>Marking a function <code>'use server'</code> (either at the top of the file or inline inside another server function) tells the build to extract it into a server-only module reachable via a generated action ID, and to replace the client-side reference with a thin wrapper that POSTs to it. This is why Server Actions work seamlessly with progressive enhancement: a form's <code>action</code> attribute can point directly at a Server Action, and the browser's native form submission handles the POST even with JavaScript disabled — React then hydrates on top of that to give you pending states and optimistic UI when JS is available.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<h2 id="migration-path-from-the-old-approach">Migration path from the old approach</h2>
-<p>In the work I have done on next.js 15 server actions, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
-</div>
-<h2 id="how-server-interacts-with-server-components">How server interacts with server components</h2>
-<p>When the work moves from design to production, the questions change. The next is not the question; the failure mode of the server is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useNext(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
+  <div class="code-header"><span class="code-lang">TSX · app/todos/actions.ts</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>'use server';
+import { z } from 'zod';
+import { revalidatePath } from 'next/cache';
+import { db } from '@/lib/db';
+
+const TodoSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+});
+
+export async function createTodo(formData: FormData) {
+  const parsed = TodoSchema.safeParse({
+    title: formData.get('title'),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.flatten().fieldErrors };
+  }
+
+  await db.todo.create({ data: { title: parsed.data.title } });
+  revalidatePath('/todos');
+  return { error: null };
 }</code></pre>
 </div>
-<h2 id="typescript-patterns-for-next">TypeScript patterns for next</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
-</div>
-<h2 id="when-next-is-the-wrong-tool">When next is the wrong tool</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="useactionstate-and-useformstatus">useActionState and useFormStatus for form UX</h2>
+<p><code>useActionState</code> (the successor to <code>useFormState</code>) wraps an action and gives you back its current state — validation errors, success messages — along with a wrapped action to pass to the form, updated automatically as submissions resolve. <code>useFormStatus</code>, called from a child component nested inside the form, tells you whether a submission is pending without threading that state down as a prop manually, which is exactly what a reusable submit button needs to disable itself during submission.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
+  <div class="code-header"><span class="code-lang">TSX · app/todos/todo-form.tsx</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>'use client';
+import { useActionState, useFormStatus } from 'react-dom';
+import { createTodo } from './actions';
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    &lt;button type="submit" disabled={pending}&gt;
+      {pending ? 'Adding…' : 'Add todo'}
+    &lt;/button&gt;
+  );
+}
+
+export function TodoForm() {
+  const [state, formAction] = useActionState(createTodo, { error: null });
+
+  return (
+    &lt;form action={formAction}&gt;
+      &lt;input name="title" placeholder="What needs doing?" /&gt;
+      {state.error?.title && &lt;p&gt;{state.error.title[0]}&lt;/p&gt;}
+      &lt;SubmitButton /&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
 </div>
-<h2 id="build-vs-buy-for-server">Build vs buy for server</h2>
-<p>The performance of server in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
+<h2 id="validation-belongs-on-the-server">Validate inside the action, not just in the form</h2>
+<p>Client-side validation is a UX nicety; server-side validation inside the action is the actual security boundary, because the action is reachable directly regardless of what the form did. A schema library like Zod parsing <code>FormData</code> at the top of every action — as in the example above — is the pattern that holds up: reject bad input before it touches your database, and return typed field-level errors that <code>useActionState</code> can render back next to the relevant input.</p>
+<h2 id="revalidation-after-mutation">Revalidating after a mutation</h2>
+<p>A Server Action that writes data doesn't automatically refresh any cached page that displayed the old data — you call <code>revalidatePath('/todos')</code> or <code>revalidateTag('todos')</code> explicitly after the mutation succeeds, which tells Next.js to purge and regenerate that cached route on next visit. Tag-based revalidation is the better default once more than one route displays the same data, since you invalidate by what changed rather than hunting down every path that might render it.</p>
+<h2 id="security-they-are-public-endpoints">Server Actions are public HTTP endpoints — treat them like one</h2>
+<p>This is the point worth repeating: a Server Action's generated endpoint can be called directly with curl or any HTTP client, bypassing your form, your client-side checks, and any assumption that "only my UI calls this." Every action that mutates data or returns user-scoped information needs its own authentication and authorization check at the top — the same discipline you'd apply to a REST or GraphQL mutation. Rate limiting matters too: an action with no rate limit sitting behind a public form is a plain invitation for abuse, the same as an unprotected API route would be.</p>
+<div class="callout-warn callout">
+  <strong>No session check inside the action means no protection at all</strong>
+  <p>A page being behind a login screen doesn't protect the Server Actions its components expose. If <code>deleteAccount()</code> doesn't verify the caller owns the account being deleted, anyone who discovers the action's endpoint can call it for any account ID they can guess.</p>
 </div>
-<h2 id="testing-next-in-isolation">Testing next in isolation</h2>
-<p>Production server looks different from development server. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring server first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add next on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with server when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on next.js 15 server actions. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Server Actions read like local function calls but behave like RPC endpoints, and treating them that way — validating input with a schema, checking auth inside the action itself, revalidating explicitly after a write — is what keeps that convenience from becoming a liability. <code>useActionState</code> and <code>useFormStatus</code> make the client-side form UX close to free once the server side is solid; get the server side solid first.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/nextjs-15-app-router/">Next.js 15 App Router Patterns</a></li>
@@ -178,7 +173,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

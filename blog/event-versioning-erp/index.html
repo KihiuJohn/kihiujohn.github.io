@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Event Versioning for ERP Workflows">
 <meta property="og:description" content="Event Versioning for ERP Workflows is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/event-versioning-erp.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/event-versioning-erp/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="workflow">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,95 +92,83 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Cross-system workflows in production fail in ways that don't show up in the demo. The failure modes are usually around idempotency, ordering, and dead-letter handling. this is the pattern that handles them. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>Error handling and retry strategies is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>An event store is append-only by design, which is exactly what makes schema change hard: you cannot go back and edit the ten million events already written under the old shape. Every consumer that replays history — projections, audit reports, integration bridges — has to keep understanding events it wrote years ago, even as the producer's model of the world moves on. Versioning is how you make that promise without freezing the schema forever.</p>
+
+<h2 id="why-in-place-schema-changes-do-not-work">Why in-place schema changes don't work</h2>
+<p>A relational table lets you run <code>ALTER TABLE</code> and move on, because the table only represents current state. An event stream represents history, and history doesn't get to change. If <code>OrderPlaced</code> gained a <code>currency</code> field last year, every <code>OrderPlaced</code> event written before that change is still missing it. You cannot backfill the field into the stored event without lying about what actually happened at that point in time — and any consumer that persisted a projection from the old events already baked the absence of that field into its own state.</p>
+<p>The practical consequence: schema evolution in an event-sourced system is additive and versioned, not destructive and in-place. You never mutate a stored event. You either make new fields tolerable to old readers, or you introduce a new event version and teach your read path to translate between them.</p>
+
+<h2 id="versioned-event-types">Versioned event types</h2>
+<p>The simplest scheme is to put a version number directly in the event's type name or metadata — <code>OrderPlaced.v1</code>, <code>OrderPlaced.v2</code> — and treat each version as a distinct, immutable contract. When the business needs a field that genuinely changes the meaning of the event (not just adds an optional attribute), you cut a new version rather than overload the old one. Consumers that only need current behavior read the latest version; consumers replaying history see whichever version was actually persisted at that point in time, unaltered.</p>
+<p>This works well for large, meaningful changes — splitting one event into two, renaming a field whose semantics changed, adding a required field that didn't previously exist. It's overkill for additive, backward-compatible changes, which is where upcasting earns its keep.</p>
+
+<h2 id="upcasting-on-read">Upcasting on read</h2>
+<p>Upcasting means transforming an old event shape into the current shape at read time, before it reaches application code. The stored event never changes — a translation layer sits between the event store and the deserializer, and every event, regardless of when it was written, arrives at the consumer looking like the latest schema. New optional fields get sensible defaults; renamed fields get mapped; removed fields get dropped or ignored.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Event", "type": "n8n-nodes-base.event"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Event"}]]}
+  <div class="code-header"><span class="code-lang">C# · UPCASTER CHAIN</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>public interface IEventUpcaster
+{
+    string SourceType { get; }   // e.g. "OrderPlaced.v1"
+    JObject Upcast(JObject raw); // returns v2-shaped payload
+}
+
+public class OrderPlacedV1ToV2 : IEventUpcaster
+{
+    public string SourceType => "OrderPlaced.v1";
+
+    public JObject Upcast(JObject raw)
+    {
+        // v2 added an explicit currency code; v1 events
+        // were all USD, so default rather than reject.
+        if (raw["currency"] == null)
+            raw["currency"] = "USD";
+
+        raw["schemaVersion"] = 2;
+        return raw;
     }
+}
+
+// Read-path pipeline: apply every upcaster whose
+// SourceType matches, in order, before deserializing
+// into the current CLR type.
+public JObject ApplyUpcasters(string eventType, JObject raw, IEnumerable<IEventUpcaster> chain)
+{
+    foreach (var upcaster in chain.Where(u => u.SourceType == eventType))
+        raw = upcaster.Upcast(raw);
+    return raw;
 }</code></pre>
 </div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>In the work I have done on event versioning for erp workflows, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Chaining upcasters (v1→v2, v2→v3) rather than writing every version straight to the latest keeps each transform small and testable, and it means adding v4 later doesn't require touching the v1→v2 logic at all.</p>
+
+<h2 id="backward-and-forward-compatibility-rules">Backward and forward compatibility rules</h2>
+<p>Most of the pain disappears if you enforce a small set of rules on every event schema change. Additive changes — new optional fields with defaults — are backward compatible and need no upcaster at all if your deserializer ignores unknown fields and defaults missing ones. Removing a field is forward compatible for old consumers (they just never read it) but breaks anything that treated it as required, so removals should go through a deprecation window where the field is written-but-ignored before it disappears. Renaming a field or changing its type is neither compatible on its own; it always needs an explicit upcaster or a new event version.</p>
+<div class="callout">
+  <strong>Never change the meaning of a field in place</strong>
+  <p>If a field's unit, precision, or semantics change — cents to decimal, local time to UTC, nullable to required — treat it as a new field or a new event version. Silently reinterpreting old data through new code produces numbers that are wrong in ways nobody notices until reconciliation fails months later.</p>
+</div>
+
+<h2 id="rebuilding-projections-after-a-schema-change">Rebuilding projections after a schema change</h2>
+<p>Projections built from the event stream are derived state, which means they're disposable — that's the whole point of event sourcing. When an upcaster changes how history is interpreted, the safest move is to drop the affected projection and rebuild it from the beginning of the stream through the new upcasting pipeline, rather than trying to patch the projection's existing rows. This is slower than an in-place update but eliminates an entire class of bugs where the projection reflects a mix of old and new interpretation logic depending on when each row was last touched.</p>
 <div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+  <strong>Test upcasters against real historical payloads, not fixtures</strong>
+  <p>Hand-written test fixtures tend to be shaped like the current schema with fields removed, which isn't the same as what actually got persisted three schema versions ago — optional fields that were never populated, enum values that were later renamed, null handling that changed. Pull a sample of real events from each historical version and run the upcaster chain against them before trusting a projection rebuild.</p>
 </div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>When the work moves from design to production, the questions change. The event is not the question; the failure mode of the versioning is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleEvent(event) {
-    try {
-        const result = await processVersioning(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="why-event-fails-at-3-am-and-what-to-do">Why event fails at 3 AM and what to do</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        event: item.json.event,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="ordering-and-sequencing-in-versioning">Ordering and sequencing in versioning</h2>
-<p>The performance of versioning in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>Production versioning looks different from development versioning. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Event", "type": "n8n-nodes-base.event"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Event"}]]}
-    }
-}</code></pre>
-</div>
+
+<h2 id="keeping-the-catalog-honest">Keeping the event catalog honest</h2>
+<p>None of this holds together without a single source of truth for which event versions exist, what each upcaster does, and which consumers still depend on which version. A schema registry — even a lightweight one that's just versioned JSON Schema files in the repo with the upcaster code next to them — stops the quiet drift where a producer ships a breaking change and three consuming services find out when their projections stop matching finance's numbers.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring versioning first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add event on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with versioning when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Change type</th><th>Compatible without upcaster?</th><th>Action</th></tr>
+  <tr><td>New optional field, sensible default</td><td>Yes, if readers ignore unknowns</td><td>Document it; no upcaster needed</td></tr>
+  <tr><td>New required field</td><td>No</td><td>New event version; upcaster fills default for old events</td></tr>
+  <tr><td>Field rename</td><td>No</td><td>Upcaster maps old name to new</td></tr>
+  <tr><td>Field removed</td><td>Forward-compatible only</td><td>Deprecate first, remove after a window</td></tr>
+  <tr><td>Semantic/unit change</td><td>No</td><td>New event type or explicit version bump</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on event versioning for erp workflows. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<p>The discipline that makes this sustainable is small: never mutate a stored event, treat every schema change as additive or explicitly versioned, and keep upcasters as the only place old and new shapes ever meet. Do that consistently and a five-year-old event store stays replayable instead of becoming an archive nobody trusts.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/event-driven-architecture-erp/">Event-Driven Architecture for ERP — A Field Guide</a></li>
@@ -192,7 +179,6 @@ return items.map(item =&gt; ({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Star Schema vs Snowflake Schema | John Kihiu</title>
-<meta name="description" content="Star Schema vs Snowflake Schema is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
+<meta name="description" content="Star schema vs snowflake schema in dimensional modeling: how denormalized dimensions trade storage and maintenance for query simplicity, and when normalizing them into a snowflake pays off.">
 <meta name="keywords" content="Acumatica schema, Acumatica design, Acumatica warehouse, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/star-schema-vs-snowflake/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Star Schema vs Snowflake Schema">
-<meta property="og:description" content="Star Schema vs Snowflake Schema is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/star-schema-vs-snowflake.svg">
+<meta property="og:description" content="Star schema vs snowflake schema in dimensional modeling: how denormalized dimensions trade storage and maintenance for query simplicity, and when normalizing them into a snowflake pays off.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/star-schema-vs-snowflake/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="data">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="warehouse">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Star Schema vs Snowflake Schema","description":"Star Schema vs Snowflake Schema is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in every.","image":"https://kihiujohn.github.io/assets/og/star-schema-vs-snowflake.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/star-schema-vs-snowflake/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Star Schema vs Snowflake Schema","description":"Star schema vs snowflake schema in dimensional modeling: how denormalized dimensions trade storage and maintenance for query simplicity, and when normalizing them into a snowflake pays off.","image":"https://kihiujohn.github.io/assets/og/star-schema-vs-snowflake.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/star-schema-vs-snowflake/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Star Schema vs Snowflake Schema","item":"https://kihiujohn.github.io/blog/star-schema-vs-snowflake/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,88 +86,89 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Star Schema vs Snowflake Schema</span></nav>
     <span class="tag">Data / ML · Schema</span>
     <h1>Star Schema vs Snowflake Schema</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Star Schema vs Snowflake Schema is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Star schema vs snowflake schema in dimensional modeling: how denormalized dimensions trade storage and maintenance for query simplicity, and when normalizing them into a snowflake pays off.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Data pipelines in production are mostly about how to handle the slow failure modes. this is the pattern that handles the cases that don't show up in the demo data. This article is the field-tested patterns, with the runbook that saves you at 2 AM.</p>
-<h2 id="observability-lineage-monitoring-alerts">Observability: lineage, monitoring, alerts</h2>
-<p>Observability: lineage, monitoring, alerts is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Star schema and snowflake schema are the two standard ways to model dimensions in a data warehouse, and the choice between them is really a choice about where you want the complexity to live: in the storage and maintenance of the dimension tables, or in the joins your queries have to run. Neither is "correct" — they're opposite ends of a denormalization trade-off, and most warehouses end up with a mix.</p>
+<h2 id="what-a-star-schema-actually-looks-like">What a star schema actually looks like</h2>
+<p>A star schema has one fact table (the measurements — order amount, quantity, revenue) surrounded by denormalized dimension tables (customer, product, date). Denormalized means each dimension is flattened into a single wide table, even if some of its attributes are technically hierarchical or repeat across rows.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM star
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
+  <div class="code-header"><span class="code-lang">SQL · STAR SCHEMA (DENORMALIZED)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE dim_product (
+    product_key      INT PRIMARY KEY,
+    product_name     VARCHAR(200),
+    category_name    VARCHAR(100),   -- flattened in, not a separate table
+    subcategory_name VARCHAR(100),   -- flattened in, not a separate table
+    brand_name       VARCHAR(100),   -- flattened in, not a separate table
+    supplier_name    VARCHAR(200)    -- flattened in, not a separate table
+);
+
+CREATE TABLE fact_sales (
+    sale_id      BIGINT PRIMARY KEY,
+    product_key  INT REFERENCES dim_product(product_key),
+    customer_key INT REFERENCES dim_customer(customer_key),
+    date_key     INT REFERENCES dim_date(date_key),
+    quantity     INT,
+    amount       NUMERIC(12,2)
+);
+
+-- One join per dimension, no matter how many attributes you pull
+SELECT p.category_name, SUM(f.amount) AS total
+FROM fact_sales f
+JOIN dim_product p ON f.product_key = p.product_key
+GROUP BY p.category_name;</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on star schema vs snowflake schema, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Category, subcategory, brand, and supplier all live as plain columns on <code>dim_product</code>, even though in a normalized world they'd be their own tables. That redundancy is the whole point: any query touching product attributes needs exactly one join.</p>
+<h2 id="what-a-snowflake-schema-normalizes-out">What a snowflake schema normalizes out</h2>
+<p>A snowflake schema takes those same dimensions and normalizes them into a hierarchy of smaller tables — category and subcategory become their own tables, referenced by foreign key instead of duplicated as text on every product row.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · SNOWFLAKED DIMENSION HIERARCHY (NORMALIZED)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE dim_category (
+    category_key INT PRIMARY KEY,
+    category_name VARCHAR(100)
+);
+
+CREATE TABLE dim_subcategory (
+    subcategory_key INT PRIMARY KEY,
+    subcategory_name VARCHAR(100),
+    category_key INT REFERENCES dim_category(category_key)
+);
+
+CREATE TABLE dim_product (
+    product_key      INT PRIMARY KEY,
+    product_name     VARCHAR(200),
+    subcategory_key  INT REFERENCES dim_subcategory(subcategory_key),
+    supplier_key     INT REFERENCES dim_supplier(supplier_key)
+);
+
+-- Same rollup now needs three joins instead of one
+SELECT c.category_name, SUM(f.amount) AS total
+FROM fact_sales f
+JOIN dim_product p ON f.product_key = p.product_key
+JOIN dim_subcategory sc ON p.subcategory_key = sc.subcategory_key
+JOIN dim_category c ON sc.category_key = c.category_key
+GROUP BY c.category_name;</code></pre>
+</div>
+<h2 id="the-actual-trade-off-storage-vs-query-cost">The actual trade-off: storage vs query cost</h2>
+<p>Normalizing a dimension removes redundant text (a category name repeated across ten thousand product rows becomes one row in a category table), which shrinks storage and makes updates to category names a single-row change instead of a bulk update across every product. That's the entire case for snowflaking.</p>
+<p>The cost is that every query touching those attributes needs more joins, and columnar warehouses (BigQuery, Snowflake the product, Redshift) are specifically optimized for the star pattern — scanning a single wide dimension table is cheap, and join elimination or broadcast joins on small denormalized dimensions are fast. Chaining three or four joins to rebuild a hierarchy that could have been three flat columns adds query planning overhead and makes BI tools (which usually expect a flat star for their semantic layers) harder to configure.</p>
 <div class="callout callout-warn">
-  <strong>The cost is the metric</strong>
-  <p>Data pipeline cost is a function of the data volume, the compute, and the storage. The right pattern is to know your cost per row and have an alert when it doubles.</p>
+  <strong>Storage is rarely the bottleneck it looks like on paper</strong>
+  <p>A denormalized product dimension with a repeated category name wastes bytes, but text compresses extremely well in columnar storage — a column of ten thousand rows with five distinct category names costs almost nothing after compression. Don't snowflake to save storage in a warehouse where storage is already cheap; snowflake because the hierarchy itself needs independent updates or referential integrity.</p>
 </div>
-<h2 id="why-star-in-the-warehouse-beats-in-the-lake">Why star in the warehouse beats in the lake</h2>
-<p>When the work moves from design to production, the questions change. The star is not the question; the failure mode of the schema is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>def transform(df):
-    return df.filter(df.star > 0).groupBy("schema").agg({"amount": "sum"})</code></pre>
-</div>
-<h2 id="schema-evolution-for-schema">Schema evolution for schema</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="when-to-actually-choose-each">When to actually choose each</h2>
+<p>Default to a star schema for anything BI tools or analysts query directly — dashboards, self-serve reporting, anything where join simplicity and query speed matter more than storage efficiency. Reach for snowflaking selectively, not wholesale, when a specific dimension has a genuine hierarchy that changes independently of the fact table — a product catalog with categories that get renamed or restructured by a merchandising team, where you want that update to happen in one place, not be reflected across every fact-adjacent product row via a slow bulk update or SCD (slowly changing dimension) process.</p>
 <div class="callout">
-  <strong>The test is the contract</strong>
-  <p>Data quality tests are the contract between the producer and the consumer. The test that catches the bug is the test that prevents the incident.</p>
+  <strong>Most production warehouses are a "galaxy," not purely one or the other</strong>
+  <p>In practice you'll snowflake the one or two dimensions that have real hierarchical churn (product categories, org structures) and keep everything else — date, a flat customer dimension — fully denormalized. Treating the whole schema as an all-or-nothing choice is the mistake; treat it dimension by dimension.</p>
 </div>
-<h2 id="cost-optimisation-for-star">Cost optimisation for star</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- dbt model
-{{ config(materialized='incremental', on_schema_change='append_new_columns') }}
-SELECT *
-FROM {{ ref('stg_star') }}
-{% if is_incremental() %}
-  WHERE updated_at &gt; (SELECT MAX(updated_at) FROM {{ this }})
-{% endif %}</code></pre>
-</div>
-<h2 id="the-testing-pyramid-for-schema">The testing pyramid for schema</h2>
-<p>The performance of schema in data / ml is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The pivot is expensive</strong>
-  <p>Pivot tables in a GI are convenient. Pivot tables over 1M rows are slow. The right pattern is to pre-aggregate.</p>
-</div>
-<h2 id="backfills-and-rollbacks-for-star">Backfills and rollbacks for star</h2>
-<p>Production schema looks different from development schema. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT
-  customer_id,
-  SUM(amount) AS total,
-  COUNT(*) AS transactions
-FROM star
-WHERE created_at &gt;= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY 1
-ORDER BY total DESC
-LIMIT 100;</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring schema first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add star on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with schema when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on star schema vs snowflake schema. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Star vs snowflake isn't a stylistic preference — it's a direct trade between how much you denormalize (fewer joins, more redundant storage, simpler queries) and how much you normalize (more joins, less redundancy, easier maintenance of hierarchies that actually change). Start with a star schema by default because most analytical queries favor fewer joins, and snowflake only the specific dimensions where the normalized structure earns its keep.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/graphql-schema-design/">GraphQL Schema Design — A Field Guide</a></li>
@@ -179,7 +179,6 @@ LIMIT 100;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

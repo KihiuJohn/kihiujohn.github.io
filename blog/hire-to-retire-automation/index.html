@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Hire-to-Retire Automation">
 <meta property="og:description" content="Hire-to-Retire Automation is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/hire-to-retire-automation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/hire-to-retire-automation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,79 +92,51 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real vertical SaaS projects, this is rarely the question. The question is the multi-tenant data isolation, the feature flags, the channel partner program. This article is the implementation.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HireExt : PXCacheExtension<Retire>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
+    <p>Hire-to-retire is the umbrella term for every HR process that touches an employee's record from the offer letter to the final payslip: onboarding, role changes, leave, performance cycles, payroll changes, and offboarding. Most of it is well-understood, repetitive, and exactly the kind of work that should not depend on someone remembering a checklist. The automation opportunity isn't a single big system — it's a series of small, reliable triggers stitched between the systems that already hold the data.</p>
+<h2 id="onboarding-as-a-workflow-not-a-checklist">Onboarding as a workflow, not a checklist</h2>
+<p>A new hire touches identity (account creation), IT (equipment, access grants), HR (contract, benefits enrollment), and finance (payroll setup) — usually four different systems owned by four different people. The manual version is a shared spreadsheet or a PDF checklist that someone forgets to update. The automated version triggers off a single event — an offer accepted, or a start date confirmed in the HRIS — and fires provisioning tasks into each downstream system, with an owner and a due date attached to each one.</p>
+<div class="callout">
+  <strong>Trigger off state changes, not calendar dates</strong>
+  <p>"Two weeks before start date" is a fragile trigger — start dates move. Trigger off the actual event (offer accepted, contract signed) and compute relative deadlines from there, so a slipped start date doesn't leave provisioning tasks firing against a date that no longer means anything.</p>
 </div>
-<h2 id="why-hire-on-a-horizontal-platform-beats-from-scratch">Why hire on a horizontal platform beats from-scratch</h2>
-<p>In the work I have done on hire-to-retire automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="the-approval-chains-that-matter">The approval chains that actually need automation</h2>
+<p>Leave requests, expense claims, and role/compensation changes are the highest-volume approval workflows in the employee lifecycle, and they're the ones most worth automating because the approval logic is usually simple: route to the direct manager, escalate if no response within N business days, and copy HR on anything touching compensation. The mistake teams make is over-modeling this — building a generic workflow engine for a process that is, in practice, a two-step approval with one escalation rule. Most HRIS and payroll platforms already have this built in; the automation work is usually integration (making sure an approved leave request actually reduces the payroll run and updates the time-off balance) rather than building approval logic from scratch.</p>
+<h2 id="offboarding-is-where-the-risk-lives">Offboarding is where the risk actually lives</h2>
+<p>Onboarding delays are an inconvenience. Offboarding delays are a security incident waiting to happen — an ex-employee with active VPN, email, or ERP access for days or weeks after their last day is a real and common finding in security audits. The fix is the same pattern in reverse: a termination event in the HRIS should trigger de-provisioning tasks (revoke SSO, disable email forwarding after a grace period, remove ERP/CRM roles, reclaim equipment) with the same urgency as onboarding gets speed. If your identity provider supports SCIM, tying user deactivation to the HRIS termination event closes the gap between "HR processed the termination" and "the account still works" almost entirely.</p>
 <div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
+  <strong>Test the offboarding path as hard as onboarding</strong>
+  <p>Onboarding automation gets tested constantly because it runs every time someone joins. Offboarding automation runs less often and is more likely to silently break — a renamed field in the HRIS export, a changed API scope — and nobody notices until an audit or an incident surfaces it. Put offboarding on the same monitoring/alerting you'd use for a payment pipeline.</p>
 </div>
-<h2 id="channel-partner-programs-for-retire">Channel partner programs for retire</h2>
-<p>When the work moves from design to production, the questions change. The hire is not the question; the failure mode of the retire is.</p>
+<h2 id="data-consistency-across-systems">Keeping the systems from disagreeing</h2>
+<p>The recurring failure mode in hire-to-retire automation isn't a missing trigger — it's two systems disagreeing about the same fact because updates flow one direction only. If a manager updates someone's title in the HRIS but the ERP's employee master isn't updated in the same transaction, approval routing and reporting drift out of sync silently. The fix is picking one system of record per fact (usually the HRIS owns employment status and org structure, payroll owns compensation) and pushing changes outward from there, rather than letting each system accept edits independently.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'hire'
-  AND tenant_id = @TenantId;</code></pre>
+  <div class="code-header"><span class="code-lang">TEXT · EVENT FLOW</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>HRIS: employee.status changed to "terminated"
+  -> webhook/event fired with effective_date, employee_id
+  -> Identity provider: schedule SSO deactivation at effective_date
+  -> ERP: disable user account, revoke financial approval roles
+  -> Payroll: flag for final pay run, stop future accruals
+  -> IT ticketing: create equipment-return and access-audit task
+  -> Facilities: revoke badge access
+
+Each downstream action logs success/failure back to a
+central audit table keyed on employee_id + event_id,
+so a partial failure (e.g. ERP API timeout) is visible,
+not silent.</code></pre>
 </div>
-<h2 id="marketplace-listing-for-hire">Marketplace listing for hire</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="soc-2-and-iso-27001-for-retire">SOC 2 and ISO 27001 for retire</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM hire
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>The performance of retire in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="what-hire-to-retire-automation-is-for">What Hire-to-Retire Automation is for</h2>
-<p>Production retire looks different from development retire. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class HireExt : PXCacheExtension<Retire>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+<h2 id="where-not-to-automate">Where not to automate</h2>
+<p>Performance reviews, compensation decisions, and anything involving judgment calls about a specific person are poor automation targets — you can automate the reminder to complete a review, but not the review itself. The line to hold is: automate the mechanical handoffs between systems and the reminders that keep humans on schedule, and leave the actual decisions to the humans who own them.</p>
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring retire first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add hire on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with retire when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Lifecycle stage</th><th>Good automation target</th><th>System of record</th></tr>
+  <tr><td>Onboarding</td><td>Provisioning task fan-out on offer-accepted</td><td>HRIS</td></tr>
+  <tr><td>Leave/time-off</td><td>Approval routing + payroll sync</td><td>HRIS or dedicated leave system</td></tr>
+  <tr><td>Role change</td><td>Propagating title/manager change downstream</td><td>HRIS</td></tr>
+  <tr><td>Offboarding</td><td>De-provisioning fan-out on termination event</td><td>HRIS, mirrored to identity provider</td></tr>
 </table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on hire-to-retire automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Hire-to-retire automation isn't a single platform purchase — it's making sure the systems that already hold employment data actually talk to each other on the events that matter, especially offboarding, where the cost of a delay is a live account nobody remembers to close. Pick a system of record per fact, trigger off real state changes, and put offboarding under the same monitoring rigor as anything security-sensitive.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/employee-onboarding-automation/">Employee Onboarding Automation</a></li>
@@ -176,7 +147,6 @@ public class HireExt : PXCacheExtension<Retire>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

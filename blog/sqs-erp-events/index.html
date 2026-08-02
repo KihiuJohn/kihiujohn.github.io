@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AWS SQS for ERP Event-Driven Workflows | John Kihiu</title>
-<meta name="description" content="AWS SQS for ERP Event-Driven Workflows is the work that turns a collection of business systems into a coherent operation.">
+<meta name="description" content="How to use AWS SQS to decouple ERP integrations from downstream systems, with retry, visibility timeout, and dead-letter queue patterns that keep failures contained.">
 <meta name="keywords" content="Acumatica aws, Acumatica sqs, Acumatica erp, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/sqs-erp-events/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="AWS SQS for ERP Event-Driven Workflows">
-<meta property="og:description" content="AWS SQS for ERP Event-Driven Workflows is the work that turns a collection of business systems into a coherent operation.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/sqs-erp-events.svg">
+<meta property="og:description" content="How to use AWS SQS to decouple ERP integrations from downstream systems, with retry, visibility timeout, and dead-letter queue patterns that keep failures contained.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/sqs-erp-events/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="workflow">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="erp">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"AWS SQS for ERP Event-Driven Workflows","description":"AWS SQS for ERP Event-Driven Workflows is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/sqs-erp-events.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/sqs-erp-events/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"AWS SQS for ERP Event-Driven Workflows","description":"How to use AWS SQS to decouple ERP integrations from downstream systems, with retry, visibility timeout, and dead-letter queue patterns that keep failures contained.","image":"https://kihiujohn.github.io/assets/og/sqs-erp-events.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/sqs-erp-events/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"AWS SQS for ERP Event-Driven Workflows","item":"https://kihiujohn.github.io/blog/sqs-erp-events/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,101 +86,98 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">AWS SQS for ERP Event-Driven Workflows</span></nav>
     <span class="tag">Workflow · Aws</span>
     <h1>AWS SQS for ERP Event-Driven Workflows</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">AWS SQS for ERP Event-Driven Workflows is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to use AWS SQS to decouple ERP integrations from downstream systems, with retry, visibility timeout, and dead-letter queue patterns that keep failures contained.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Workflow automation is mostly about how to handle the cases that don't show up in the happy path. this is one of the patterns that handles them. The pattern that works is to push the workflow towards being deterministic, testable, and observable. This article is that pattern.</p>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>Monitoring and observability is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most ERP integrations start as direct calls: system A calls system B's API, waits for a response, and fails the whole operation if B is slow or down. That works until B has a bad day, or a batch of 500 orders needs to sync at once and B can only handle 20 requests a second. AWS SQS fixes this by putting a durable queue between the ERP and whatever consumes its events — order created, invoice posted, inventory adjusted. The producer drops a message and moves on; the consumer pulls messages at its own pace and retries on failure without the producer ever knowing there was a problem.</p>
+<h2 id="why-a-queue-instead-of-a-direct-call">Why a queue instead of a direct call</h2>
+<p>A direct HTTP call couples the availability of two systems together. If the downstream warehouse system is deploying, restarting, or just slow, the ERP either blocks or drops the event. A queue decouples that: SQS holds the message durably (by default, messages are retained up to 4 days, configurable up to 14) until a consumer is ready. The ERP's job becomes "publish the event reliably," not "guarantee the downstream system processed it."</p>
+<p>This also absorbs bursts. An end-of-day batch job that pushes 10,000 line-item events doesn't need the consumer to keep up in real time — it needs the queue to hold them until the consumer works through the backlog.</p>
+<h2 id="sending-and-receiving-messages">Sending and receiving messages</h2>
+<p>Here's a minimal producer and consumer using boto3. The producer runs inside (or next to) the ERP's event hooks; the consumer is a small worker process.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Aws", "type": "n8n-nodes-base.aws"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Aws"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PYTHON · BOTO3 SQS PRODUCER/CONSUMER</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import json
+import boto3
+
+sqs = boto3.client("sqs", region_name="us-east-1")
+QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/erp-order-events"
+
+def publish_order_created(order):
+    sqs.send_message(
+        QueueUrl=QUEUE_URL,
+        MessageBody=json.dumps({
+            "event": "order.created",
+            "order_id": order["id"],
+            "total": order["total"],
+        }),
+        MessageAttributes={
+            "eventType": {"DataType": "String", "StringValue": "order.created"}
+        },
+    )
+
+def consume_orders():
+    while True:
+        resp = sqs.receive_message(
+            QueueUrl=QUEUE_URL,
+            MaxNumberOfMessages=10,
+            WaitTimeSeconds=20,        # long polling
+            VisibilityTimeout=30,      # hide message while we process it
+        )
+        for msg in resp.get("Messages", []):
+            body = json.loads(msg["Body"])
+            try:
+                handle_order_event(body)
+                sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=msg["ReceiptHandle"])
+            except Exception:
+                # Don't delete — let it become visible again and retry,
+                # or land in the DLQ after maxReceiveCount is hit.
+                pass
+
+def handle_order_event(event):
+    print(f"syncing order {event['order_id']} to warehouse system")</code></pre>
 </div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>In the work I have done on aws sqs for erp event-driven workflows, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>Long polling (<code>WaitTimeSeconds=20</code>) matters: without it, the consumer hammers SQS with empty <code>receive_message</code> calls. The visibility timeout is the window during which a received-but-not-deleted message is hidden from other consumers — if processing throws, the message reappears in the queue after that timeout and gets retried.</p>
+<h2 id="retries-and-the-dead-letter-queue">Retries and the dead-letter queue</h2>
+<p>Retrying forever is its own failure mode — a malformed event that always throws will loop indefinitely, burning consumer capacity and hiding real problems in noise. SQS's redrive policy caps retries: after <code>maxReceiveCount</code> failed receives, the message moves to a separate dead-letter queue (DLQ) instead of going back to the main queue.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · CLOUDFORMATION SQS + DLQ</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>Resources:
+  OrderEventsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: erp-order-events-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  OrderEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: erp-order-events
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrderEventsDLQ.Arn
+        maxReceiveCount: 5</code></pre>
+</div>
 <div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+  <strong>A DLQ without alerting is a silent graveyard</strong>
+  <p>Messages that land in the DLQ represent orders, invoices, or inventory updates that never made it downstream. Wire a CloudWatch alarm on <code>ApproximateNumberOfMessagesVisible</code> for the DLQ so a stuck integration surfaces as a page, not as a customer complaint three days later.</p>
 </div>
-<h2 id="why-aws-fails-at-3-am-and-what-to-do">Why aws fails at 3 AM and what to do</h2>
-<p>When the work moves from design to production, the questions change. The aws is not the question; the failure mode of the sqs is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handleAws(event) {
-    try {
-        const result = await processSqs(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="ordering-and-sequencing-in-sqs">Ordering and sequencing in sqs</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="ordering-and-duplicate-delivery">Ordering and duplicate delivery</h2>
+<p>Standard SQS queues don't guarantee order and can deliver a message more than once. For most ERP events that's fine if the consumer is idempotent — upserting an order by its ID rather than blindly inserting handles duplicate delivery safely. If strict per-entity ordering actually matters (for example, "created" must be processed before "cancelled" for the same order), use a FIFO queue with a <code>MessageGroupId</code> set to the order ID: messages within the same group are delivered in order, while different groups still process in parallel.</p>
+<p>Don't reach for FIFO by default — it caps throughput per message group and adds constraints you don't need if your consumer is already idempotent. Start with a standard queue and an idempotent handler; add FIFO only when you've confirmed ordering is a real requirement, not a hypothetical one.</p>
+<h2 id="sizing-visibility-timeout-and-retention">Sizing visibility timeout and retention</h2>
+<p>Two settings decide most of your queue's behavior in production. Visibility timeout should be comfortably longer than your worst-case processing time — if it's too short, a slow-but-successful job gets treated as failed and reprocessed, potentially causing duplicate side effects downstream. Message retention should cover your longest expected outage: if the downstream system might be down for a weekend deploy, a 4-day default retention could drop events before anyone notices.</p>
 <div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
+  <strong>Match visibility timeout to your Lambda timeout, not the other way around</strong>
+  <p>If a Lambda consumer times out at 60 seconds but the queue's visibility timeout is set to 30, SQS will make the message visible again while the Lambda is still running — a second worker picks it up and you get double processing. Visibility timeout must always be equal to or greater than the consumer's own timeout.</p>
 </div>
-<h2 id="testing-workflow-automations-patterns">Testing workflow automations: patterns</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        aws: item.json.aws,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="the-runbook-for-aws">The runbook for aws</h2>
-<p>The performance of sqs in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="from-cron-to-events-the-evolution">From cron to events: the evolution</h2>
-<p>Production sqs looks different from development sqs. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Aws", "type": "n8n-nodes-base.aws"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Aws"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sqs first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add aws on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sqs when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on aws sqs for erp event-driven workflows. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The value of SQS in an ERP integration isn't the queue itself — it's what the queue lets you stop worrying about. The producer no longer needs the consumer to be up, fast, or even reachable at the moment an event fires. Retries, visibility timeouts, and the DLQ turn "the integration silently dropped an event" into "there are 12 messages sitting in a dead-letter queue with an alarm attached," which is a problem you can actually see and fix.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-aws-s3-integration/">Acumatica AWS S3 Integration — A Complete Guide</a></li>
@@ -192,7 +188,6 @@ return items.map(item =&gt; ({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

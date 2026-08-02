@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PHP Async Runtime — A Field Guide | John Kihiu</title>
-<meta name="description" content="PHP Async Runtime — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="ReactPHP, Amphp/Revolt, and Swoole: the async PHP ecosystem beyond PHP-FPM's request-per-process model, and the real tradeoffs — shared state, blocking calls, and why most apps still don't need it.">
 <meta name="keywords" content="Acumatica php, Acumatica async, Acumatica revolt, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/php-async-runtime/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PHP Async Runtime — A Field Guide">
-<meta property="og:description" content="PHP Async Runtime — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/php-async-runtime.svg">
+<meta property="og:description" content="ReactPHP, Amphp/Revolt, and Swoole: the async PHP ecosystem beyond PHP-FPM's request-per-process model, and the real tradeoffs — shared state, blocking calls, and why most apps still don't need it.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/php-async-runtime/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="revolt">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP Async Runtime — A Field Guide","description":"PHP Async Runtime — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/php-async-runtime.svg","datePublished":"2026-06-26","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-async-runtime/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP Async Runtime — A Field Guide","description":"ReactPHP, Amphp/Revolt, and Swoole: the async PHP ecosystem beyond PHP-FPM's request-per-process model, and the real tradeoffs — shared state, blocking calls, and why most apps still don't need it.","image":"https://kihiujohn.github.io/assets/og/php-async-runtime.svg","datePublished":"2026-06-26","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-async-runtime/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PHP Async Runtime — A Field Guide","item":"https://kihiujohn.github.io/blog/php-async-runtime/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,45 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PHP Async Runtime — A Field Guide</span></nav>
     <span class="tag">Laravel · Php</span>
     <h1>PHP Async Runtime — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PHP Async Runtime — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">ReactPHP, Amphp/Revolt, and Swoole: the async PHP ecosystem beyond PHP-FPM's request-per-process model, and the real tradeoffs — shared state, blocking calls, and why most apps still don't need it.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-26">Jun 26, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Laravel projects to know the patterns that work. They share a few traits: the package is well-maintained, the test suite is fast, the upgrade path is documented, and the pattern is the one the Laravel docs would recommend if the docs were a year ahead of the framework. This article is those patterns.</p>
-<h2 id="performance-considerations-on-production-hardware">Performance considerations on production hardware</h2>
-<p>Performance considerations on production hardware is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>The default PHP deployment — PHP-FPM behind Nginx, one request per process, the process reset or reused for the next request — is a genuinely good model, and it's why PHP has stayed boring and reliable for two decades. It's also not the only way to run PHP anymore. ReactPHP, Amphp (built on the Revolt event loop), and Swoole all let a single PHP process stay alive and handle many things concurrently, and each takes a real tradeoff to get there that the request-per-process model doesn't force on you.</p>
+<h2 id="why-the-fpm-model-is-the-default-for-good-reason">Why request-per-process is the default for good reason</h2>
+<p>Every PHP-FPM request starts with a clean slate: no global state survives from the previous request, a bug that corrupts memory or leaves an object in a bad state dies with the process, and a crash in one request can't take down another request being served concurrently. That isolation is worth a lot, and it's the reason most PHP applications never think about "runtime" as a concept at all — they just write code and the process model handles the concurrency and cleanup for them.</p>
+<h2 id="the-event-loop-alternative">Event loops: ReactPHP and Amphp/Revolt</h2>
+<p>ReactPHP and Amphp both run a single-threaded event loop — one process, cooperative multitasking, no operating system threads — where a "blocking" call like a database query or HTTP request is replaced with a non-blocking equivalent that registers a callback (or, since PHP 8.1, suspends a Fiber) and lets the loop move on to other work while waiting. Amphp's newer versions build directly on Fibers via Revolt, which is what gives Amphp 3.x code the look of ordinary synchronous PHP even though it's running cooperatively.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class PhpController extends Controller
-{
-    public function store(AsyncRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return php::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PHP · AMPHP CONCURRENT REQUESTS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>use function Amp\async;
+use function Amp\Future\awaitAll;
+
+// Both HTTP calls happen concurrently on one thread, one process —
+// the event loop switches between them while each waits on I/O
+[$errors, $responses] = awaitAll([
+    async(fn() => file_get_contents('https://api.example.com/rates')),
+    async(fn() => file_get_contents('https://api.example.com/inventory')),
+]);</code></pre>
 </div>
-<h2 id="what-to-avoid-in-2026">What to avoid in 2026</h2>
-<p>In the work I have done on php async runtime — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
 <div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
+  <strong>One blocking call stalls the entire process</strong>
+  <p>In an event-loop runtime, everything shares one thread. A single call to a blocking function — a synchronous <code>curl_exec</code> or a raw PDO query not routed through the loop's async driver — blocks every other pending request in that process until it returns. This is the sharpest footgun in event-loop PHP: libraries that look async-compatible but quietly call a blocking function internally will silently degrade concurrency without an obvious error.</p>
 </div>
-<h2 id="alternatives-and-when-to-reach-for-them">Alternatives and when to reach for them</h2>
-<p>When the work moves from design to production, the questions change. The php is not the question; the failure mode of the async is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('phps', PhpController::class);
-});</code></pre>
-</div>
-<h2 id="why-php-matters-for-a-laravel-codebase">Why php matters for a Laravel codebase</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="swoole-and-openswoole">Swoole and OpenSwoole: coroutines with less ceremony</h2>
+<p>Swoole (and its community fork OpenSwoole) take a different approach: a C extension that replaces PHP-FPM entirely, running an HTTP server inside long-lived PHP worker processes and using coroutines to handle concurrency with far less code restructuring than event-loop libraries need — Swoole can transparently "hook" standard blocking calls like <code>mysqli</code> or file I/O so they become non-blocking coroutines without you rewriting the call sites. That convenience is also the risk: it changes the runtime semantics of code that looks unmodified, so behavior under Swoole can diverge from behavior under plain PHP-FPM in ways that are easy to miss until load testing.</p>
+<h2 id="the-shared-memory-footgun">The tradeoff nobody skips: shared process state</h2>
+<p>The entire value proposition of these runtimes — keeping a process alive across many requests — is also their central risk. Global state, static properties, singletons, and anything cached in a long-lived object now persists between requests instead of resetting, which means a bug that leaks memory, holds a stale database connection, or accumulates state in a static array will compound across thousands of requests instead of dying with the process. Laravel's framework internals in particular assume a single request lifecycle per process; running a Laravel app under Swoole or a long-running event loop (via packages like Laravel Octane) requires actively resetting container bindings and service state between requests, not just leaving the framework running as-is.</p>
 <div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
+  <strong>Most PHP apps don't need this</strong>
+  <p>If your app's bottleneck is a slow database query or an N+1 problem, an async runtime won't fix it — it will just let more requests wait concurrently instead of sequentially, which can mask the underlying problem while adding real operational complexity. Reach for one of these when you specifically need long-lived connections (WebSockets), very high connection concurrency (thousands of simultaneous slow clients), or a background worker doing many concurrent outbound calls — not as a default performance upgrade.</p>
 </div>
-<h2 id="migrating-async-from-a-package-to-a-custom-solution">Migrating async from a package to a custom solution</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (PhpJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
-</div>
-<h2 id="the-laravel-native-way-to-do-php">The Laravel-native way to do php</h2>
-<p>The performance of async in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="pitfalls-when-async-is-not-the-bottleneck">Pitfalls when async is not the bottleneck</h2>
-<p>Production async looks different from development async. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class PhpController extends Controller
-{
-    public function store(AsyncRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return php::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring async first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add php on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with async when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on php async runtime — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>ReactPHP, Amphp/Revolt, and Swoole all solve the same underlying problem — letting one PHP process do many things concurrently instead of one thing per process — but they get there differently and they all trade away the request isolation that makes PHP-FPM forgiving. That tradeoff is worth it for WebSocket servers, high-concurrency proxies, and queue workers making many outbound calls at once. It's not worth it for a typical Laravel CRUD app whose real bottleneck is a database index, and adopting one of these runtimes without a specific concurrency problem to solve usually just trades a simple, well-understood deployment model for a harder-to-debug one.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/php-8-fibers/">PHP 8 Fibers — A Field Guide</a></li>
@@ -185,7 +135,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

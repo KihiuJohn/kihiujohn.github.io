@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pub/Sub Patterns for ERP | John Kihiu</title>
-<meta name="description" content="Pub/Sub Patterns for ERP is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
+<meta name="description" content="Why publish/subscribe beats point-to-point webhooks for ERP integrations at scale, how to design event topics around business domain events, and how to handle at-least-once delivery without double-processing an order.">
 <meta name="keywords" content="Acumatica pub-sub, Acumatica erp, Acumatica events, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/pub-sub-erp/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Pub/Sub Patterns for ERP">
-<meta property="og:description" content="Pub/Sub Patterns for ERP is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/pub-sub-erp.svg">
+<meta property="og:description" content="Why publish/subscribe beats point-to-point webhooks for ERP integrations at scale, how to design event topics around business domain events, and how to handle at-least-once delivery without double-processing an order.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/pub-sub-erp/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="events">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Pub/Sub Patterns for ERP","description":"Pub/Sub Patterns for ERP is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.","image":"https://kihiujohn.github.io/assets/og/pub-sub-erp.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/pub-sub-erp/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Pub/Sub Patterns for ERP","description":"Why publish/subscribe beats point-to-point webhooks for ERP integrations at scale, how to design event topics around business domain events, and how to handle at-least-once delivery without double-processing an order.","image":"https://kihiujohn.github.io/assets/og/pub-sub-erp.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/pub-sub-erp/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Pub/Sub Patterns for ERP","item":"https://kihiujohn.github.io/blog/pub-sub-erp/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +86,49 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Pub/Sub Patterns for ERP</span></nav>
     <span class="tag">Acumatica · Pub-sub</span>
     <h1>Pub/Sub Patterns for ERP</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Pub/Sub Patterns for ERP is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Why publish/subscribe beats point-to-point webhooks for ERP integrations at scale, how to design event topics around business domain events, and how to handle at-least-once delivery without double-processing an order.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Acumatica ERP customisations are different from most other software: they have to survive multi-year upgrade cycles, multi-tenant deployments, and integration with systems that change without notice. this in this context is not just a code pattern — it is a discipline. This article is the discipline, with the code that follows from it.</p>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>When to use the standard screen vs a customisation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most ERP integrations start as point-to-point calls: when an order ships, call the CRM's API, then the invoicing system's API, then the warehouse system's API, in a row, inline, hoping none of them time out. That works fine for the first two integrations. By the fifth, the ERP is a switchboard operator, and every new downstream system means editing code that has nothing to do with it. Pub/sub is the fix for that specific pain — not a general upgrade, a fix for one problem: too many systems needing to know about the same event.</p>
+<h2 id="what-pub-sub-buys-you">What pub/sub buys you over direct calls</h2>
+<p>With publish/subscribe, the ERP doesn't call anyone. It publishes one event — <code>order.created</code>, say — to a broker, and whatever is listening (a fulfillment service, a CRM sync job, an analytics pipeline) picks it up independently. The ERP doesn't know or care who's listening, doesn't wait for a response, and doesn't fail if a downstream system is down for maintenance. Adding a sixth consumer is a subscription, not a code change in the publisher. The tradeoff is that you lose the immediate, synchronous "did this succeed" feedback a direct call gives you — you trade it for decoupling and durability.</p>
+<h2 id="designing-topics-around-domain-events">Designing topics around domain events, not tables</h2>
+<p>The temptation is to publish a raw "SalesOrder row changed" event because it's easy to wire up from a database trigger or hook. Resist it. A generic change event forces every consumer to inspect the payload and guess what actually happened, which turns your event schema into an implicit, undocumented state machine. Model events as things that happened in the business: <code>order.created</code>, <code>order.line_added</code>, <code>inventory.adjusted</code>, <code>invoice.posted</code>. Each is a fact, past tense, with a payload that carries what changed — not the whole row, just enough for a consumer to act or decide to fetch more.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PubSubExt : PXGraphExtension<PubEntry>
-{
-    [PXOverride]
-    public virtual void Sub(Pub doc)
-    {
-        // Custom sub logic for pub sub patterns
-        if (doc?.Sub == null) return;
-        Base.Sub(doc);
-    }
+  <div class="code-header"><span class="code-lang">JSON · EVENT SHAPE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "event_id": "b6b0b4b0-6e2e-4b7a-9c1f-2f1a9b3d9e11",
+  "event_type": "order.created",
+  "occurred_at": "2026-07-28T09:14:03Z",
+  "source": "erp.sales",
+  "data": {
+    "order_id": "SO-10482",
+    "customer_id": "C-2291",
+    "total": 4820.00,
+    "currency": "KES"
+  }
 }</code></pre>
 </div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>In the work I have done on pub/sub patterns for erp, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The <code>event_id</code> is not decoration — it's what makes the next section possible.</p>
+<h2 id="delivery-guarantees-and-idempotency">Delivery guarantees: at-least-once is the default, so plan for duplicates</h2>
+<p>Almost every practical broker — SNS/SQS, Kafka, RabbitMQ with acks, Azure Service Bus — gives you at-least-once delivery, not exactly-once. A consumer can crash after processing a message but before acknowledging it, and the broker will redeliver. Exactly-once delivery across a network is a much harder guarantee to buy than most teams realize, and most brokers that advertise it are really doing at-least-once delivery plus deduplication on the consumer side. So build the deduplication yourself: keep a small table of processed <code>event_id</code>s (with a TTL if you want to bound it), and check-and-insert before acting on an event.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Idempotency is the consumer's job, not the broker's</strong>
+  <p>Don't wait for a broker feature to solve duplicate delivery. A unique constraint on <code>event_id</code> in your processing table, checked in the same transaction as the side effect, is enough. If the insert fails because the event was already processed, skip the work and ack the message.</p>
 </div>
-<h2 id="the-sub-edge-cases-i-have-shipped">The sub edge cases I have shipped</h2>
-<p>When the work moves from design to production, the questions change. The pub is not the question; the failure mode of the sub is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for pub
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="migration-path-when-pub-changes">Migration path when pub changes</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="when-pub-sub-is-overkill">When pub/sub is overkill</h2>
+<p>If you have one ERP and one downstream system, a webhook is simpler, easier to debug, and gives you a synchronous response you can act on immediately. Pub/sub earns its complexity when there are three or more independent consumers of the same event, when consumers need to be able to go offline without losing events, or when you want to add new consumers without touching the publisher. Standing up a broker, topic naming conventions, and dead-letter handling for a single webhook relationship is solving a problem you don't have yet.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>A dead-letter queue is not optional</strong>
+  <p>Once a consumer starts failing on a message — a bad payload, a downstream outage — you need somewhere for it to land after N retries, and an alert when it does. Without a DLQ, failed messages either retry forever or silently vanish, and both are worse than the direct-call failure mode you were trying to avoid.</p>
 </div>
-<h2 id="how-to-debug-sub-in-production">How to debug sub in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-version-of-pub-that-works">The version of pub that works</h2>
-<p>The performance of sub in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="why-pub-sub-patterns-for-erp-matters-in-production">Why Pub/Sub Patterns for ERP matters in production</h2>
-<p>Production sub looks different from development sub. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class PubSubExt : PXGraphExtension<PubEntry>
-{
-    [PXOverride]
-    public virtual void Sub(Pub doc)
-    {
-        // Custom sub logic for pub sub patterns
-        if (doc?.Sub == null) return;
-        Base.Sub(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sub first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add pub on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sub when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on pub/sub patterns for erp. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Pub/sub replaces "who do I need to call" with "what happened," and that shift is worth it exactly when you have multiple independent consumers of the same ERP event. It costs you a broker to operate, a schema to version, and idempotent consumers to write. If you only have one consumer, skip it and use a webhook — you can always add the broker later when a second consumer shows up.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/event-driven-architecture-erp/">Event-Driven Architecture for ERP — A Field Guide</a></li>
@@ -187,7 +139,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

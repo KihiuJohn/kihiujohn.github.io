@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Qwik Resumability — A Field Guide | John Kihiu</title>
-<meta name="description" content="Qwik Resumability — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="What Qwik's resumability model actually replaces hydration with, how the $ optimizer makes it work, and when the win is real versus when it's not worth the ecosystem trade-off.">
 <meta name="keywords" content="Acumatica qwik, Acumatica resumability, Acumatica performance, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/qwik-resumability/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Qwik Resumability — A Field Guide">
-<meta property="og:description" content="Qwik Resumability — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/qwik-resumability.svg">
+<meta property="og:description" content="What Qwik's resumability model actually replaces hydration with, how the $ optimizer makes it work, and when the win is real versus when it's not worth the ecosystem trade-off.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/qwik-resumability/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="performance">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Qwik Resumability — A Field Guide","description":"Qwik Resumability — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/qwik-resumability.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/qwik-resumability/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Qwik Resumability — A Field Guide","description":"What Qwik's resumability model actually replaces hydration with, how the $ optimizer makes it work, and when the win is real versus when it's not worth the ecosystem trade-off.","image":"https://kihiujohn.github.io/assets/og/qwik-resumability.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/qwik-resumability/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Qwik Resumability — A Field Guide","item":"https://kihiujohn.github.io/blog/qwik-resumability/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +86,48 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Qwik Resumability — A Field Guide</span></nav>
     <span class="tag">Acumatica · Qwik</span>
     <h1>Qwik Resumability — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Qwik Resumability — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">What Qwik's resumability model actually replaces hydration with, how the $ optimizer makes it work, and when the win is real versus when it's not worth the ecosystem trade-off.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>On real Acumatica customisation projects, this comes up more often than the official documentation suggests. The pattern that actually ships to production is rarely the one in the help portal. It is the one that survives three upgrades, a tenant migration, and a customer-driven schema change. This article is the one I wish someone had handed me before my first Acumatica project.</p>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>Extending vs replacing: the decision framework is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class QwikResumabilityExt : PXGraphExtension<QwikEntry>
-{
-    [PXOverride]
-    public virtual void Resumability(Qwik doc)
-    {
-        // Custom resumability logic for qwik resumability
-        if (doc?.Resumability == null) return;
-        Base.Resumability(doc);
-    }
-}</code></pre>
-</div>
-<h2 id="the-resumability-edge-cases-i-have-shipped">The resumability edge cases I have shipped</h2>
-<p>In the work I have done on qwik resumability — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
-</div>
-<h2 id="migration-path-when-qwik-changes">Migration path when qwik changes</h2>
-<p>When the work moves from design to production, the questions change. The qwik is not the question; the failure mode of the resumability is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for qwik
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="how-to-debug-resumability-in-production">How to debug resumability in production</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+    <p>Every mainstream frontend framework — React, Vue, Svelte, even Solid — ships JavaScript to the browser, then re-executes enough of the component tree to attach event listeners and rebuild internal state. That step is hydration, and its cost scales with how much of the page is interactive, not with how big the page looks. Qwik's pitch is that this step is unnecessary: if you serialize the right things into the HTML at build/render time, the browser can "resume" exactly where the server left off, attaching one listener at a time, only when a user actually interacts with something.</p>
+<h2 id="what-hydration-actually-costs">What hydration actually costs</h2>
+<p>Server-side rendering solves the blank-screen problem — the user sees painted content immediately — but the page isn't interactive until hydration finishes. Hydration means downloading the JS for every component that could be interactive, executing all of it, rebuilding the virtual DOM tree in memory, diffing it against the real DOM, and attaching event listeners. Frameworks have chased partial fixes for years — code splitting, islands architecture, progressive hydration, `<Suspense>` boundaries — because the fundamental problem doesn't go away: the client still has to re-run component logic it already ran once on the server, just to know where to put event listeners.</p>
+<h2 id="resumability-not-hydration">Resumability: serialize the "where," not just the "what"</h2>
+<p>Qwik's approach is to serialize the application's state and a listener map directly into the HTML as it renders on the server — which component needs which event listener on which element, and what closures those listeners need. The client doesn't re-execute the component tree at all on load. It downloads essentially no JS up front beyond a small runtime (the "qwikloader"), and when a user clicks a button, that runtime looks up which lazy-loaded chunk contains the click handler, fetches just that chunk, and runs it — with the serialized state already available, no re-render needed to reconstruct it. The framework "resumes" execution at the point of interaction instead of replaying everything that came before it.</p>
 <div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
+  <strong>Resumability moves cost from "load" to "interaction"</strong>
+  <p>Hydration front-loads a fixed cost on every page load, whether or not the user ever clicks anything. Resumability defers almost all JS execution until the specific moment a specific interaction happens, and only for the code that interaction needs — which is why Time-to-Interactive stays flat as the page gets bigger, instead of growing with component count.</p>
 </div>
-<h2 id="the-version-of-qwik-that-works">The version of qwik that works</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
+<h2 id="the-dollar-sign-and-the-optimizer">The `$` symbol and the optimizer</h2>
+<p>Qwik marks lazy-loadable boundaries with a trailing <code>$</code> — <code>component$()</code>, <code>onClick$()</code>, <code>useTask$()</code>. This isn't decoration; the Qwik Optimizer (a build-time compiler step) uses that convention to find closures it can safely extract into their own separately-loadable modules. Each `$`-marked function gets pulled out, given a unique import path, and referenced from the serialized HTML by that path rather than being inlined into one big bundle. That's what makes fine-grained lazy loading possible — the framework isn't guessing which code might be needed later; the build step has already split it into fetchable pieces and recorded exactly where each piece is invoked.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
+  <div class="code-header"><span class="code-lang">TSX · Qwik component</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { component$, useSignal } from '@builder.io/qwik';
+
+export const Counter = component$(() => {
+  const count = useSignal(0);
+
+  return (
+    &lt;button onClick$={() =&gt; count.value++}&gt;
+      Clicked {count.value} times
+    &lt;/button&gt;
+  );
+});</code></pre>
 </div>
-<h2 id="why-qwik-resumability-a-field-guide-matters-in-production">Why Qwik Resumability — A Field Guide matters in production</h2>
-<p>The performance of resumability in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
+<p><code>useSignal</code> creates reactive state that Qwik can serialize into the DOM as an attribute, and <code>onClick$</code> marks the handler as its own lazy-loadable chunk. On first render, the server outputs the button with the count already painted and a reference to where the click handler lives — no client-side JS has run yet. The first click downloads and executes just that handler's chunk.</p>
+<h2 id="the-honest-tradeoffs">The honest tradeoffs</h2>
+<p>None of this is free. The mental model is a real shift — you have to think about your app in terms of serializable state and lazy boundaries, which is a different discipline than "just write a component and don't think about bundling." Debugging is less mature: fewer battle-tested devtools, a smaller StackOverflow corpus, and an ecosystem of component libraries that's a fraction of React's size. Qwik City (its meta-framework, roughly Next.js's equivalent) is capable but younger, with fewer examples of large-scale production deployments to learn from.</p>
+<div class="callout-warn callout">
+  <strong>The resumability win isn't universal</strong>
+  <p>For a small dashboard behind a login where users are already engaged and JS payload isn't the bottleneck, hydration cost is rarely what's slowing you down — pick whatever framework your team knows. Resumability's advantage shows up specifically on large, content-heavy, mostly-server-rendered pages with lots of potential interactivity and a cold, unauthenticated visitor — marketing sites, content platforms, e-commerce catalogs — where Time-to-Interactive under hydration would otherwise scale with page complexity.</p>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>Production resumability looks different from development resumability. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class QwikResumabilityExt : PXGraphExtension<QwikEntry>
-{
-    [PXOverride]
-    public virtual void Resumability(Qwik doc)
-    {
-        // Custom resumability logic for qwik resumability
-        if (doc?.Resumability == null) return;
-        Base.Resumability(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring resumability first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add qwik on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with resumability when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on qwik resumability — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Resumability isn't a faster version of hydration — it's an argument that hydration's basic premise, replaying the component tree to reattach behavior, is the wrong default. Whether that argument matters for your project depends entirely on what "slow" means for your users: if it's initial load on a content-heavy page, Qwik's model directly targets that cost. If your bottleneck is somewhere else entirely, the ecosystem and tooling maturity of React or Vue will usually get you to production faster than the theoretical performance win justifies.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-azure-vm-sizing/">Acumatica Azure VM Sizing — A Practical Guide</a></li>
@@ -187,7 +138,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

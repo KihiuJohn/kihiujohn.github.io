@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prefect for ERP Workflows | John Kihiu</title>
-<meta name="description" content="Prefect for ERP Workflows is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
+<meta name="description" content="Why orchestrating ERP data sync with Prefect beats raw cron: retries with backoff on flaky ERP APIs, visibility into which run failed and why, targeted backfills, and explicit dependency ordering between extraction and load.">
 <meta name="keywords" content="Acumatica prefect, Acumatica erp, Acumatica workflow, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/prefect-erp/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Prefect for ERP Workflows">
-<meta property="og:description" content="Prefect for ERP Workflows is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/prefect-erp.svg">
+<meta property="og:description" content="Why orchestrating ERP data sync with Prefect beats raw cron: retries with backoff on flaky ERP APIs, visibility into which run failed and why, targeted backfills, and explicit dependency ordering between extraction and load.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/prefect-erp/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="workflow">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="workflow">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Prefect for ERP Workflows","description":"Prefect for ERP Workflows is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.","image":"https://kihiujohn.github.io/assets/og/prefect-erp.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/prefect-erp/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Prefect for ERP Workflows","description":"Why orchestrating ERP data sync with Prefect beats raw cron: retries with backoff on flaky ERP APIs, visibility into which run failed and why, targeted backfills, and explicit dependency ordering between extraction and load.","image":"https://kihiujohn.github.io/assets/og/prefect-erp.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/prefect-erp/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Prefect for ERP Workflows","item":"https://kihiujohn.github.io/blog/prefect-erp/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,101 +86,67 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Prefect for ERP Workflows</span></nav>
     <span class="tag">Workflow · Prefect</span>
     <h1>Prefect for ERP Workflows</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Prefect for ERP Workflows is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Why orchestrating ERP data sync with Prefect beats raw cron: retries with backoff on flaky ERP APIs, visibility into which run failed and why, targeted backfills, and explicit dependency ordering between extraction and load.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough workflow automation projects to know the patterns that work. They share a few traits: idempotency, retry with exponential backoff, and a dead-letter queue that gets reviewed weekly. This article is the patterns.</p>
-<h2 id="the-architecture-of-a-workflow-automation">The architecture of a workflow automation</h2>
-<p>The architecture of a workflow automation is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Most ERP integrations start life as a cron job: a script that runs at 2 AM, pulls sales orders or inventory levels from the ERP's API, and writes them into a warehouse or a downstream system. That works fine until the ERP API times out on one run out of fifty, or a schema change upstream silently breaks the transform step, or someone needs last Tuesday's data re-run because the ERP was down that night. Cron has no answer to any of that beyond "check the logs and re-run it by hand." An orchestrator like Prefect isn't a fundamentally different architecture — it's the same extract-transform-load shape — but it gives you retries, observability, and backfills as first-class features instead of things you bolt on yourself.</p>
+<h2 id="why-cron-stops-being-enough">Why cron stops being enough</h2>
+<p>ERP APIs are usually the least reliable part of a sync pipeline. They're built for the ERP's own UI first and integrations second, rate limits are inconsistently documented, and a nightly batch job hitting them at scale will occasionally get a timeout or a 500 that has nothing to do with your code. A bare cron job either crashes and waits for someone to notice, or — worse — swallows the error and silently skips a day's data. Neither is a design decision anyone made on purpose; it's just what happens by default when the orchestration logic is a bash script and a crontab entry.</p>
+<p>The other thing cron doesn't give you is dependency ordering. A sync pipeline is rarely one step — it's extract from the ERP, transform into the target schema, then load — and those steps genuinely depend on each other. Cron can schedule three separate jobs five minutes apart and hope the timing holds; it can't express "don't run the load step if the extract step failed."</p>
+<h2 id="retries-with-backoff-on-a-flaky-erp-api">Retries with backoff on a flaky API</h2>
+<p>The single highest-value thing an orchestrator buys you here is retry policy as configuration instead of hand-rolled logic. A transient 503 from the ERP shouldn't fail the whole nightly sync — it should back off and try again, and only page someone if it's still failing after a few attempts.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Prefect", "type": "n8n-nodes-base.prefect"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Prefect"}]]}
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">Python · erp_sync.py</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from prefect import flow, task
+from datetime import date, timedelta
+
+@task(retries=4, retry_delay_seconds=[10, 30, 60, 120])
+def extract_sales_orders(sync_date: date) -> list[dict]:
+    # calls the ERP's REST API for orders modified on sync_date;
+    # a transient timeout or 5xx here should not kill the whole run
+    ...
+
+@task
+def transform_orders(raw_orders: list[dict]) -> list[dict]:
+    ...
+
+@task(retries=2)
+def load_to_warehouse(orders: list[dict], sync_date: date) -> None:
+    ...
+
+@flow(name="erp-sales-order-sync", log_prints=True)
+def erp_sales_order_sync(sync_date: date = None):
+    sync_date = sync_date or date.today() - timedelta(days=1)
+    raw = extract_sales_orders(sync_date)
+    clean = transform_orders(raw)
+    load_to_warehouse(clean, sync_date)
+
+if __name__ == "__main__":
+    erp_sales_order_sync()</code></pre>
 </div>
-<h2 id="implementation-a-working-example">Implementation: a working example</h2>
-<p>In the work I have done on prefect for erp workflows, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The <code>transform_orders</code> task only runs once <code>extract_sales_orders</code> has returned successfully, and <code>load_to_warehouse</code> only runs once transform has — that ordering falls out of the plain Python data dependency, no separate DAG config required. If extraction fails after all its retries, the flow run is marked failed with the actual exception attached, and the load step never fires against partial or missing data.</p>
+<div class="callout">
+  <strong>Backoff is not optional for third-party APIs you don't control</strong>
+  <p>A fixed short retry delay against a rate-limited ERP API can make things worse — you retry into the same rate limit window and get rejected again. An increasing backoff schedule, like the one above, gives the upstream system time to recover before you hit it again.</p>
+</div>
+<h2 id="observability-into-which-run-failed-and-why">Observability into which run failed and why</h2>
+<p>With a cron job, "did last night's sync work" means SSH-ing into a box and grepping a log file, if the log file wasn't rotated away already. With Prefect, every flow run has a state, a duration, and the actual traceback of whatever task failed, visible in one place. When a sync fails at 2 AM, the question in the morning isn't "did it run" — it's "which task failed, on which sync_date, with what error," and that's answered in a few clicks instead of a log spelunking exercise.</p>
+<p>This matters more than it sounds like it should, because ERP sync failures are rarely all-or-nothing. A run might succeed for 900 of 950 orders and fail on one malformed record. Task-level state means you can see exactly which task and which input caused the failure, instead of treating the whole night's sync as a binary success or failure.</p>
+<h2 id="backfills-for-a-specific-date-range">Backfills without rerunning everything</h2>
+<p>ERP outages, downstream schema changes, and bad data all eventually require re-running the sync for a specific past date, not the whole history. Because the flow above takes <code>sync_date</code> as a parameter, a backfill is just calling the same flow with a different date — or a range of dates — rather than writing a one-off script that duplicates the extract/transform/load logic.</p>
 <div class="callout callout-warn">
-  <strong>Dead-letter or die</strong>
-  <p>A workflow that fails silently is worse than a workflow that does not exist. The dead-letter queue is where failed events go. A worker replays them after the integration is fixed.</p>
+  <strong>Design the flow to be safely re-runnable before you need a backfill</strong>
+  <p>If <code>load_to_warehouse</code> appends rows instead of upserting on a natural key, re-running a date range for a backfill will duplicate data. Decide on upsert semantics (or a delete-then-insert per sync_date) when you write the load step, not during the incident where you actually need to backfill.</p>
 </div>
-<h2 id="error-handling-and-retry-strategies">Error handling and retry strategies</h2>
-<p>When the work moves from design to production, the questions change. The prefect is not the question; the failure mode of the erp is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>async function handlePrefect(event) {
-    try {
-        const result = await processErp(event.body);
-        return { status: 'ok', result };
-    } catch (err) {
-        await deadLetter.push(event, err.message);
-        return { status: 'failed' };
-    }
-}</code></pre>
-</div>
-<h2 id="idempotency-and-dead-letter-queues">Idempotency and dead-letter queues</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Run on a schedule that does not conflict</strong>
-  <p>A workflow that runs at midnight Eastern and a workflow that runs at 1 AM Eastern will overlap. Pick schedules that have at least an hour of buffer.</p>
-</div>
-<h2 id="monitoring-and-observability">Monitoring and observability</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// n8n expression
-const items = $input.all();
-return items.map(item =&gt; ({
-    json: {
-        id: item.json.id,
-        prefect: item.json.prefect,
-        timestamp: new Date().toISOString()
-    }
-}));</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of erp in workflow is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Test the failure modes</strong>
-  <p>The test that says "the workflow succeeds" is the easy test. The test that says "the workflow retries on 5xx" is the test that matters.</p>
-</div>
-<h2 id="why-prefect-fails-at-3-am-and-what-to-do">Why prefect fails at 3 AM and what to do</h2>
-<p>Production erp looks different from development erp. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>{
-    "nodes": [
-        {"name": "Trigger", "type": "n8n-nodes-base.webhook"},
-        {"name": "Transform", "type": "n8n-nodes-base.set"},
-        {"name": "Prefect", "type": "n8n-nodes-base.prefect"}
-    ],
-    "connections": {
-        "Trigger": {"main": [[{"node": "Transform"}]]},
-        "Transform": {"main": [[{"node": "Prefect"}]]}
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring erp first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add prefect on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with erp when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="dependency-ordering-between-extraction-and-transformation">Dependency ordering between extraction and transformation</h2>
+<p>Real ERP sync pipelines are rarely a single flow — inventory sync, sales order sync, and customer sync often run on different schedules but sometimes need to respect ordering between them (customer records should land before the sales orders that reference them, for instance). Prefect handles the in-flow ordering naturally through task dependencies, and cross-flow ordering through deployment scheduling or by having one flow call another as a subflow when the dependency is tight enough to require it. The point either way is that the ordering is explicit in code, not an assumption about how long each cron job takes to run.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on prefect for erp workflows. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>None of this requires abandoning the basic extract-transform-load shape that a cron job already has — an ERP sync pipeline built on Prefect is doing the same work a bash script and crontab entry would do. What changes is that retries, failure visibility, and backfills stop being things you build yourself under pressure during an incident, and become configuration you set once. For a pipeline pulling from an API you don't control and can't make more reliable, that's the actual value: less time spent reconstructing what happened after a 2 AM failure, more confidence that a bad night doesn't quietly become a week of missing data.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://cloudevents.io/" target="_blank" rel="noopener noreferrer">CloudEvents specification</a></li><li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry documentation</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP background jobs guidance</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/airflow-erp/">Apache Airflow for ERP Workflows</a></li>
@@ -192,7 +157,6 @@ return items.map(item =&gt; ({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

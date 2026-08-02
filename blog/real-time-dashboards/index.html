@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Real-Time Dashboards — A Field Guide | John Kihiu</title>
-<meta name="description" content="Real-Time Dashboards — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="How to build a dashboard that updates in seconds instead of on refresh: WebSockets vs Server-Sent Events, where to aggregate before the browser sees the data, and why most real-time dashboards fail under load, not on day one.">
 <meta name="keywords" content="Acumatica realtime, Acumatica dashboards, Acumatica bi, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/real-time-dashboards/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Real-Time Dashboards — A Field Guide">
-<meta property="og:description" content="Real-Time Dashboards — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/real-time-dashboards.svg">
+<meta property="og:description" content="How to build a dashboard that updates in seconds instead of on refresh: WebSockets vs Server-Sent Events, where to aggregate before the browser sees the data, and why most real-time dashboards fail under load, not on day one.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/real-time-dashboards/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="bi">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Real-Time Dashboards — A Field Guide","description":"Real-Time Dashboards — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/real-time-dashboards.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/real-time-dashboards/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Real-Time Dashboards — A Field Guide","description":"How to build a dashboard that updates in seconds instead of on refresh: WebSockets vs Server-Sent Events, where to aggregate before the browser sees the data, and why most real-time dashboards fail under load, not on day one.","image":"https://kihiujohn.github.io/assets/og/real-time-dashboards.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/real-time-dashboards/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Real-Time Dashboards — A Field Guide","item":"https://kihiujohn.github.io/blog/real-time-dashboards/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,96 +86,48 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Real-Time Dashboards — A Field Guide</span></nav>
     <span class="tag">Acumatica · Realtime</span>
     <h1>Real-Time Dashboards — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Real-Time Dashboards — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to build a dashboard that updates in seconds instead of on refresh: WebSockets vs Server-Sent Events, where to aggregate before the browser sees the data, and why most real-time dashboards fail under load, not on day one.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-20">Jun 20, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>There is a difference between this in the Acumatica help portal and this in a production customisation. The help portal is correct; it is just incomplete. The patterns I describe here are the ones I have shipped, the ones I have inherited, and the ones I have refactored. They are the difference between a customisation that ages well and one that breaks on the next R2.</p>
-<h2 id="why-real-time-dashboards-a-field-guide-matters-in-production">Why Real-Time Dashboards — A Field Guide matters in production</h2>
-<p>Why Real-Time Dashboards — A Field Guide matters in production is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A dashboard that reloads every 30 seconds feels real-time until someone asks why the number on screen doesn't match what just happened in the warehouse. The gap between "refreshes often" and "actually real-time" is entirely about transport and aggregation: how updates get pushed to the browser, and how much math happens before they arrive. I've built both kinds, and the honest answer is that most dashboards don't need sub-second updates — they need updates that are never stale by more than the business cares about, delivered without hammering your database on every poll.</p>
+<h2 id="polling-sse-or-websockets">Polling, SSE, or WebSockets</h2>
+<p>Polling is the version everyone starts with and the version that's fine for a surprising number of cases: a client sets an interval, hits an endpoint, gets JSON back. It's stateless, it works through any proxy, and it's trivial to reason about. It falls over when you need sub-5-second latency across many clients, because now you're multiplying client count by poll frequency against your backend. Server-Sent Events (SSE) solve the "push updates without polling" problem with a plain HTTP connection the browser keeps open and the server writes to — one direction only, server to client, which is exactly what most dashboards need since users aren't sending data back over that channel. WebSockets are the right call when you genuinely need bidirectional communication — a user toggling a filter that changes what the server streams next — but they cost you more infrastructure: sticky sessions or a shared pub/sub layer if you scale past one server process, and reconnect logic you have to write yourself. If your dashboard is read-only, reach for SSE before WebSockets; it's less to operate.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class RealTimeExt : PXGraphExtension<RealEntry>
-{
-    [PXOverride]
-    public virtual void Time(Real doc)
-    {
-        // Custom time logic for real time dashboards
-        if (doc?.Time == null) return;
-        Base.Time(doc);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">JavaScript · SSE client</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const stream = new EventSource('/api/metrics/stream');
+
+stream.addEventListener('metric', (event) => {
+  const { key, value, ts } = JSON.parse(event.data);
+  updateChart(key, value, ts);
+});
+
+stream.onerror = () => {
+  // EventSource auto-reconnects, but back off if the server
+  // is actually down instead of hammering it every second.
+  console.warn('SSE connection dropped, browser will retry');
+};</code></pre>
 </div>
-<h2 id="the-patterns-that-survive-the-upgrade-cycle">The patterns that survive the upgrade cycle</h2>
-<p>In the work I have done on real-time dashboards — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="aggregate-before-it-leaves-the-server">Aggregate before it leaves the server</h2>
+<p>The most common real-time dashboard mistake is streaming raw events to the browser and doing the rollup in JavaScript. It works in the demo with ten events a minute and falls apart at production volume, because now every open tab is independently summing the same numbers, and a slow client can't keep up with the firehose. Do the aggregation server-side — a rolling window job that maintains current counts, sums, and rates in Redis or an in-memory store, updated as events arrive — and push only the aggregate, not the raw stream. The browser's job is to render a number that's already correct, not to be a second analytics engine.</p>
+<div class="callout">
+  <strong>Debounce writes, not just reads</strong>
+  <p>If ten events land in the same second, don't push ten WebSocket messages. Batch updates on a short interval (100-500ms) server-side and send one message per window. The dashboard doesn't need to animate every individual event — it needs the current state to be correct within a bound the user won't notice.</p>
+</div>
+<h2 id="what-breaks-under-load">What breaks under load</h2>
+<p>The failure mode that actually matters isn't "the chart is slow" — it's connection exhaustion. Each open SSE or WebSocket connection holds a file descriptor and, depending on your server, a thread or event-loop slot. A dashboard with a thousand concurrent viewers is a thousand long-lived connections, and if your load balancer or reverse proxy has a default idle timeout of 60 seconds, connections silently drop and reconnect in a loop that looks like the feature is flaky when it's actually a config mismatch. Set explicit keep-alive intervals on the server side (a comment or heartbeat event every 15-30 seconds) and make sure your proxy's timeout is longer than that interval, not shorter.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Reconnect storms are real</strong>
+  <p>If the server restarts and every client reconnects at the same instant, you get a thundering herd against the same backend that just came back up. Add jitter to client-side reconnect delays — a random 0-2 second offset — so a deploy doesn't turn into a self-inflicted spike.</p>
 </div>
-<h2 id="real-implementation-walkthrough">Real implementation walkthrough</h2>
-<p>When the work moves from design to production, the questions change. The real is not the question; the failure mode of the time is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for real
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="performance-and-observability-for-real">Performance and observability for real</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>The performance of time in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>Production time looks different from development time. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class RealTimeExt : PXGraphExtension<RealEntry>
-{
-    [PXOverride]
-    public virtual void Time(Real doc)
-    {
-        // Custom time logic for real time dashboards
-        if (doc?.Time == null) return;
-        Base.Time(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring time first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add real on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with time when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="picking-a-refresh-floor">Picking a refresh floor, not a ceiling</h2>
+<p>Teams over-invest in shaving milliseconds off latency for dashboards nobody is staring at pixel-by-pixel. Before building a streaming pipeline, ask what staleness the business actually can't tolerate — a support queue depth dashboard might need 2-second updates because agents route work off it live, while a weekly revenue dashboard is fine refreshing every few minutes. Match the transport to that number. Polling every 10 seconds is simpler to operate than a WebSocket fleet, and if it meets the actual requirement, it's the better engineering decision, not a compromise.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on real-time dashboards — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Real-time dashboards live or die on two decisions made early: pick the lightest transport that satisfies your actual latency requirement (polling, then SSE, then WebSockets — in that order of preference), and push pre-aggregated numbers instead of raw events so the browser never has to do the math the server should have done. The failures that show up in production — dropped connections, reconnect storms, a client-side aggregation bug that only appears under real traffic — are almost always about not planning for the connection count, not about the chart library.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-power-bi-connector-setup/">Acumatica Power BI Connector — Setup and Best Practices</a></li>
@@ -187,7 +138,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

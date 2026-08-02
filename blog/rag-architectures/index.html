@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RAG Architectures — A Field Guide | John Kihiu</title>
-<meta name="description" content="RAG Architectures — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="Why naive retrieval-augmented generation breaks down in production, and the architecture patterns — hybrid search, hierarchical retrieval, re-ranking — that actually fix retrieval quality.">
 <meta name="keywords" content="Acumatica rag, Acumatica architecture, Acumatica retrieval, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/rag-architectures/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="RAG Architectures — A Field Guide">
-<meta property="og:description" content="RAG Architectures — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/rag-architectures.svg">
+<meta property="og:description" content="Why naive retrieval-augmented generation breaks down in production, and the architecture patterns — hybrid search, hierarchical retrieval, re-ranking — that actually fix retrieval quality.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/rag-architectures/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="ai">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="retrieval">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"RAG Architectures — A Field Guide","description":"RAG Architectures — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/rag-architectures.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/rag-architectures/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"RAG Architectures — A Field Guide","description":"Why naive retrieval-augmented generation breaks down in production, and the architecture patterns — hybrid search, hierarchical retrieval, re-ranking — that actually fix retrieval quality.","image":"https://kihiujohn.github.io/assets/og/rag-architectures.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/rag-architectures/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"RAG Architectures — A Field Guide","item":"https://kihiujohn.github.io/blog/rag-architectures/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,105 +86,60 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">RAG Architectures — A Field Guide</span></nav>
     <span class="tag">AI Agents · Rag</span>
     <h1>RAG Architectures — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">RAG Architectures — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Why naive retrieval-augmented generation breaks down in production, and the architecture patterns — hybrid search, hierarchical retrieval, re-ranking — that actually fix retrieval quality.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>AI agents in production are 20% LLM and 80% plumbing. this is one of the parts of the plumbing. The pattern that works is to push the LLM towards being a thin layer, and push the rest of the system towards being deterministic, testable, and observable. This article is the plumbing.</p>
-<h2 id="safety-guardrails-and-observability">Safety, guardrails, and observability</h2>
-<p>Safety, guardrails, and observability is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>"Attach a vector database to your LLM and you have RAG" is the pitch, and it's the part everyone gets working in an afternoon. It's also the least important part. Retrieval-augmented generation lives or dies on retrieval quality — whether the chunks you hand the model actually contain the answer — and that's the part that takes real iteration. I've built enough of these to have a fairly settled view of where the basic pipeline breaks and which patterns are worth the added complexity.</p>
+<h2 id="the-basic-pipeline">The basic pipeline</h2>
+<p>Every RAG system does the same five things: split source documents into chunks, embed each chunk into a vector, store the vectors in an index, retrieve the top-k chunks most similar to the query's embedding, and stuff those chunks into the prompt alongside the user's question for the model to generate from. Optionally a re-ranking step sits between retrieval and generation, re-scoring the initial candidates with a more expensive, more accurate model before truncating to the final set that goes in the prompt. None of this is hard to wire up — LangChain, LlamaIndex, or a dozen vector DB SDKs will get you a working pipeline in under a hundred lines. The hard part is everything that determines whether the retrieved chunks are actually the right ones.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
+  <div class="code-header"><span class="code-lang">Python · basic retrieval flow</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from sentence_transformers import SentenceTransformer
+import numpy as np
 
-def list_rag(query: str) -> str:
-    """List rag matching the query."""
-    response = requests.get(
-        f"https://api.example.com/rag",
-        params={"q": query}
-    )
-    return response.json()
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-tools = [Tool(name="rag", func=list_rag, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
+def chunk_text(text, size=500, overlap=50):
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), size - overlap):
+        chunks.append(" ".join(words[i:i + size]))
+    return chunks
+
+chunks = chunk_text(source_document)
+chunk_vectors = embedder.encode(chunks, normalize_embeddings=True)
+
+def retrieve(query, k=5):
+    query_vector = embedder.encode([query], normalize_embeddings=True)[0]
+    scores = chunk_vectors @ query_vector  # cosine similarity via dot product
+    top_k = np.argsort(scores)[::-1][:k]
+    return [(chunks[i], float(scores[i])) for i in top_k]
+
+results = retrieve("What is the cancellation policy?")</code></pre>
 </div>
-<h2 id="when-to-use-it-and-when-not-to">When to use it (and when not to)</h2>
-<p>In the work I have done on rag architectures — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Tools matter more than prompts</strong>
-  <p>An LLM that can read and write Acumatica records is more useful than an LLM that can chat about Acumatica. Spend the time designing the tools, not the prompt.</p>
+<h2 id="where-naive-rag-breaks-down">Where naive RAG breaks down</h2>
+<p>Fixed-size chunking is the first thing that goes wrong: a 500-word window has no idea where a sentence, a section, or a table ends, so it routinely splits the sentence that contains the actual answer across two chunks — the retriever finds the chunk with the question restated and misses the chunk with the number. The second problem is the precision/recall tradeoff baked into top-k retrieval: ask for more chunks and you dilute the prompt with irrelevant context that can distract the model or push out the chunk that mattered; ask for fewer and you risk missing the right one entirely. The third is staleness — embeddings are a snapshot of the source document at index time, and if the underlying document changes (a policy update, a price change) and you don't re-embed, the model confidently answers from a chunk that's now wrong, with no signal to anyone that it happened.</p>
+<div class="callout-warn callout">
+  <strong>Retrieval failures look like generation failures</strong>
+  <p>When a RAG system gives a wrong answer, the instinct is to blame the LLM and tweak the prompt. Most of the time the model answered correctly given what it was handed — the actual bug is that the retriever fetched the wrong chunks. Always inspect what was retrieved before touching the prompt.</p>
 </div>
-<h2 id="latency-and-cost-tradeoffs-for-rag">Latency and cost tradeoffs for rag</h2>
-<p>When the work moves from design to production, the questions change. The rag is not the question; the failure mode of the architectures is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from anthropic import Anthropic
-client = Anthropic()
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "..."}]
-)</code></pre>
-</div>
-<h2 id="prompt-patterns-that-work-for-architectures">Prompt patterns that work for architectures</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="hybrid-search-keyword-plus-vector">Hybrid search: keyword plus vector</h2>
+<p>Pure vector similarity is bad at exact-match queries — product SKUs, error codes, proper nouns — because embedding models compress meaning, not surface form, and two dissimilar-looking strings that mean similar things end up close in vector space while an exact code match can end up far apart. Hybrid search runs a traditional keyword index (BM25 is the standard) alongside the vector search and combines the two ranked lists, typically with reciprocal rank fusion, before re-ranking. This catches the cases vector search alone misses — a user searching for an exact error code or a specific model number — without losing the semantic matching that keyword search alone can't do. Most production-grade vector stores (Elasticsearch, Weaviate, Qdrant) now support this natively rather than requiring you to run two separate systems and merge results yourself.</p>
+<h2 id="hierarchical-and-parent-document-retrieval">Hierarchical and parent-document retrieval</h2>
+<p>Small chunks retrieve precisely but lack context; large chunks carry context but retrieve imprecisely and waste prompt space on irrelevant text. Hierarchical (parent-document) retrieval resolves this by embedding small chunks for search but returning their larger parent section — a paragraph or a document's containing chapter — once one of its child chunks is matched. The retriever's similarity search stays sharp because it's matching against small, focused text, but the model gets the surrounding context it needs to actually use the retrieved fact correctly, instead of a fragment missing the qualifier two sentences earlier that changes its meaning.</p>
 <div class="callout">
-  <strong>Latency compounds</strong>
-  <p>Each LLM call adds 1-5 seconds. A 5-step agent can take 25 seconds. The right pattern is parallel calls where possible and short-circuit for the common case.</p>
+  <strong>Re-ranking is cheap insurance</strong>
+  <p>A cross-encoder re-ranker (e.g. a small BERT-based model scoring query-chunk pairs directly, rather than comparing pre-computed embeddings) is slower per-comparison than vector search but only needs to run on the top 20-50 candidates, not the whole corpus. Adding it after initial retrieval consistently improves precision for a latency cost measured in tens of milliseconds — cheap relative to the LLM call that follows it.</p>
 </div>
-<h2 id="how-to-evaluate-rag-in-production">How to evaluate rag in production</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import openai
-response = openai.ChatCompletion.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "..."},
-        {"role": "user", "content": "..."}
-    ],
-    tools=[{"type": "function", "function": {...}}]
-)</code></pre>
-</div>
-<h2 id="cost-optimisation-caching-and-batching">Cost optimisation: caching and batching</h2>
-<p>The performance of architectures in ai agents is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The deterministic layer</strong>
-  <p>The agent suggests; the deterministic layer validates and executes. The deterministic layer is plain old code that you can debug with a debugger, log with a logger, and test with a unit test.</p>
-</div>
-<h2 id="the-role-of-architectures-in-the-agent-loop">The role of architectures in the agent loop</h2>
-<p>Production architectures looks different from development architectures. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
-import requests
-
-def list_rag(query: str) -> str:
-    """List rag matching the query."""
-    response = requests.get(
-        f"https://api.example.com/rag",
-        params={"q": query}
-    )
-    return response.json()
-
-tools = [Tool(name="rag", func=list_rag, description="...")]
-agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring architectures first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add rag on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with architectures when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="keeping-the-index-current">Keeping the index current</h2>
+<p>Treat the vector index as a derived artifact of the source documents, not as the source of truth itself — the same relationship a search index has to a database. That means a re-embedding pipeline triggered by document changes (a webhook on document update, or a scheduled diff-and-reembed job), not a one-time ingestion script run at project kickoff and forgotten. For systems where staleness has real cost — pricing, policy, compliance documents — track a last-indexed timestamp per document and either exclude or explicitly flag chunks older than a threshold, so a stale answer is at least visible as stale rather than presented with the same confidence as a fresh one.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on rag architectures — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>The generation half of RAG is close to a solved problem — any current-generation LLM will write a coherent answer from good context. The retrieval half is where the actual engineering work is: chunking strategy, hybrid search to cover exact-match queries vector similarity misses, hierarchical retrieval to balance precision against context, re-ranking to clean up the candidate set, and a real pipeline for keeping the index in sync with source documents. If a RAG system is giving wrong answers, look at what got retrieved before you touch the prompt — that's where the bug almost always is.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/itl/ai-risk-management-framework" target="_blank" rel="noopener noreferrer">NIST AI Risk Management Framework</a></li><li><a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/" target="_blank" rel="noopener noreferrer">OWASP Top 10 for LLM Applications</a></li><li><a href="https://developers.google.com/machine-learning/guides/rules-of-ml" target="_blank" rel="noopener noreferrer">Google ML Rules of Thumb</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-api-gateway-pattern/">Acumatica API Gateway Pattern</a></li>
@@ -196,7 +150,6 @@ agent = initialize_agent(tools, OpenAI(), agent="zero-shot-react-description")</
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

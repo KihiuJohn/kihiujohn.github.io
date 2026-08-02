@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL Persisted Queries — A Field Guide">
 <meta property="og:description" content="GraphQL Persisted Queries — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-persisted-queries.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-persisted-queries/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,55 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>On real production APIs, this is rarely the question. The question is the failure mode: what happens when the consumer retries, when the rate limit hits, when the schema changes. This article is the patterns.</p>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>Common production failure modes is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>A public GraphQL endpoint that accepts arbitrary query strings is a bigger attack surface than most teams intend to ship. Every client can send any query the schema technically permits — including deeply nested ones that fan out into expensive database work, or queries built straight off introspection to pull fields the UI never needed. Persisted queries close that gap by replacing free-form query text with a fixed, known set of operations the server will actually execute.</p>
+
+<h2 id="the-problem-with-client-supplied-queries">The problem with client-supplied queries</h2>
+<p>Standard GraphQL over HTTP POST sends the full query document on every request. That has three costs. First, it's a denial-of-service vector: a client (malicious or just careless) can send an expensive nested query and the server has no way to distinguish it from a legitimate one without per-query cost analysis. Second, it exposes your entire schema to introspection-driven exploration in production, which you may not want for an internal or partner-only API. Third, because the query text is arbitrary and lives in the POST body, you lose HTTP-level caching — GET requests are cacheable by CDNs and browsers, POST bodies generally are not.</p>
+
+<h2 id="hash-based-execution">Sending a hash instead of a query</h2>
+<p>The core idea: instead of the client sending the full query string, it sends a short hash that identifies the query, and the server looks that hash up in a registry before executing anything. There are two common flavors. A <strong>build-time allowlist</strong> extracts every query used by the client at build time, uploads the hash-to-query mapping to the server ahead of deployment, and the server rejects any hash it doesn't recognize — no unregistered query ever runs. <strong>Automatic Persisted Queries (APQ)</strong>, Apollo's variant, builds the registry lazily at runtime instead of at build time.</p>
+
+<h2 id="the-apq-protocol">Apollo's APQ protocol specifically</h2>
+<p>APQ works as a two-step handshake. On the first attempt, the client sends only the hash of the query it wants to run:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · APQ REQUEST</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "extensions": {
+    "persistedQuery": {
+      "version": 1,
+      "sha256Hash": "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+    }
+  }
+}</code></pre>
 </div>
-<h2 id="why-graphql-is-not-rest-anymore">Why graphql is not REST anymore</h2>
-<p>In the work I have done on graphql persisted queries — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="idempotency-in-persisted">Idempotency in persisted</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the persisted is.</p>
+<p>If the server has never seen that hash, it responds with a <code>PersistedQueryNotFound</code> error instead of executing anything. The client then resends the request once, this time including both the hash and the full query text, so the server can verify the hash matches and store the mapping:</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
+  <div class="code-header"><span class="code-lang">JSON · APQ REGISTRATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "query": "query GetUser($id: ID!) { user(id: $id) { name email } }",
+  "extensions": {
+    "persistedQuery": {
+      "version": 1,
+      "sha256Hash": "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+    }
+  }
+}</code></pre>
 </div>
-<h2 id="contract-testing-for-graphql">Contract testing for graphql</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>Every subsequent call for that query sends just the hash again. The net effect: after the first round-trip, the wire payload for a query shrinks from the full document to a 64-character hash.</p>
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>APQ vs a strict allowlist</strong>
+  <p>APQ registers whatever hash-query pairs clients send it, which is convenient but still lets a client register a brand-new query at runtime. A strict build-time allowlist refuses anything not pre-registered at deploy time, which is the stronger security posture for a public-facing production API — APQ alone doesn't stop introspection-driven queries from being registered and run.</p>
 </div>
-<h2 id="observability-tracing-persisted">Observability: tracing persisted</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    persisted: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="sdk-generation-for-graphql">SDK generation for graphql</h2>
-<p>The performance of persisted in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="what-graphql-persisted-queries-a-field-guide-gives-you">What GraphQL Persisted Queries — A Field Guide gives you</h2>
-<p>Production persisted looks different from development persisted. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring persisted first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with persisted when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql persisted queries — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<h2 id="unlocking-get-and-cdn-caching">Unlocking GET requests and CDN caching</h2>
+<p>Because a hash is short and stable, it fits cleanly into a URL query parameter, which means a persisted query can be sent as an HTTP GET rather than a POST: <code>GET /graphql?extensions={"persistedQuery":{"sha256Hash":"ecf4..."}}</code>. GET requests with a deterministic URL are exactly what CDNs, browser caches, and reverse proxies know how to cache. A query that would otherwise require a POST bypassing every layer of HTTP caching becomes a cacheable, CDN-fronted request — often the biggest practical performance win from adopting persisted queries, separate from the security benefit.</p>
+
+<h2 id="the-security-payoff-of-an-allowlist">The security payoff of a strict allowlist</h2>
+<p>Once only known hashes execute, arbitrary client-crafted queries — including ones built by scraping your schema via introspection — simply can't run, because they were never registered. This is the concrete answer to the DoS and bandwidth concerns above: expensive or exploratory queries have no path to execution unless someone deliberately added them to the build. Many teams pair this with disabling introspection in production entirely, since a locked-down allowlist makes introspection's main remaining use (ad hoc exploration) a liability rather than a convenience.</p>
+
+<p>Persisted queries add a build step and a registry to maintain, and they're a poor fit for genuinely ad hoc query tools aimed at internal users. For a client-facing production API, though, the trade is usually worth it: smaller requests, GET-cacheable traffic, and a server that only ever executes queries you already know about.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/api-style-decision/">REST vs GraphQL vs gRPC — Decision Guide</a></li>
@@ -181,7 +151,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

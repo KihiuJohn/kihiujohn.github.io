@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Sanctum for SPA — A Field Guide | John Kihiu</title>
-<meta name="description" content="Laravel Sanctum for SPA — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
+<meta name="description" content="How Sanctum's cookie-based SPA authentication actually works, why CSRF and same-site cookies replace bearer tokens for first-party SPAs, and where mobile API tokens fit alongside it.">
 <meta name="keywords" content="Acumatica laravel, Acumatica sanctum, Acumatica spa, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-sanctum-spa/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Sanctum for SPA — A Field Guide">
-<meta property="og:description" content="Laravel Sanctum for SPA — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-sanctum-spa.svg">
+<meta property="og:description" content="How Sanctum's cookie-based SPA authentication actually works, why CSRF and same-site cookies replace bearer tokens for first-party SPAs, and where mobile API tokens fit alongside it.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-sanctum-spa/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="spa">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Sanctum for SPA — A Field Guide","description":"Laravel Sanctum for SPA — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.","image":"https://kihiujohn.github.io/assets/og/laravel-sanctum-spa.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-sanctum-spa/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Sanctum for SPA — A Field Guide","description":"How Sanctum's cookie-based SPA authentication actually works, why CSRF and same-site cookies replace bearer tokens for first-party SPAs, and where mobile API tokens fit alongside it.","image":"https://kihiujohn.github.io/assets/og/laravel-sanctum-spa.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-sanctum-spa/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Sanctum for SPA — A Field Guide","item":"https://kihiujohn.github.io/blog/laravel-sanctum-spa/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,48 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Sanctum for SPA — A Field Guide</span></nav>
     <span class="tag">Laravel · Laravel</span>
     <h1>Laravel Sanctum for SPA — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Laravel Sanctum for SPA — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How Sanctum's cookie-based SPA authentication actually works, why CSRF and same-site cookies replace bearer tokens for first-party SPAs, and where mobile API tokens fit alongside it.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Laravel developers working on this eventually converge on a small set of conventions that don't show up in the framework docs. The convention is to do the boring thing first and reach for the framework's built-ins before adding a dependency. The pattern that survives 18 months in production is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM.</p>
-<h2 id="what-laravel-sanctum-for-spa-a-field-guide-actually-solves-in-a-laravel-app">What Laravel Sanctum for SPA — A Field Guide actually solves in a Laravel app</h2>
-<p>What Laravel Sanctum for SPA — A Field Guide actually solves in a Laravel app is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Sanctum solves a narrower problem than Passport, deliberately: authenticating a first-party SPA or mobile app against your own API, without building a full OAuth2 server for a case that doesn't need one. For a SPA served from the same top-level domain as its API, Sanctum's cookie-based approach means you never touch a bearer token in JavaScript at all — the browser handles the cookie, and CSRF protection covers the gap that pure cookie auth would otherwise leave open.</p>
+<h2 id="cookies-not-tokens-for-same-site-spas">Cookies, not tokens, for same-site SPAs</h2>
+<p>The SPA authentication flow doesn't issue an API token the frontend stores and attaches to requests. Instead, the SPA hits `/sanctum/csrf-cookie` first to get a CSRF cookie, then logs in through your normal session-based login route, and every subsequent request rides on the same encrypted, HttpOnly session cookie the browser already manages. There's no token to accidentally log, no token sitting in localStorage where an XSS payload can read it — the browser enforces same-origin cookie access, which is a meaningfully stronger default than "store a JWT in localStorage and attach it manually."</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(SanctumRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PHP · SANCTUM SPA CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// config/sanctum.php
+'stateful' => explode(',', env(
+    'SANCTUM_STATEFUL_DOMAINS',
+    'localhost,localhost:3000,app.example.com'
+)),
+
+// config/cors.php — must allow credentials for cookie auth to work
+'supports_credentials' => true,
+
+// Frontend: fetch CSRF cookie before the first stateful request
+await axios.get('/sanctum/csrf-cookie');
+await axios.post('/login', { email, password });
+// Every request after this carries the session cookie automatically
+const { data } = await axios.get('/api/user');</code></pre>
 </div>
-<h2 id="where-it-fits-in-the-laravel-request-lifecycle">Where it fits in the Laravel request lifecycle</h2>
-<p>In the work I have done on laravel sanctum for spa — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="the-stateful-domains-list-is-the-security-boundary">The stateful domains list is the security boundary</h2>
+<p>Sanctum decides whether a request should be treated as "cookie-authenticated, CSRF-protected" or "token-authenticated" based on whether the request's origin matches an entry in `stateful` domains. Anything not in that list falls back to token auth if a bearer token is present. Getting this list wrong — including a domain you don't control, or forgetting to include a staging subdomain — either breaks auth for legitimate frontends or, worse, extends cookie-based trust to an origin that shouldn't have it. This config is the actual access control decision, not a formality.</p>
+<div class="callout">
+  <strong>CORS credentials and Sanctum's stateful list have to agree</strong>
+  <p><code>supports_credentials => true</code> in CORS and a matching origin in Sanctum's stateful domains are both required together — one without the other either breaks the cookie flow or silently falls through to token auth in a way that's confusing to debug. If cookie auth "isn't working" in a new environment, check both configs before assuming the frontend code is wrong.</p>
+</div>
+<h2 id="mobile-and-third-party-clients-still-use-tokens">Mobile and third-party clients still use tokens</h2>
+<p>The cookie flow is specifically for same-site, first-party SPAs. A mobile app, or any client that isn't running inside a browser sharing your domain's cookie jar, uses Sanctum's other mode: personal access tokens, created via `$user->createToken('device-name')` and sent as a normal `Authorization: Bearer` header. Both modes coexist in the same app — Sanctum picks the right one per request based on whether a valid session cookie or a bearer token is present — so a single API can serve a web SPA over cookies and a mobile app over tokens without maintaining two separate auth systems.</p>
 <div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
+  <strong>Token abilities are not the same as Passport scopes, but serve a similar purpose</strong>
+  <p>Sanctum tokens support "abilities" — string identifiers checked via <code>$token->can('posts:update')</code> — which lets you issue a mobile app token that can only read, not write, without needing an OAuth2 scope negotiation flow. It's a lighter-weight mechanism than Passport's scopes, appropriate for first-party clients where you control both ends, not for handing access to an untrusted third party.</p>
 </div>
-<h2 id="implementation-with-a-clean-laravel-pattern">Implementation with a clean Laravel pattern</h2>
-<p>When the work moves from design to production, the questions change. The laravel is not the question; the failure mode of the sanctum is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('laravels', LaravelController::class);
-});</code></pre>
-</div>
-<h2 id="testing-the-edge-cases">Testing the edge cases</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
-</div>
-<h2 id="performance-considerations-on-production-hardware">Performance considerations on production hardware</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (LaravelJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
-</div>
-<h2 id="what-to-avoid-in-2026">What to avoid in 2026</h2>
-<p>The performance of sanctum in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="alternatives-and-when-to-reach-for-them">Alternatives and when to reach for them</h2>
-<p>Production sanctum looks different from development sanctum. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(SanctumRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring sanctum first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add laravel on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with sanctum when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on laravel sanctum for spa — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Sanctum's cookie-based SPA auth is the right choice specifically because it avoids the token-in-JavaScript problem for the common case of a first-party frontend on the same top-level domain — CSRF and same-site cookies do the security work a hand-rolled token store would otherwise need to reinvent. Reach for personal access tokens for mobile and third-party clients that can't share your cookie jar, and if you find yourself needing real OAuth2 grant types or scoped third-party access, that's the point where Passport, not Sanctum, is the right tool.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-11-new-features/">Laravel 11 New Features — A Complete Guide</a></li>
@@ -185,7 +138,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

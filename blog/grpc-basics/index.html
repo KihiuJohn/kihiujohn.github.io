@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="gRPC Basics — A Field Guide">
 <meta property="og:description" content="gRPC Basics — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether the.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/grpc-basics.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/grpc-basics/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,46 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough production APIs to know the patterns that work. They share a few traits: versioned from day one, idempotent, and boring enough that the on-call doesn't have to think. This article is the patterns.</p>
-<h2 id="observability-tracing-basics">Observability: tracing basics</h2>
-<p>Observability: tracing basics is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>gRPC is Google's RPC framework built on two things that give it most of its advantages over REST: Protocol Buffers as the interface definition and serialization format, and HTTP/2 as the transport. Instead of writing an OpenAPI spec that describes a REST API after the fact, you write a <code>.proto</code> file that defines services and messages up front, and the compiler generates client and server code in whatever languages you need — the contract exists before either side is implemented, and it's enforced by the compiler, not by hoping everyone read the docs.</p>
+<h2 id="the-proto-file-is-the-contract">The .proto file is the contract</h2>
+<p>A service in gRPC is defined as a set of RPC methods with typed request and response messages, and the message fields are numbered, not named-in-JSON — those field numbers are what make the wire format compact and what make additive schema evolution safe (a new field with a new number doesn't disturb existing consumers reading old fields by number). The <code>protoc</code> compiler, or <code>buf</code> in most modern toolchains, turns this into strongly typed client stubs and server interfaces in Go, Java, Python, C#, TypeScript, and more, so the client and server are never out of sync about what a method accepts and returns.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
+  <div class="code-header"><span class="code-lang">PROTOBUF · SERVICE DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>syntax = "proto3";
+
+package orders.v1;
+
+service OrderService {
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc ListOrders (ListOrdersRequest) returns (stream Order);
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message Order {
+  string id = 1;
+  string status = 2;
+  int64 total_cents = 3;
+}</code></pre>
 </div>
-<h2 id="sdk-generation-for-grpc">SDK generation for grpc</h2>
-<p>In the work I have done on grpc basics — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
-</div>
-<h2 id="what-grpc-basics-a-field-guide-gives-you">What gRPC Basics — A Field Guide gives you</h2>
-<p>When the work moves from design to production, the questions change. The grpc is not the question; the failure mode of the basics is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /grpcs/{id}:
-    get:
-      operationId: getGrpc
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="binary-over-json">Binary encoding over JSON, and why it matters</h2>
+<p>Protobuf serializes to a compact binary format rather than JSON's human-readable text, which means smaller payloads and faster serialize/deserialize on both ends — meaningful at scale, in service-to-service traffic where the same handful of message types cross the wire millions of times a day. The trade-off is that you can't just curl an endpoint and read the response; you need the <code>.proto</code> definition (or a tool like <code>grpcurl</code>) to make sense of the bytes. That's a real cost for debuggability and is one reason gRPC is far more common on internal service-to-service links than on public-facing APIs.</p>
+<h2 id="four-rpc-types-not-just-request-response">Four RPC types, not just request/response</h2>
+<p>Because gRPC runs over HTTP/2, it isn't limited to a single request producing a single response the way REST effectively is. A method can be unary (one request, one response — the REST-equivalent case), server-streaming (one request, a stream of responses — useful for a large result set or a live feed), client-streaming (a stream of requests, one response — useful for uploading a large or ongoing dataset), or bidirectional streaming (both sides stream independently over the same connection — useful for something like a chat session or live collaboration). Each is declared explicitly in the <code>.proto</code> with the <code>stream</code> keyword, so the contract states up front which shape a method has.</p>
 <div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
+  <strong>Multiplexing is the HTTP/2 payoff</strong>
+  <p>HTTP/2 multiplexes many concurrent RPCs over a single TCP connection instead of opening a new connection per request the way HTTP/1.1 effectively does. That's why gRPC connections tend to be long-lived — reconnecting per-call throws away the multiplexing advantage that makes gRPC fast in the first place.</p>
 </div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GrpcResponse = {
-    id: string;
-    basics: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="versioning-and-deprecation">Versioning and deprecation</h2>
-<p>The performance of basics in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="performance-caching-batching-pagination">Performance: caching, batching, pagination</h2>
-<p>Production basics looks different from development basics. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/grpcs/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await grpcService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring basics first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add grpc on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with basics when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="status-codes-not-http-codes">gRPC status codes, not HTTP status codes</h2>
+<p>A gRPC response carries a gRPC status code — <code>OK</code>, <code>NOT_FOUND</code>, <code>INVALID_ARGUMENT</code>, <code>UNAVAILABLE</code>, <code>DEADLINE_EXCEEDED</code>, and so on — which is a different, purpose-built set from HTTP status codes, even though gRPC happens to run over HTTP/2 under the hood. Client libraries surface these as typed errors rather than something you parse out of an HTTP response, which matters when deciding what to do with a failure: <code>UNAVAILABLE</code> is usually safe to retry, <code>INVALID_ARGUMENT</code> is not.</p>
+<h2 id="when-grpc-is-the-wrong-choice">When gRPC is the wrong choice</h2>
+<p>gRPC is a poor fit for anything a browser calls directly — browsers can't originate true HTTP/2 trailers-based gRPC calls without a proxy layer like gRPC-Web, and public APIs consumed by third parties benefit far more from REST's ubiquity, curl-ability, and native browser support. Reach for gRPC on internal, service-to-service traffic where both ends are under your control and performance or strict typing genuinely matters, and reach for REST (or GraphQL) at the edge where humans and browsers are involved.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on grpc basics — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>gRPC's value is the compiler-enforced contract, the compact binary wire format, and native support for streaming beyond simple request/response — all of which pay off most clearly in internal service-to-service communication. It costs you human-readability on the wire and browser compatibility at the edge, which is exactly why most systems that use it keep it behind a gateway that speaks REST or GraphQL to the outside world.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/grpc-error-handling/">gRPC Error Handling — A Field Guide</a></li>
@@ -181,7 +142,6 @@ app.get('/api/grpcs/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

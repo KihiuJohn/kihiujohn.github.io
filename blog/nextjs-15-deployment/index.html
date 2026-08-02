@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Next.js 15 Deployment to Production | John Kihiu</title>
-<meta name="description" content="Next.js 15 Deployment to Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="Deploying Next.js 15 outside Vercel: standalone output for Docker, choosing edge vs Node runtime per route, environment variables at build vs runtime, and running ISR on your own infrastructure.">
 <meta name="keywords" content="Acumatica nextjs, Acumatica deployment, Acumatica vercel, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/nextjs-15-deployment/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Next.js 15 Deployment to Production">
-<meta property="og:description" content="Next.js 15 Deployment to Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/nextjs-15-deployment.svg">
+<meta property="og:description" content="Deploying Next.js 15 outside Vercel: standalone output for Docker, choosing edge vs Node runtime per route, environment variables at build vs runtime, and running ISR on your own infrastructure.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/nextjs-15-deployment/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="modern-web">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="vercel">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Deployment to Production","description":"Next.js 15 Deployment to Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-deployment.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-deployment/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Next.js 15 Deployment to Production","description":"Deploying Next.js 15 outside Vercel: standalone output for Docker, choosing edge vs Node runtime per route, environment variables at build vs runtime, and running ISR on your own infrastructure.","image":"https://kihiujohn.github.io/assets/og/nextjs-15-deployment.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/nextjs-15-deployment/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Next.js 15 Deployment to Production","item":"https://kihiujohn.github.io/blog/nextjs-15-deployment/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,87 +86,63 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Next.js 15 Deployment to Production</span></nav>
     <span class="tag">Modern Web · Nextjs</span>
     <h1>Next.js 15 Deployment to Production</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Next.js 15 Deployment to Production is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Deploying Next.js 15 outside Vercel: standalone output for Docker, choosing edge vs Node runtime per route, environment variables at build vs runtime, and running ISR on your own infrastructure.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>The web platform in 2026 is more capable than it was in 2020. Container queries, view transitions, the popover API, server components — the modern web is enough to build a rich UI without a 200KB framework. this is the pattern that uses the platform.</p>
-<h2 id="common-pitfalls-when-adopting-next">Common pitfalls when adopting next</h2>
-<p>Common pitfalls when adopting next is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Vercel built Next.js, and it shows — the fastest path to shipping any Next.js 15 app is still <code>vercel deploy</code>, with zero-config ISR, edge middleware, and image optimization handled for you. But plenty of teams have infrastructure requirements Vercel doesn't fit: data residency rules, an existing Kubernetes cluster, or just a cost model that doesn't work at Vercel's per-request pricing once traffic scales. Self-hosting Next.js 15 is well-supported now, but it means owning decisions Vercel used to make invisibly.</p>
+<h2 id="standalone-output-for-docker">Standalone output for Docker</h2>
+<p>Setting <code>output: 'standalone'</code> in <code>next.config.js</code> makes the build produce a minimal, self-contained server — Next.js traces exactly which <code>node_modules</code> files your app actually uses and copies only those into <code>.next/standalone</code>, instead of you needing to ship the entire dependency tree. This is the difference between a multi-hundred-megabyte image and a lean one, and it's what makes Next.js practical to run in Docker without a bespoke pruning script.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
+  <div class="code-header"><span class="code-lang">DOCKERFILE · MULTI-STAGE BUILD WITH STANDALONE OUTPUT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]</code></pre>
 </div>
-<h2 id="migration-path-from-the-old-approach">Migration path from the old approach</h2>
-<p>In the work I have done on next.js 15 deployment to production, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>Server components changed everything</strong>
-  <p>React 19 / Next.js 15 server components push more work to the server, which means less JS shipped and faster TTFB. The trade-off is more complex mental model.</p>
+<div class="callout-warn callout">
+  <strong>Standalone output doesn't include public/ or .next/static automatically</strong>
+  <p>The traced output only covers server code and its dependencies — you still have to copy the <code>public/</code> directory and <code>.next/static</code> into the final image yourself, as shown above. Skipping this is the most common "why are my images and CSS 404ing in production" mistake with standalone builds.</p>
 </div>
-<h2 id="how-deployment-interacts-with-server-components">How deployment interacts with server components</h2>
-<p>When the work moves from design to production, the questions change. The next is not the question; the failure mode of the deployment is.</p>
+<h2 id="edge-vs-node-runtime-per-route">Edge vs. Node runtime, chosen per route</h2>
+<p>Self-hosted or on Vercel, Next.js 15 lets you set <code>export const runtime = 'edge'</code> or <code>'nodejs'</code> per route or middleware file. The Node runtime gives you the full Node.js API surface — native modules, Buffer, arbitrary npm packages that assume Node internals — at the cost of a heavier, slower-to-cold-start process. The Edge runtime is a stripped-down, Web-standard-APIs-only environment that starts faster and runs closer to the request, but can't use anything requiring Node-specific APIs. If you're self-hosting behind a single region, the edge runtime's latency advantage mostly disappears — it's a bigger win with Vercel's or another provider's global edge network than on a single VPS.</p>
+<h2 id="environment-variables-build-vs-runtime">Environment variables: build time vs. runtime</h2>
+<p>This is where self-hosted deployments most often go wrong. Any variable prefixed <code>NEXT_PUBLIC_</code> gets inlined into the client JavaScript bundle at build time — it is baked in, not read fresh at runtime. If you build one Docker image and expect to promote it through staging and production with different <code>NEXT_PUBLIC_API_URL</code> values via runtime environment injection, it won't work; the value from whichever environment ran the build is permanent in that image. Server-only variables (no <code>NEXT_PUBLIC_</code> prefix) are read at runtime and can differ per environment for the same image.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { useState } from 'react';
-export function useNext(initial) {
-    const [value, setValue] = useState(initial);
-    return [value, setValue];
-}</code></pre>
+  <div class="code-header"><span class="code-lang">BASH · BUILD-TIME VS RUNTIME ENV DISTINCTION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># WRONG for multi-environment images: baked in at build, can't change later
+# NEXT_PUBLIC_API_URL=https://staging.api.example.com  npm run build
+
+# Build once, generic:
+npm run build
+
+# Server-side vars can differ per environment at container start,
+# because server code reads process.env at request time, not build time
+docker run -e API_SECRET=prod_secret -e DATABASE_URL=$PROD_DB my-nextjs-app</code></pre>
 </div>
-<h2 id="typescript-patterns-for-next">TypeScript patterns for next</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<h2 id="isr-on-self-hosted-infrastructure">ISR on your own infrastructure</h2>
+<p>Incremental Static Regeneration works self-hosted, but Vercel's version relies on their global CDN and a managed cache invalidation layer that a plain Docker container doesn't have. Self-hosted, revalidated pages are written to disk on the server instance itself by default — which breaks down the moment you run more than one container instance, because each instance regenerates and caches independently and users can get different cached versions depending on which instance serves them. Running ISR at scale self-hosted means putting a shared cache (Redis, or a CDN in front of the app with its own invalidation hooked to <code>revalidatePath</code>/<code>revalidateTag</code>) in the path, not relying on the filesystem cache that works fine for a single instance.</p>
 <div class="callout">
-  <strong>Type safety compounds</strong>
-  <p>TypeScript types are documentation that never goes stale. The upfront cost is paid back the second your IDE catches a bug.</p>
+  <strong>Health checks need a route that doesn't hit your cache logic</strong>
+  <p>If your load balancer's health check hits a page that triggers ISR regeneration, you can end up regenerating on every health check interval, defeating the point of the cache. Use a dedicated lightweight route (e.g. <code>/api/health</code> returning a static 200) for health checks, separate from user-facing cached pages.</p>
 </div>
-<h2 id="when-next-is-the-wrong-tool">When next is the wrong tool</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>export default {
-    async fetch(request, env) {
-        const cache = caches.default;
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        const response = await fetch(request);
-        return response;
-    }
-};</code></pre>
-</div>
-<h2 id="build-vs-buy-for-deployment">Build vs buy for deployment</h2>
-<p>The performance of deployment in modern web is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>WebSockets are easier now</strong>
-  <p>Laravel Reverb, Soketi, and Supabase Realtime make WebSockets a one-line integration. The 2010s of hand-rolled WebSocket servers are over.</p>
-</div>
-<h2 id="testing-next-in-isolation">Testing next in isolation</h2>
-<p>Production deployment looks different from development deployment. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-export default defineConfig({
-    plugins: [vue()],
-    build: { target: 'es2020' }
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring deployment first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add next on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with deployment when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on next.js 15 deployment to production. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Self-hosting Next.js 15 is a legitimate choice, not a downgrade — standalone output makes the Docker story clean, and edge/Node runtime selection is available regardless of host. The two things that actually bite teams are environment variables baked in at build time when they expected runtime configuration, and ISR silently misbehaving across multiple instances because the default cache is per-instance disk, not shared. Plan for both before you're debugging them in production.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">W3C WCAG 2.2</a></li><li><a href="https://web.dev/" target="_blank" rel="noopener noreferrer">web.dev</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-blue-green-deployment/">Acumatica Blue-Green Deployment</a></li>
@@ -178,7 +153,6 @@ export default defineConfig({
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

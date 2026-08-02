@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Pulse Application Monitoring | John Kihiu</title>
-<meta name="description" content="Laravel Pulse Application Monitoring is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta name="description" content="What Laravel Pulse actually captures out of the box, how its ingestion and aggregation model keeps overhead low, and where you still need a real APM alongside it.">
 <meta name="keywords" content="Acumatica laravel, Acumatica pulse, Acumatica monitoring, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-pulse-monitoring/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Pulse Application Monitoring">
-<meta property="og:description" content="Laravel Pulse Application Monitoring is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-pulse-monitoring.svg">
+<meta property="og:description" content="What Laravel Pulse actually captures out of the box, how its ingestion and aggregation model keeps overhead low, and where you still need a real APM alongside it.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-pulse-monitoring/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="laravel">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="monitoring">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Pulse Application Monitoring","description":"Laravel Pulse Application Monitoring is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/laravel-pulse-monitoring.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-pulse-monitoring/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Pulse Application Monitoring","description":"What Laravel Pulse actually captures out of the box, how its ingestion and aggregation model keeps overhead low, and where you still need a real APM alongside it.","image":"https://kihiujohn.github.io/assets/og/laravel-pulse-monitoring.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-pulse-monitoring/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Pulse Application Monitoring","item":"https://kihiujohn.github.io/blog/laravel-pulse-monitoring/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,94 +86,55 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Pulse Application Monitoring</span></nav>
     <span class="tag">Laravel · Laravel</span>
     <h1>Laravel Pulse Application Monitoring</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Laravel Pulse Application Monitoring is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">What Laravel Pulse actually captures out of the box, how its ingestion and aggregation model keeps overhead low, and where you still need a real APM alongside it.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Laravel developers working on this eventually converge on a small set of conventions that don't show up in the framework docs. The convention is to do the boring thing first and reach for the framework's built-ins before adding a dependency. The pattern that survives 18 months in production is rarely the clever one — it is the one that a tired on-call engineer can debug at 2 AM.</p>
-<h2 id="migrating-pulse-from-a-package-to-a-custom-solution">Migrating pulse from a package to a custom solution</h2>
-<p>Migrating pulse from a package to a custom solution is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Pulse is Laravel's first-party application performance dashboard: a single package, a single migration, and a dashboard route that shows slow requests, slow queries, queue throughput, exceptions, and server load without standing up Grafana or paying for a third-party APM. It's not trying to replace a full observability stack — it has no distributed tracing, no alerting engine, no long retention story by default — but for a small-to-mid-size Laravel app, it answers "what's actually slow right now" faster than wiring up OpenTelemetry ever will.</p>
+<h2 id="how-pulse-collects-data-without-slowing-requests-down">How Pulse collects data without slowing requests down</h2>
+<p>Pulse's core design decision is that recording shouldn't happen inline with the request that triggered it. Recorders capture entries (a slow query, a request duration, an exception) into an in-memory or Redis-backed buffer, and a separate `pulse:check` scheduled command or ingest process aggregates and writes them to storage. The upshot: even under load, Pulse's overhead per request is a lightweight write to a fast in-memory store, not a synchronous database insert competing with the request's own queries for connection pool slots.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(PulseRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
+  <div class="code-header"><span class="code-lang">PHP · CONFIGURING RECORDERS</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>// config/pulse.php
+'recorders' => [
+    Recorders\SlowQueries::class => [
+        'enabled' => env('PULSE_SLOW_QUERIES_ENABLED', true),
+        'threshold' => 1000, // ms — only capture queries slower than this
+        'sample_rate' => 1,
+    ],
+    Recorders\SlowRequests::class => [
+        'enabled' => env('PULSE_SLOW_REQUESTS_ENABLED', true),
+        'threshold' => 500,
+        'sample_rate' => 1,
+    ],
+    Recorders\Queues::class => ['enabled' => true],
+    Recorders\Exceptions::class => ['enabled' => true, 'sample_rate' => 1],
+],
+
+'ingest' => [
+    'driver' => env('PULSE_INGEST_DRIVER', 'storage'), // or 'redis'
+],</code></pre>
 </div>
-<h2 id="the-laravel-native-way-to-do-laravel">The Laravel-native way to do laravel</h2>
-<p>In the work I have done on laravel pulse application monitoring, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="sampling-is-not-optional-at-scale">Sampling is not optional at scale</h2>
+<p>Every Pulse recorder supports a `sample_rate` between 0 and 1. At `sample_rate => 1`, every matching event gets recorded — fine for a low-traffic app, expensive for one doing thousands of requests a minute, since every recorded entry is still a row written somewhere. Dropping slow-query or exception sampling to 0.1 or 0.25 on a high-traffic endpoint keeps the signal (you'll still see the pattern) while cutting storage and write load by the same factor. The mistake is leaving every recorder at full sampling and then being surprised the pulse_entries table needs its own retention policy.</p>
+<div class="callout">
+  <strong>Pulse needs its own database housekeeping</strong>
+  <p>Run <code>pulse:purge</code> on a schedule (daily is typical) to trim entries past your retention window, set via <code>PULSE_RETENTION</code> config. Without it, the pulse_entries and pulse_aggregates tables grow indefinitely and the dashboard itself gets slower to render as it scans more history.</p>
+</div>
+<h2 id="custom-recorders-for-business-specific-signals">Custom recorders for business-specific signals</h2>
+<p>Pulse's recorder interface is extensible — you can write a custom recorder that captures something specific to your domain (payment webhook latency, a third-party API's response time, cache hit rate on a specific key pattern) and have it show up on the same dashboard as the built-in cards. This is where Pulse earns more of its keep than the out-of-box installation suggests: the built-in recorders answer generic Laravel questions, but a custom recorder tracking "time to process an incoming webhook" answers a question specific to your product that a generic APM dashboard wouldn't surface without custom instrumentation anyway.</p>
+<h2 id="what-pulse-is-not">What Pulse is not</h2>
+<p>Pulse has no distributed tracing across services — if a slow request is slow because it's waiting on a downstream microservice, Pulse shows you the slow request but not the trace into that service. It also has no built-in alerting; the dashboard is something a human has to look at, not something that pages someone at 2am. For a single Laravel monolith, that's often enough. For a system split across several services where you need cross-service traces and automated alerting, Pulse belongs alongside a real observability stack (Sentry for exceptions with alerting, an actual tracing backend), not instead of it.</p>
 <div class="callout callout-warn">
-  <strong>The queue is your friend</strong>
-  <p>Long-running operations do not belong in the request lifecycle. Dispatch to a queue, return immediately, process in the background. The pattern saves you in production.</p>
+  <strong>Don't run Pulse's dashboard route without auth</strong>
+  <p>By default Pulse's dashboard is gated behind a <code>viewPulse</code> authorization gate that you're expected to define — it ships permissive in local development but you must lock it down before deploying. Query duration, slow endpoints, and exception messages are the kind of information you don't want exposed to anyone who finds the <code>/pulse</code> route.</p>
 </div>
-<h2 id="pitfalls-when-pulse-is-not-the-bottleneck">Pitfalls when pulse is not the bottleneck</h2>
-<p>When the work moves from design to production, the questions change. The laravel is not the question; the failure mode of the pulse is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// routes/web.php
-Route::middleware(['auth', 'verified'])-&gt;group(function () {
-    Route::resource('laravels', LaravelController::class);
-});</code></pre>
-</div>
-<h2 id="production-telemetry-for-laravel">Production telemetry for laravel</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Migrations are not optional</strong>
-  <p>Schema migrations are how you evolve the database. The migrations folder is the source of truth. Manual schema changes are technical debt.</p>
-</div>
-<h2 id="what-laravel-pulse-application-monitoring-actually-solves-in-a-laravel-app">What Laravel Pulse Application Monitoring actually solves in a Laravel app</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// In your App\ServiceProvider
-public function boot(): void
-{
-    Queue::failing(function (LaravelJob $job) {
-        // Notify ops, but never retry these
-    });
-}</code></pre>
-</div>
-<h2 id="where-it-fits-in-the-laravel-request-lifecycle">Where it fits in the Laravel request lifecycle</h2>
-<p>The performance of pulse in laravel is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>The artisan list grows</strong>
-  <p>The packages you trust today will be unmaintained tomorrow. The artisan list grows. Pick dependencies that have replacement paths.</p>
-</div>
-<h2 id="implementation-with-a-clean-laravel-pattern">Implementation with a clean Laravel pattern</h2>
-<p>Production pulse looks different from development pulse. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>class LaravelController extends Controller
-{
-    public function store(PulseRequest $request)
-    {
-        $validated = $request->validated();
-        $result = DB::transaction(function () use ($validated) {
-            return laravel::create($validated);
-        });
-        return response()-&gt;json($result, 201);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring pulse first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add laravel on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with pulse when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on laravel pulse application monitoring. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Pulse gives you a real-time view of slow queries, slow requests, queue health, and exceptions with almost no setup cost, because its recorder-plus-scheduled-ingest design keeps collection overhead off the request path. Tune sample rates before you hit production traffic, purge old entries on a schedule, and treat it as a fast local diagnostic tool that complements — rather than replaces — a proper observability stack once your architecture spans more than one service.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://laravel.com/docs" target="_blank" rel="noopener noreferrer">Laravel documentation</a></li><li><a href="https://www.php.net/docs.php" target="_blank" rel="noopener noreferrer">PHP manual</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP cheat sheets</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-horizon-monitoring/">Laravel Horizon Monitoring Patterns</a></li>
@@ -185,7 +145,6 @@ public function boot(): void
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

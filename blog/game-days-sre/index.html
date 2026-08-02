@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Game Days for SRE Teams — A Field Guide">
 <meta property="og:description" content="Game Days for SRE Teams — A Field Guide is the work that turns a deploy into a system. The deployment is one moment; the system is the next 18 months of uptime, incidents, and.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/game-days-sre.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/game-days-sre/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="acumatica">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,90 +92,48 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I have shipped this in enough Acumatica customisations to know the patterns that work and the ones that waste time. The working patterns share a few traits: they extend rather than modify, they assume the next upgrade will break things, and they have a runbook for the cases that the happy path does not cover. This article is the working patterns, with the failure modes called out.</p>
-<h2 id="common-pitfalls-and-the-failures-that-taught-me-the-right-way">Common pitfalls and the failures that taught me the right way</h2>
-<p>Common pitfalls and the failures that taught me the right way is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class GameDaysExt : PXGraphExtension<GameEntry>
-{
-    [PXOverride]
-    public virtual void Days(Game doc)
-    {
-        // Custom days logic for game days sre
-        if (doc?.Days == null) return;
-        Base.Days(doc);
-    }
-}</code></pre>
+    <p>A game day is a scheduled exercise where a team deliberately breaks something in a controlled way to find out whether the systems, the alerting, and the humans respond the way the runbook says they will. The value isn't the outage — it's finding the gap between what you believe will happen during an incident and what actually happens, while it's still Tuesday afternoon and not 3am on a real one.</p>
+<h2 id="what-a-game-day-actually-tests">What a game day actually tests</h2>
+<p>A well-run game day tests three things at once: whether monitoring and alerting fire correctly for the injected failure, whether the documented runbook is accurate and findable under pressure, and whether the on-call engineer can execute it without needing the person who wrote it. Teams that only test the first — "did the alert fire" — miss most of the value. The alert firing and someone successfully mitigating are different questions, and game days exist to answer the second one.</p>
+<h2 id="picking-a-failure-that-teaches-you-something">Picking a failure that teaches you something</h2>
+<p>The best game day scenarios come from real, plausible failure modes — a dependency timing out, a region losing connectivity, a cache going cold, a queue backing up — not creative but implausible disasters. Start from your architecture's actual single points of failure and your past incident history; if a database failover has never been tested outside of production, that's a stronger game day candidate than an exotic multi-region scenario nobody's architecture actually needs to survive.</p>
+<div class="callout">
+  <strong>Start with the failure you're most afraid of and least sure about</strong>
+  <p>Teams tend to game-day the scenarios they already understand well, because those are comfortable to run. The higher-value exercise is the one where nobody on the team can confidently predict what will happen — that's where the exercise actually surfaces something new.</p>
 </div>
-<h2 id="performance-and-observability-for-game">Performance and observability for game</h2>
-<p>In the work I have done on game days for sre teams — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<h2 id="roles-facilitator-scribe-and-participants">Roles: facilitator, scribe, and participants</h2>
+<p>A game day needs someone running the exercise who is not also debugging it — a facilitator who knows the injected failure and observes without giving hints, and a scribe capturing a timeline: when the failure was injected, when it was detected, when mitigation started, when it resolved. Participants respond as if it were a real incident, using the actual paging and communication channels. Skipping the facilitator/scribe split is the most common way a game day quietly turns into an unstructured debugging session that produces no usable timeline afterward.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · GAME DAY RUN SHEET EXAMPLE</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>game_day:
+  name: payment-service-dependency-timeout
+  date: 2026-08-05
+  facilitator: sre-lead
+  scribe: sre-secondary
+  hypothesis: "On-call detects elevated latency within 5 minutes and
+    fails over to the backup payment provider within 15 minutes,
+    per the documented runbook."
+  injection:
+    method: inject 2000ms latency on payment-gateway calls via proxy
+    blast_radius: staging environment, 10% of synthetic traffic
+  abort_conditions:
+    - error rate exceeds 25% in staging
+    - facilitator calls "stop" at any time
+  success_criteria:
+    - alert fires within 5 minutes of injection
+    - on-call follows runbook without escalation
+    - mitigation completes within 20 minutes</code></pre>
+</div>
+<h2 id="the-blameless-retro-is-not-optional">The blameless retro is not optional</h2>
+<p>A game day that ends without a retrospective wastes most of its value. The retro should be blameless by design — the point is finding gaps in systems and documentation, not finding fault in the responder, who was following whatever the runbook said. Every gap found (an alert that didn't fire, a runbook step that was wrong, a dashboard that didn't exist) becomes a tracked follow-up item with an owner, and the next game day should verify the fix actually closed the gap rather than assuming it did.</p>
 <div class="callout callout-warn">
-  <strong>The Usr prefix matters</strong>
-  <p>Every custom field on a built-in DAC must start with <code>Usr</code>. Acumatica uses this prefix to separate your fields from base fields, and the upgrade tool relies on it.</p>
+  <strong>Don't run a game day against production without a tested abort path</strong>
+  <p>Chaos engineering in production is a legitimate, valuable practice, but it requires a fast, tested rollback or abort mechanism before you start — a feature flag, a circuit breaker, a proxy you can disable in seconds. A game day without a fast abort path is just an unplanned outage with extra steps.</p>
 </div>
-<h2 id="testing-strategy-and-what-to-cover">Testing strategy and what to cover</h2>
-<p>When the work moves from design to production, the questions change. The game is not the question; the failure mode of the days is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Performance check for game
-SELECT TOP 20
-    total_worker_time / execution_count AS avg_cpu,
-    total_elapsed_time / execution_count AS avg_duration,
-    SUBSTRING(text, 1, 200) AS query_text
-FROM sys.dm_exec_query_stats
-ORDER BY avg_cpu DESC;</code></pre>
-</div>
-<h2 id="when-to-use-the-standard-screen-vs-a-customisation">When to use the standard screen vs a customisation</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Cache is per-graph</strong>
-  <p>Acumatica caches DACs per graph instance. If you put a record in the cache and another graph instance tries to read it, you get stale data. Use <code>cache.Clear()</code> deliberately.</p>
-</div>
-<h2 id="extending-vs-replacing-the-decision-framework">Extending vs replacing: the decision framework</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>SELECT ar.RefNbr, ar.CuryOrigDocAmt, ar.Status
-FROM ARInvoice ar
-INNER JOIN Customer c ON ar.CustomerID = c.BAccountID
-WHERE ar.DocDate BETWEEN @FromDate AND @AsOfDate
-  AND ar.Status = 'O'
-  AND ar.CuryDocBal > 0
-  AND c.CustomerClassID IN (@Classes)
-ORDER BY ar.DocDate DESC;</code></pre>
-</div>
-<h2 id="the-days-edge-cases-i-have-shipped">The days edge cases I have shipped</h2>
-<p>The performance of days in acumatica is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Plan for the upgrade</strong>
-  <p>The customisation that ages well is the one written with the next upgrade in mind. Extensions instead of base modifications. <code>Usr</code> prefixes on every field. Source control.</p>
-</div>
-<h2 id="migration-path-when-game-changes">Migration path when game changes</h2>
-<p>Production days looks different from development days. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>public class GameDaysExt : PXGraphExtension<GameEntry>
-{
-    [PXOverride]
-    public virtual void Days(Game doc)
-    {
-        // Custom days logic for game days sre
-        if (doc?.Days == null) return;
-        Base.Days(doc);
-    }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring days first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add game on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with days when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on game days for sre teams — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Game days work when the scenario is plausible, the roles are separated so the exercise produces a real timeline, and every gap surfaces as a tracked, owned follow-up rather than a war story. Run them on a cadence, not as a one-off — the value compounds as the team builds confidence that the runbooks they wrote actually work under pressure.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/chaos-engineering-patterns/">Chaos Engineering Patterns — A Field Guide</a></li>
@@ -187,7 +144,6 @@ ORDER BY ar.DocDate DESC;</code></pre>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

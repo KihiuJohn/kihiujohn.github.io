@@ -4,15 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multi-Tenant Feature Flags for Vertical SaaS | John Kihiu</title>
-<meta name="description" content="Multi-Tenant Feature Flags for Vertical SaaS is the pattern that defines the next decade of enterprise software.">
+<meta name="description" content="How to design a feature flag system for multi-tenant vertical SaaS that supports per-tenant rollout, plan-gating, and safe rollback without becoming its own maintenance burden.">
 <meta name="keywords" content="Acumatica saas, Acumatica feature flags, Acumatica multi-tenant, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vertical-saas-feature-flags-multi-tenant/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Multi-Tenant Feature Flags for Vertical SaaS">
-<meta property="og:description" content="Multi-Tenant Feature Flags for Vertical SaaS is the pattern that defines the next decade of enterprise software.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/vertical-saas-feature-flags-multi-tenant.svg">
+<meta property="og:description" content="How to design a feature flag system for multi-tenant vertical SaaS that supports per-tenant rollout, plan-gating, and safe rollback without becoming its own maintenance burden.">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vertical-saas-feature-flags-multi-tenant/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -21,7 +20,7 @@
 <meta property="article:tag" content="multi-tenant">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Multi-Tenant Feature Flags for Vertical SaaS","description":"Multi-Tenant Feature Flags for Vertical SaaS is the pattern that defines the next decade of enterprise software.","image":"https://kihiujohn.github.io/assets/og/vertical-saas-feature-flags-multi-tenant.svg","datePublished":"2026-06-19","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vertical-saas-feature-flags-multi-tenant/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Multi-Tenant Feature Flags for Vertical SaaS","description":"How to design a feature flag system for multi-tenant vertical SaaS that supports per-tenant rollout, plan-gating, and safe rollback without becoming its own maintenance burden.","image":"https://kihiujohn.github.io/assets/og/vertical-saas-feature-flags-multi-tenant.svg","datePublished":"2026-06-19","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vertical-saas-feature-flags-multi-tenant/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Multi-Tenant Feature Flags for Vertical SaaS","item":"https://kihiujohn.github.io/blog/vertical-saas-feature-flags-multi-tenant/"}]}
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -87,85 +86,45 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Multi-Tenant Feature Flags for Vertical SaaS</span></nav>
     <span class="tag">Vertical SaaS · Saas</span>
     <h1>Multi-Tenant Feature Flags for Vertical SaaS</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Multi-Tenant Feature Flags for Vertical SaaS is the pattern that defines the next decade of enterprise software.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">How to design a feature flag system for multi-tenant vertical SaaS that supports per-tenant rollout, plan-gating, and safe rollback without becoming its own maintenance burden.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-19">Jun 19, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS on a horizontal platform is the pattern that gives ISVs leverage: the platform's compliance and infrastructure, your differentiation. this is one of the patterns that make it work. This article is the field-tested implementation, with the multi-tenant data model, the feature flags, and the pricing.</p>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The vertical SaaS model on a horizontal platform is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Feature flags in a single-tenant app are mostly about deployment safety: ship dark, roll out gradually, kill the switch if something breaks. In multi-tenant vertical SaaS, flags do that job plus a second one that's easy to underestimate at the start — they're also the mechanism for plan-gating and per-tenant customization, which means the flag system ends up load-bearing for both engineering safety and the billing model.</p>
+<h2 id="two-different-kinds-of-flag">Two different kinds of flag, and why conflating them hurts</h2>
+<p>A release flag is temporary: it exists to de-risk a deploy and gets deleted once the feature is fully rolled out and stable. A plan flag is permanent: it exists as long as the pricing tier does, gating a real feature behind a paid plan. The mistake I've seen teams make is using the same flag for both — shipping a feature behind a "dark launch" flag, then repurposing that same flag as the permanent plan gate once the feature ships. Six months later nobody remembers which flags are safe to delete and which ones are load-bearing for billing, and cleanup becomes too risky to attempt.</p>
+<div class="callout-warn">
+  <strong>Never let cleanup risk stop you from deleting release flags</strong>
+  <p>If a team is scared to delete an old release flag because "something might depend on it," that's a sign the flag was never cleanly separated from permanent plan-gating logic. Keep the two flag types in visibly different namespaces (<code>release.</code> vs <code>plan.</code> prefixes) so a stale flag audit is a five-minute grep, not an investigation.</p>
+</div>
+<h2 id="evaluation-key-tenant-not-user">The evaluation key should usually be the tenant, not the user</h2>
+<p>Most flag SDKs default to evaluating flags per user, which makes sense for consumer products where each user has an independent experience. In B2B vertical SaaS, the buying unit is the tenant (the company), and inconsistent behavior between two users at the same customer — one sees a new UI, their coworker doesn't — generates support tickets that have nothing to do with the actual feature. Evaluate plan-gating flags on tenant ID as the primary key, and only fall back to user-level targeting for genuinely user-scoped experiments like a UI redesign A/B test.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class MultiExt : PXCacheExtension<Tenant>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  <div class="code-header"><span class="code-lang">TYPESCRIPT · TENANT-SCOPED EVALUATION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>function isFeatureEnabled(flagKey: string, ctx: { tenantId: string; planTier: string }) {
+  const flag = flagRegistry.get(flagKey);
+  if (!flag) return false;
+
+  if (flag.type === 'plan') {
+    return flag.enabledForPlans.includes(ctx.planTier);
+  }
+
+  // release flags: percentage rollout keyed on tenantId so every
+  // user at a tenant gets the same answer
+  const bucket = hashToBucket(ctx.tenantId, flag.salt);
+  return bucket < flag.rolloutPercent;
 }</code></pre>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>In the work I have done on multi-tenant feature flags for vertical saas, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>When the work moves from design to production, the questions change. The multi is not the question; the failure mode of the tenant is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'multi'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
-</div>
-<h2 id="go-to-market-and-customer-success">Go-to-market and customer success</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM multi
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="common-production-failure-modes">Common production failure modes</h2>
-<p>The performance of tenant in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="why-multi-on-a-horizontal-platform-beats-from-scratch">Why multi on a horizontal platform beats from-scratch</h2>
-<p>Production tenant looks different from development tenant. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class MultiExt : PXCacheExtension<Tenant>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring tenant first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add multi on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with tenant when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="rollback-under-load">Rollback has to work while the tenant is actively using the feature</h2>
+<p>The point of a release flag is that flipping it off mid-incident doesn't require a deploy. That only holds if the flag is checked on every relevant code path with no caching that outlives a reasonable TTL, and if turning a flag off degrades gracefully rather than throwing — a tenant who had a feature enabled, then disabled mid-session, should fall back to the old behavior cleanly, not hit a broken UI referencing state that no longer exists.</p>
+<h2 id="flag-debt-and-audits">Flag debt accumulates faster in multi-tenant systems</h2>
+<p>Because plan flags are permanent by design, the flag count in a mature vertical SaaS product only grows — every new plan tier or add-on module is another flag that never gets deleted. The practical fix is a quarterly audit: any release flag rolled out to 100% for more than one quarter gets deleted and its condition inlined, and plan flags get consolidated into a single tenant-entitlements table rather than living as scattered boolean checks through the codebase.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on multi-tenant feature flags for vertical saas. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Feature flags in multi-tenant SaaS are doing two jobs — safe rollout and plan enforcement — and treating them as one undifferentiated pile of booleans is how flag debt becomes unmanageable. Separate the namespaces, evaluate plan-gating on tenant ID, and delete release flags on a schedule instead of never.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://help.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Help</a></li><li><a href="https://www.acumatica.com/developers/" target="_blank" rel="noopener noreferrer">Acumatica developer resources</a></li><li><a href="https://community.acumatica.com/" target="_blank" rel="noopener noreferrer">Acumatica Community</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-multi-tenant/">Multi-Tenant Laravel Applications</a></li>
@@ -176,7 +135,6 @@ public class MultiExt : PXCacheExtension<Tenant>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

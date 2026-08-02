@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="GraphQL Authentication — A Field Guide">
 <meta property="og:description" content="GraphQL Authentication — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/graphql-authentication.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/graphql-authentication/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="api">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,84 +92,56 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>API design at scale is mostly about deprecations and versioning. this is the pattern that handles the cases that the first version of the API didn't anticipate. This article is the field-tested patterns, with the failure modes that don't show up in the happy path.</p>
-<h2 id="idempotency-in-authentication">Idempotency in authentication</h2>
-<p>Idempotency in authentication is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>GraphQL doesn't have an opinion on authentication. There's no login field in the spec, no auth header defined by the language, no concept of a "logged in" request at the query-execution level. Authentication happens in the HTTP layer — same as any other web API — and what GraphQL gives you is a single place, the resolver context, to make the result of that authentication available everywhere it's needed. Most of the confusion I see comes from treating GraphQL as if it should handle auth for you rather than just handing you a clean seam to plug it into.</p>
+<h2 id="the-context-object">Building the context object</h2>
+<p>Every mainstream GraphQL server — Apollo Server, GraphQL Yoga, Mercurius — gives you a hook that runs once per incoming request, before any resolver executes, where you build a <code>context</code> object. This is where auth actually happens: you read the <code>Authorization</code> header (or a session cookie), verify the token, look up the user, and hang the result on context. Every resolver in that request then receives the same context object as its third argument.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
+  <div class="code-header"><span class="code-lang">JAVASCRIPT · APOLLO SERVER CONTEXT</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const server = new ApolloServer({ typeDefs, resolvers });
+
+const { url } = await startStandaloneServer(server, {
+  context: async ({ req }) =&gt; {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
+    const user = token ? await verifyToken(token) : null;
+    return { user };
+  },
 });</code></pre>
 </div>
-<h2 id="contract-testing-for-graphql">Contract testing for graphql</h2>
-<p>In the work I have done on graphql authentication — a field guide, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
+<p>The important part is that this runs <em>once</em> per request, not once per field. If you're verifying a JWT or hitting a session store, do it here — resolvers should read <code>context.user</code>, not each independently re-parse the header.</p>
+<h2 id="resolver-level-checks">Checking authorization inside resolvers</h2>
+<p>Authentication tells you who the caller is; authorization decides what they're allowed to see or do, and that check belongs in the resolver for the field being protected, not at a gateway in front of the whole schema. A gateway can reject an entire request, but it has no visibility into which of the twenty fields in the query is the sensitive one. If <code>salary</code> and <code>jobTitle</code> live on the same <code>Employee</code> type, only a resolver sitting on <code>salary</code> can decide that field-by-field.</p>
+<div class="callout">
+  <strong>Authorize at the resolver, not the gateway</strong>
+  <p>A gateway sees a request; a resolver sees a field. Field-level permissions — "this user can read jobTitle but not salary" — can only be enforced where the field is actually resolved. Push coarse checks (is there a valid session at all) to the edge, and push fine-grained checks (can *this* user see *this* field on *this* object) into the resolver that owns it.</p>
+</div>
+<h2 id="schema-directives-for-auth">Directive-based authorization</h2>
+<p>Repeating an <code>if (!context.user) throw new Error(...)</code> at the top of every resolver gets tedious and easy to forget on a new field. A common pattern is a custom schema directive that wraps the check declaratively in the SDL, then transforms the schema at startup to inject the guard automatically.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">GRAPHQL · SCHEMA</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>directive @auth(requires: Role = USER) on FIELD_DEFINITION
+
+enum Role { USER ADMIN }
+
+type Employee {
+  id: ID!
+  jobTitle: String
+  salary: Float @auth(requires: ADMIN)
+}</code></pre>
+</div>
+<p>The directive itself does nothing by default — you implement its behavior in a schema transformer (e.g. with <code>@graphql-tools/utils</code>'s <code>mapSchema</code>) that wraps the resolver for any field carrying <code>@auth</code> and throws before the underlying resolver runs if <code>context.user</code> lacks the required role. This keeps the permission visible in the schema itself rather than buried in resolver logic someone has to go read.</p>
+<h2 id="nested-resolver-leaks">The nested-resolver leak</h2>
+<p>The most common real bug: a top-level query checks permissions correctly, but a nested field on the returned type doesn't re-check anything, because it was written assuming it would only ever be reached through the "safe" parent. GraphQL doesn't work that way — any type can be reached through multiple paths in the graph, and a resolver that trusts its caller inherits nothing from how it was reached.</p>
 <div class="callout callout-warn">
-  <strong>Versioning is mandatory</strong>
-  <p>The first version of the API will have the wrong field names. The second version will have the right ones. Plan for it.</p>
+  <strong>Every resolver is a potential entry point</strong>
+  <p>If <code>Order.customer</code> resolves to a <code>User</code>, and <code>User.email</code> has no guard because "you'd only see a user through an order you own," that assumption breaks the moment <code>User</code> is also reachable from <code>adminSearchUsers(query: String)</code>. Put the check on the field that exposes the sensitive data, not on the query that you assumed was the only path to it.</p>
 </div>
-<h2 id="observability-tracing-authentication">Observability: tracing authentication</h2>
-<p>When the work moves from design to production, the questions change. The graphql is not the question; the failure mode of the authentication is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// OpenAPI spec
-paths:
-  /graphqls/{id}:
-    get:
-      operationId: getGraphql
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }</code></pre>
-</div>
-<h2 id="sdk-generation-for-graphql">SDK generation for graphql</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
-<div class="callout">
-  <strong>Idempotency is the contract</strong>
-  <p>A retry is not an error condition; it is a normal operation. The API that is not idempotent cannot be retried safely.</p>
-</div>
-<h2 id="what-graphql-authentication-a-field-guide-gives-you">What GraphQL Authentication — A Field Guide gives you</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>type GraphqlResponse = {
-    id: string;
-    authentication: string;
-    createdAt: Date;
-};</code></pre>
-</div>
-<h2 id="the-api-design">The API design</h2>
-<p>The performance of authentication in api is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Rate limiting is a contract</strong>
-  <p>A rate limit that is not enforced is a suggestion. A rate limit that is enforced is a contract. The contract is what the client can rely on.</p>
-</div>
-<h2 id="implementation-code-examples">Implementation: code examples</h2>
-<p>Production authentication looks different from development authentication. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>// Express handler
-app.get('/api/graphqls/:id', async (req, res) =&gt; {
-    const id = req.params.id;
-    const item = await graphqlService.findById(id);
-    if (!item) return res.status(404).json({ error: 'Not found' });
-    res.json(item);
-});</code></pre>
-</div>
-<table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring authentication first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add graphql on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with authentication when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
-</table>
+<h2 id="subscription-auth">Subscriptions authenticate differently</h2>
+<p>Queries and mutations ride ordinary HTTP requests, so the context-per-request pattern above just works. Subscriptions over WebSocket are a different transport with a different lifecycle: the connection is established once and then stays open for many events, so there's no per-message <code>Authorization</code> header to read. Instead, the client sends credentials in the connection params during the WebSocket handshake (<code>connectionParams</code> in <code>graphql-ws</code>), and the server validates them in an <code>onConnect</code> callback, building a context that's then reused for every subscription event pushed down that socket. Treat this as a separate auth path to test — it's easy to lock down HTTP auth thoroughly and forget the WebSocket handshake accepts anything.</p>
 <h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on graphql authentication — a field guide. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+<p>Auth in GraphQL is ordinary auth, just relocated: verify identity once in the context function, then push authorization decisions down to the resolvers and directives that actually own the sensitive fields. The failure mode worth watching for isn't the top-level query — it's the nested type reachable through a second, less-guarded path you didn't think about when you wrote the first resolver.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI Specification</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener noreferrer">RFC 9110 HTTP Semantics</a></li><li><a href="https://owasp.org/www-project-api-security/" target="_blank" rel="noopener noreferrer">OWASP API Security</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/graphql-error-handling/">GraphQL Error Handling — A Field Guide</a></li>
@@ -181,7 +152,6 @@ app.get('/api/graphqls/:id', async (req, res) =&gt; {
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>

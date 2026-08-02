@@ -12,7 +12,6 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="Expense Approval Automation">
 <meta property="og:description" content="Expense Approval Automation is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta property="og:image" content="https://kihiujohn.github.io/assets/og/expense-automation.svg">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/expense-automation/">
 <meta property="article:author" content="John Kihiu">
 <meta property="article:section" content="vertical-saas">
@@ -29,12 +28,12 @@
 <link rel="icon" type="image/svg+xml" href="/logos/favicon-portfolio.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#FAFAF9;--bg-alt:#F5F5F4;--surface:#fff;--border:#E7E5E4;--text:#0C0A09;--text-2:#44403C;--muted:#78716C;--accent:#059669;--accent-light:#ECFDF5;--radius:6px;--max:min(60rem,100% - 2rem);--gutter:clamp(1rem,3vw,1.75rem)}
   html{font-size:clamp(14px,0.4167vw + 10.83px,17px);scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7}
+  body{background:var(--bg);color:var(--text);font-family:'Geist',system-ui,sans-serif;line-height:1.7}
   h1,h2,h3{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;line-height:1.25}
   a{color:inherit;text-decoration:none}
   .container{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
@@ -66,7 +65,7 @@
   .code-block{position:relative;background:#1E293B;border:1px solid #334155;border-radius:6px;margin:1.5rem 0;overflow:hidden}
   .code-block .code-header{display:flex;align-items:center;justify-content:space-between;padding:0.55rem 0.95rem;background:#0F172A;border-bottom:1px solid #334155}
   .code-block .code-lang{font-family:'JetBrains Mono',monospace;font-size:0.74rem;font-weight:600;color:#94A3B8;letter-spacing:0.03em}
-  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif}
+  .code-block .copy-btn{background:#334155;color:#E2E8F0;border:1px solid #475569;padding:0.32rem 0.75rem;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Geist',sans-serif}
   .code-block .copy-btn:hover{background:#475569;color:#fff}
   .code-block .copy-btn.copied{background:#059669;border-color:#047857;color:#fff}
   .code-block pre{margin:0;padding:1rem 1.1rem;overflow-x:auto}
@@ -93,79 +92,61 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Vertical SaaS is a discipline, not a vertical. this is one of the parts of the discipline. The pattern is to push the platform to do the boring work and the vertical to do the differentiated work. This article is the discipline.</p>
-<h2 id="soc-2-and-iso-27001-for-approval">SOC 2 and ISO 27001 for approval</h2>
-<p>SOC 2 and ISO 27001 for approval is one of those topics where the pattern is clear but the failure modes are not. The first version is the boring one; the second version is the measured one; the third version is the production one.</p>
+    <p>Expense management sounds like a small problem — an employee spends money, submits a receipt, someone approves it — until you're running it at the volume of a few hundred employees and every step in that chain is a place work piles up. Automation here isn't about replacing judgment on borderline claims; it's about removing the manual data entry, mismatched receipts, and approval bottlenecks that make the process slow for everyone and genuinely tedious for finance.</p>
+
+<h2 id="receipt-capture-and-ocr">Receipt capture and OCR</h2>
+<p>The entry point for most modern expense tools is a photo of a receipt, and OCR does the heavy lifting of turning that image into structured data — vendor name, date, total, tax line, sometimes line-item detail on itemized receipts. The accuracy on a clean, printed receipt from a known vendor is very good; it degrades fast on faded thermal paper, handwritten receipts, or non-standard layouts, which is why every serious implementation treats OCR output as a suggestion the employee confirms rather than a value posted straight to the ledger. Email-forwarded receipts (airline confirmations, SaaS invoices) skip OCR entirely since the data is already structured in the email body or an attached PDF.</p>
+<p>The real automation win isn't the OCR itself — it's that a confirmed receipt auto-populates category, merchant, and amount, so the employee's part of the job drops from filling out a form to reviewing three pre-filled fields.</p>
+
+<h2 id="policy-enforcement-as-rules-not-review">Policy enforcement as rules, not review</h2>
+<p>Every expense policy has the same shape: spending limits by category, receipt requirements above a threshold, disallowed categories (alcohol, first-class travel), and per-diem caps for travel. Encoding these as machine-checkable rules at submission time — not at approval time — is what turns a policy document into something that actually gets enforced consistently. A rule engine flags a violation the moment the employee submits, with a specific reason, rather than leaving the approver to remember the policy and reject it two days later.</p>
 <div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ExpenseExt : PXCacheExtension<Approval>
+  <div class="code-header"><span class="code-lang">JSON · POLICY RULE DEFINITION</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "ruleId": "meals-daily-cap",
+  "category": "Meals & Entertainment",
+  "condition": "amount > dailyCap",
+  "dailyCap": 75,
+  "currency": "USD",
+  "onViolation": "flag_for_manager_review",
+  "requireReceiptAbove": 25
+},
 {
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
+  "ruleId": "disallowed-category",
+  "category": "Alcohol",
+  "condition": "always",
+  "onViolation": "block_submission",
+  "message": "Alcohol is not a reimbursable expense per policy section 4.2"
 }</code></pre>
 </div>
-<h2 id="vertical-saas-metrics-that-matter">Vertical SaaS metrics that matter</h2>
-<p>In the work I have done on expense approval automation, this is where the time is spent. Not on the implementation, but on the parts that fail in production at 3 AM.</p>
-<div class="callout callout-warn">
-  <strong>The platform is the moat</strong>
-  <p>A vertical SaaS on a horizontal platform inherits the platform's compliance, infrastructure, and updates. The vertical layer adds the differentiation. The right pattern is to lean on the platform.</p>
-</div>
-<h2 id="what-expense-approval-automation-is-for">What Expense Approval Automation is for</h2>
-<p>When the work moves from design to production, the questions change. The expense is not the question; the failure mode of the approval is.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">YAML · CONFIGURATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Feature flag check
-SELECT enabled
-FROM feature_flags
-WHERE feature_key = 'expense'
-  AND tenant_id = @TenantId;</code></pre>
-</div>
-<h2 id="the-vertical-saas-model-on-a-horizontal-platform">The vertical SaaS model on a horizontal platform</h2>
-<p>The right pattern is rarely the clever one. The right pattern is the boring one, instrumented, with a runbook. This section is about making the boring one work.</p>
+<p>The distinction between <code>flag_for_manager_review</code> and <code>block_submission</code> matters operationally: hard blocks are for policy violations with no legitimate exception (alcohol, personal items), while soft flags route to a human for cases that are sometimes justified (a meal over the daily cap during client entertainment) but shouldn't sail through unnoticed.</p>
+
+<h2 id="approval-routing">Approval routing</h2>
+<p>Static approval chains — always route to the direct manager — break down the moment an expense crosses a dollar threshold that needs a second approver, or the manager is out and the report sits untouched for a week. Dynamic routing based on amount, category, and cost center handles both: small, policy-compliant expenses can auto-approve or go to a single approver, while anything above a threshold or flagged by a policy rule routes to finance or a department head, with an automatic escalation or delegate if the primary approver hasn't acted within a set number of days.</p>
 <div class="callout">
-  <strong>Pricing is the testing ground</strong>
-  <p>The first 5 customers of a vertical SaaS will tell you what to charge. The right pattern is to test pricing, not to set it.</p>
+  <strong>Auto-approval isn't a compliance risk if the rules did the checking</strong>
+  <p>Teams are often uneasy about auto-approving anything. But an expense that's under the category cap, has a matching receipt, and violates no policy rule doesn't need a human to look at it — the rule engine already did the check a human approver would do by eye. Reserve human approval for what the rules can't decide: judgment calls, exceptions, and anything flagged.</p>
 </div>
-<h2 id="multi-tenant-data-isolation">Multi-tenant data isolation</h2>
-<p>I have shipped this pattern a few times. The first time it took a week. The second time it took a day. The third time it took an hour. The pattern is to start with the boring version and replace as needed.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">PYTHON · SCRIPT</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>-- Tenant isolation
-SELECT *
-FROM expense
-WHERE tenant_id = @TenantId
-  AND vertical_code = @VerticalCode;</code></pre>
-</div>
-<h2 id="feature-flags-and-configuration">Feature flags and configuration</h2>
-<p>The performance of approval in vertical saas is rarely the bottleneck. The bottleneck is the missing index, the unindexed join, the report that fetches every row and filters in the layout.</p>
-<div class="callout">
-  <strong>Documentation is the product</strong>
-  <p>A vertical SaaS that does not have docs is a vertical SaaS that has a churn problem. The right pattern is docs as a first-class deliverable.</p>
-</div>
-<h2 id="pricing-and-packaging">Pricing and packaging</h2>
-<p>Production approval looks different from development approval. The difference is rarely the algorithm; the difference is the failure handling.</p>
-<div class="code-block">
-  <div class="code-header"><span class="code-lang">C# · CANONICAL IMPLEMENTATION</span><button class="copy-btn" type="button">Copy</button></div>
-<pre><code>[PXTable(IsOptional = true)]
-public class ExpenseExt : PXCacheExtension<Approval>
-{
-    [PXDBString(60)]
-    [PXUIField(DisplayName = "Vertical Code")]
-    public virtual string UsrVerticalCode { get; set; }
-}</code></pre>
-</div>
+
+<h2 id="corporate-card-reconciliation">Corporate card reconciliation</h2>
+<p>Reconciliation is where expense automation earns its keep on the finance side. Corporate card feeds (via the card issuer's transaction API) bring in every charge automatically; the automation's job is matching each card transaction to a submitted expense report line by amount, date proximity, and merchant name similarity. Unmatched transactions — a charge with no corresponding expense report — are the ones that need chasing, and surfacing them automatically as a "missing receipt" nudge to the cardholder is far more effective than a monthly finance email asking everyone to check their statements.</p>
+<p>Fuzzy merchant matching matters more than it sounds: the name on a card statement ("SQ *JOES COFFEE") rarely matches what OCR extracts from the receipt ("Joe's Coffee Shop"), so exact-string matching misses most legitimate pairs. A similarity threshold combined with amount-and-date matching catches the vast majority without manual review.</p>
+
+<h2 id="integration-with-accounting-and-erp">Integration with accounting and ERP systems</h2>
+<p>An approved expense report is only useful once it lands as the right GL entries in the accounting system — correct expense account, cost center, and tax treatment per line item, not a lump sum that accounting has to manually recode. This is where category-to-GL-account mapping needs to be maintained deliberately: every expense category in the tool should map to a specific chart-of-accounts code, so posting is a mechanical translation rather than a monthly cleanup project. Multi-entity or multi-currency organizations add a layer here — the expense needs to post to the employee's home entity at the correct exchange rate as of the transaction date, not the reimbursement date.</p>
+
 <table>
-  <tr><th>Pattern</th><th>When to use it</th></tr>
-  <tr><td>Boring approval first</td><td>Simple, observable, easy to roll back. Use this for the first version of anything.</td></tr>
-  <tr><td>Add expense on top</td><td>Once the boring version is in production, layer the framework on top. Do not skip the boring version.</td></tr>
-  <tr><td>Replace with approval when measured</td><td>When the data tells you the boring version is too slow, replace. Measure before and after.</td></tr>
-  <tr><td>Document the trade-off</td><td>Every pattern has a trade-off. Document it. The next person will read the doc.</td></tr>
+  <tr><th>Stage</th><th>Automation lever</th><th>What still needs a human</th></tr>
+  <tr><td>Capture</td><td>OCR extraction from receipt photo/email</td><td>Confirming extracted fields</td></tr>
+  <tr><td>Policy check</td><td>Rule engine at submission time</td><td>Judgment calls on flagged exceptions</td></tr>
+  <tr><td>Approval</td><td>Dynamic routing by amount/category</td><td>Above-threshold and flagged reports</td></tr>
+  <tr><td>Reconciliation</td><td>Card feed matching to expense lines</td><td>Unmatched transactions</td></tr>
+  <tr><td>Posting</td><td>Category-to-GL mapping</td><td>New categories, entity/currency edge cases</td></tr>
 </table>
-<h2 id="wrapping-up">Wrapping up</h2>
-<p>That is the working approach I use on expense approval automation. The same pattern shows up whether you are in Nairobi, Johannesburg, Kigali, Lusaka or Harare — and it is the kind of thing that keeps work moving when an upgrade lands at 6 PM on a Friday. If you are stuck on something specific, <a href="/#contact">reach out</a> or keep reading through the rest of the <a href="/blog/">Acumatica blog</a>.</p>
-    <div class="related-articles">
+
+<p>The pattern across all five stages is the same: automate the mechanical matching and checking, and route only genuine exceptions to a person. Get the policy rules and GL mapping right once, and the system keeps most expense reports moving without anyone in finance touching them.</p>
+<div class="source-note"><strong>Sources consulted</strong><p>This article separates documented reference material from implementation judgment. Verify behavior against the current version, enabled modules, tenant configuration, and the customer's security or regulatory requirements.</p><ul><li><a href="https://www.nist.gov/cyberframework" target="_blank" rel="noopener noreferrer">NIST Cybersecurity Framework</a></li><li><a href="https://developer.mozilla.org/en-US/" target="_blank" rel="noopener noreferrer">MDN Web Docs</a></li><li><a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series</a></li></ul></div>
+<div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/expense-report-automation/">Expense Report Automation</a></li>
@@ -176,7 +157,6 @@ public class ExpenseExt : PXCacheExtension<Approval>
       </ul>
     </div>
     <div style="margin-top:3rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;gap:1.25rem;align-items:center">
-      <img src="/profile.jpg" alt="John Kihiu" style="width:4rem;height:4rem;border-radius:50%;object-fit:cover;border:2px solid var(--accent-light);flex-shrink:0">
       <div>
         <div style="font-weight:700;color:var(--text)">John Kihiu</div>
         <div style="font-size:0.85rem;color:var(--accent);font-weight:600;margin-bottom:0.35rem">Acumatica ERP Developer · Laravel Engineer</div>
