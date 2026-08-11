@@ -33,15 +33,16 @@
    .code-block .copy-btn, .code-block .code-lang { font-family: 'Geist', system-ui, sans-serif; }
 
    /* ── POST PAGES — warm paper, muted-emerald editorial system ── */
-   body[data-page="post"] { --post-accent: #3F7F63; --post-accent-soft: #D3E2D9; --post-tint: #EDF2EF; --post-measure: 42rem; background: #F5F3EF; color: #1C1917; }
+   body[data-page="post"] { --post-accent: #3F7F63; --post-accent-soft: #D3E2D9; --post-tint: #EDF2EF; --post-measure: 100%; background: #F5F3EF; color: #1C1917; }
    body[data-page="post"] .post-head { position: relative; overflow: hidden; padding-top: clamp(3.5rem, 8vw, 7rem); background: linear-gradient(180deg, #FAF9F6 0%, #F5F3EF 100%); border-bottom: 1px solid var(--chrome-border); }
    body[data-page="post"] .post-head::before { content: ''; position: absolute; top: -18rem; right: -8rem; width: 34rem; height: 34rem; pointer-events: none; background: radial-gradient(circle, rgba(63,127,99,.07), rgba(63,127,99,0) 68%); }
-   body[data-page="post"] .post-head .container, body[data-page="post"] .article .container { position: relative; z-index: 1; max-width: 60rem; }
+   body[data-page="post"] .post-head .container, body[data-page="post"] .article .container { position: relative; z-index: 1; max-width: var(--chrome-max); }
    body[data-page="post"] .post-head h1 { max-width: 18ch; font-size: clamp(2.4rem, 6vw, 4.8rem); line-height: 1.02; letter-spacing: -.045em; }
    body[data-page="post"] .post-head .tag { background: var(--post-tint); color: var(--post-accent); border: 1px solid var(--post-accent-soft); border-radius: 100px; }
    body[data-page="post"] .post-head .meta { max-width: var(--post-measure); border-top-color: var(--chrome-border); }
    body[data-page="post"] main.article { padding-top: clamp(3.5rem, 8vw, 7rem); font-size: 1.02rem; color: #2A2622; }
-   body[data-page="post"] main.article > .container { max-width: 60rem; }
+   body[data-page="post"] main.article > .container { max-width: var(--chrome-max); }
+   body[data-page="post"] main.article > .container > p { text-align: justify; hyphens: auto; }
    body[data-page="post"] main.article > .container > p,
    body[data-page="post"] main.article > .container > h2,
    body[data-page="post"] main.article > .container > h3,
