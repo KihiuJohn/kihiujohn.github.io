@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vite 6 New Features — A Field Guide | John Kihiu</title>
-<meta name="description" content="Vite 6 New Features — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica vite, Acumatica build, Acumatica tooling, John Kihiu">
+<meta name="description" content="What Vite 6 brings and why it matters: the new Environment API for unified client/server/edge builds, continued performance work, and what the release means for everyday app developers.">
+<meta name="keywords" content="Vite 6, Environment API, build tooling, frontend, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vite-6-features/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vite 6 New Features — A Field Guide">
-<meta property="og:description" content="Vite 6 New Features — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="What Vite 6 brings and why it matters: the new Environment API for unified client/server/edge builds, continued performance work, and what the release means for everyday app developers.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vite-6-features.svg">
 <meta property="og:image:alt" content="Vite 6 New Features — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vite-6-features/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vite-6-features.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vite 6 New Features — A Field Guide","description":"Vite 6 New Features — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/vite-6-features.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vite-6-features/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vite 6 New Features — A Field Guide","description":"What Vite 6 brings and why it matters: the new Environment API for unified client/server/edge builds, continued performance work, and what the release means for everyday app developers.","image":"https://kihiujohn.github.io/assets/og/vite-6-features.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vite-6-features/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vite 6 New Features — A Field Guide","item":"https://kihiujohn.github.io/blog/vite-6-features/"}]}
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vite 6 New Features — A Field Guide</span></nav>
-    <span class="tag">Acumatica · Vite</span>
+    <span class="tag">Frontend · Tooling</span>
     <h1>Vite 6 New Features — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vite 6 New Features — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vite 6's headline is the Environment API — plumbing most app developers won't touch directly, but which reshapes what frameworks built on Vite can do, especially for SSR and edge.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-16">Jun 16, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Vite 6 New Features — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Vite has become the default build tool across the frontend ecosystem, so each major release matters beyond its own users — frameworks like Nuxt, SvelteKit, and Astro build on it. Vite 6's centrepiece is the Environment API, a significant architectural addition. It is worth understanding what it changes, and being honest that for most everyday app developers the day-to-day impact is indirect: it is plumbing that empowers the frameworks you use.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="env">The Environment API</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The headline feature is a new Environment API that gives Vite a unified way to handle multiple build targets — client, server (SSR), and edge runtimes — within one coherent model. Previously, handling these different environments, especially server-side rendering and edge deployment, involved more workarounds and less consistency. The Environment API makes multi-environment builds a first-class concept, which is exactly what modern full-stack and edge-deployed frameworks need to build cleanly on top of Vite.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="who">Who it's really for</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Be clear-eyed about the audience: the Environment API is primarily for framework and tool authors, not application developers. If you build apps with Nuxt or SvelteKit, you will benefit from what those frameworks do <em>with</em> the API — better SSR and edge support, more consistent behaviour — without calling it yourself. It is infrastructure that raises the ceiling for the tools built on Vite, and its value reaches you through them.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="everyday">What it means day to day</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<ul><li>Faster, more capable frameworks — the tools you use gain better SSR and edge capabilities built on the new foundation.</li><li>Continued performance — Vite keeps improving dev-server and build speed, the thing you feel most directly.</li><li>A smooth upgrade — for typical app projects, moving to Vite 6 is usually straightforward, with the big changes being under-the-hood architecture rather than breaking your config.</li></ul>
 
-    <div class="related-articles">
+<div class="callout"><strong>Judge a Vite release by what your framework does with it</strong><p>As an app developer, the practical question about any Vite version is not which internal APIs it added but whether your framework's next version uses them to improve SSR, edge support, or speed. The Environment API's payoff arrives through the frameworks on top of Vite — so watch their release notes as much as Vite's to see when the benefit actually reaches you.</p></div>
+
+<p>Vite 6's Environment API is a meaningful architectural step — unified client, server, and edge builds — aimed mainly at the frameworks built on Vite rather than at app developers directly. For most projects the upgrade is smooth and the benefit arrives indirectly, as the tools you use gain better SSR and edge capabilities on the new foundation, alongside Vite's continued speed improvements that you feel every day.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/turbopack-2026/">Turbopack 2026 — A Field Guide</a></li>

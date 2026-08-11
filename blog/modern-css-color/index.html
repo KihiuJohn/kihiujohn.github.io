@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Modern CSS Color Functions — A Field Guide | John Kihiu</title>
-<meta name="description" content="Modern CSS Color Functions — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.">
-<meta name="keywords" content="Acumatica css, Acumatica color, Acumatica styling, John Kihiu">
+<meta name="description" content="Modern CSS color functions in practice: oklch and oklab for perceptually uniform color, color-mix() for blending, relative color syntax, and why these beat hex and hsl for design systems.">
+<meta name="keywords" content="modern CSS color, oklch, color-mix, relative color, design system, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/modern-css-color/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Modern CSS Color Functions — A Field Guide">
-<meta property="og:description" content="Modern CSS Color Functions — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.">
+<meta property="og:description" content="Modern CSS color functions in practice: oklch and oklab for perceptually uniform color, color-mix() for blending, relative color syntax, and why these beat hex and hsl for design systems.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/modern-css-color.svg">
 <meta property="og:image:alt" content="Modern CSS Color Functions — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/modern-css-color/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/modern-css-color.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Modern CSS Color Functions — A Field Guide","description":"Modern CSS Color Functions — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.","image":"https://kihiujohn.github.io/assets/og/modern-css-color.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/modern-css-color/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Modern CSS Color Functions — A Field Guide","description":"Modern CSS color functions in practice: oklch and oklab for perceptually uniform color, color-mix() for blending, relative color syntax, and why these beat hex and hsl for design systems.","image":"https://kihiujohn.github.io/assets/og/modern-css-color.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/modern-css-color/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Modern CSS Color Functions — A Field Guide","item":"https://kihiujohn.github.io/blog/modern-css-color/"}]}
@@ -87,36 +87,43 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Modern CSS Color Functions — A Field Guide</span></nav>
-    <span class="tag">Acumatica · Css</span>
+    <span class="tag">Frontend · CSS</span>
     <h1>Modern CSS Color Functions — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Modern CSS Color Functions — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">CSS color has quietly leapt forward. oklch, color-mix(), and relative color syntax solve real problems that hex and hsl never could — especially for building consistent design systems.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-16">Jun 16, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Modern CSS Color Functions — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>For years CSS color meant hex codes and, if you were organised, hsl. Modern CSS added color functions that are not just new syntax but genuinely better tools — perceptually uniform color spaces, blending, and deriving colors from other colors. For anyone building a design system, these solve problems the old formats made unnecessarily hard, and they are well-supported enough to use now.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="oklch">oklch: perceptually uniform color</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The standout is <code>oklch()</code> (and its cousin <code>oklab</code>), a perceptually uniform color space. Its three values — lightness, chroma, hue — behave the way your eyes expect: change the lightness and the perceived brightness changes proportionally, unlike hsl where the same lightness value looks wildly different across hues. This matters enormously for design systems, because you can generate a consistent set of shades, or a palette across hues at matching brightness, and have them actually look consistent.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">CSS · a perceptually consistent scale with oklch</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>--brand-h: 152;
+--brand-c: 0.09;
+--brand-500: oklch(0.62 var(--brand-c) var(--brand-h));
+--brand-400: oklch(0.70 var(--brand-c) var(--brand-h)); /* lighter, same feel */
+--brand-600: oklch(0.54 var(--brand-c) var(--brand-h)); /* darker,  same feel */</code></pre>
+</div>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="mix">color-mix() for blending</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p><code>color-mix()</code> blends two colors in a chosen color space directly in CSS — no preprocessor, no manual calculation. This is how you create tints and shades, hover states, and translucent variants from a base color without hardcoding each one. Mixing a brand color with white or black gives you a scale; mixing with transparent gives you alpha variants. It turns color relationships into something the browser computes from your source colors.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="relative">Relative color syntax</h2>
 
-    <div class="related-articles">
+<p>Relative color syntax lets you derive a new color from an existing one by taking it apart and modifying channels — take this color and increase its lightness, or reduce its chroma. Combined with oklch, this is powerful for design systems: define one brand color and derive the entire family from it in CSS, so changing the source color updates everything downstream. The relationships live in the code rather than in a pile of disconnected hex values.</p>
+
+<div class="callout"><strong>These replace the preprocessor color toolkit</strong><p>Sass and Less became popular partly for color functions — darken, lighten, mix. Modern CSS now does all of that natively, and better, because oklch makes the results perceptually consistent in a way the old preprocessor functions were not. For color, you increasingly do not need a preprocessor at all; the platform does it, live, in the browser.</p></div>
+
+<p>Modern CSS color — oklch for perceptually uniform palettes, color-mix() for blending, and relative color syntax for deriving colors from a source — replaces the old hex-and-preprocessor approach with tools that produce genuinely consistent results. For design systems especially, defining a palette in oklch and deriving its variations natively means your colors look as coherent as they are meant to, with the relationships expressed in code the browser understands.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/css-2026-features/">CSS 2026 New Features — A Field Guide</a></li>

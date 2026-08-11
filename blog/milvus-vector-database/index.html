@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Milvus Vector Database — A Field Guide | John Kihiu</title>
-<meta name="description" content="Milvus Vector Database — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta name="keywords" content="Acumatica milvus, Acumatica vector, Acumatica embeddings, John Kihiu">
+<meta name="description" content="Milvus as a vector database: what a purpose-built vector store gives you over bolting vectors onto a general database, how indexing trades recall for speed, and when its scale is justified.">
+<meta name="keywords" content="Milvus, vector database, embeddings, ANN, similarity search, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/milvus-vector-database/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Milvus Vector Database — A Field Guide">
-<meta property="og:description" content="Milvus Vector Database — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta property="og:description" content="Milvus as a vector database: what a purpose-built vector store gives you over bolting vectors onto a general database, how indexing trades recall for speed, and when its scale is justified.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/milvus-vector-database.svg">
 <meta property="og:image:alt" content="Milvus Vector Database — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/milvus-vector-database/">
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Milvus Vector Database — A Field Guide</span></nav>
-    <span class="tag">Data / ML · Milvus</span>
+    <span class="tag">Data / ML · Vector DB</span>
     <h1>Milvus Vector Database — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Milvus Vector Database — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Milvus is a purpose-built vector database for similarity search at scale. Its value — and its complexity — is in the indexing that makes searching billions of embeddings fast.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Milvus Vector Database — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Milvus is an open-source vector database built for storing and searching embeddings — the high-dimensional vectors that represent text, images, and other data by meaning. As AI applications lean on semantic search and retrieval-augmented generation, purpose-built vector stores like Milvus have become core infrastructure. Its whole value is doing similarity search over huge collections of vectors fast, which is exactly what general-purpose databases struggle with.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="why">Why a dedicated vector database</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>You can bolt vector search onto a general database with an extension, and for modest scale that is often enough. A dedicated vector database like Milvus earns its place when you have <em>many</em> vectors — millions to billions — and need fast similarity search over them. It is engineered specifically for the approximate-nearest-neighbour problem at scale, with the indexing, sharding, and scaling to match. Below that scale, the dedicated system may be more infrastructure than the problem warrants.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="index">Indexing trades recall for speed</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The heart of a vector database is its index. Searching billions of vectors for the nearest neighbours exactly is far too slow, so vector databases use approximate-nearest-neighbour (ANN) indexes that trade a little accuracy for enormous speed. Milvus supports several index types, each a different point on the trade-off between search speed, memory use, and recall (the fraction of true nearest neighbours found). Choosing and tuning the index for your accuracy and latency needs is the central engineering task — and understanding that it is an <em>approximate</em> search is essential to using it correctly.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="fit">When its scale is justified</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Milvus is built for scale — distributed, horizontally scalable, handling very large vector collections. That capability is the reason to choose it and also the reason not to, if you do not need it. For a small collection of vectors, a lighter embedded vector store or a general database extension is simpler to run. Reach for Milvus when your vector count and query load genuinely require a distributed, purpose-built system; its scale is a benefit only once you are operating at scale.</p>
 
-    <div class="related-articles">
+<div class="callout"><strong>Vector search is approximate — design for it</strong><p>Unlike an exact database lookup, ANN vector search returns the probable nearest neighbours, not guaranteed ones, and the index's recall setting controls how complete the results are. Tune recall against latency for your use case, and design the application knowing a relevant result can occasionally be missed. Treating approximate search as if it were exact leads to subtle quality bugs that are hard to trace back to the index.</p></div>
+
+<p>Milvus is a purpose-built vector database for fast approximate similarity search over large embedding collections, justified when your scale — millions of vectors and up — outgrows what a general database extension handles. Its power lives in ANN indexing that trades a little recall for large speed gains, which you tune to your latency and accuracy needs. Choose it when the scale is real, and design for approximate results rather than exact ones.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-embeddings-strategy/">Embeddings Strategy for ERP Knowledge Bases</a></li>

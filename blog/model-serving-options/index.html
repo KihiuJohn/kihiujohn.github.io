@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Model Serving Options — A Field Guide | John Kihiu</title>
-<meta name="description" content="Model Serving Options — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
-<meta name="keywords" content="Acumatica model, Acumatica serving, Acumatica ml, John Kihiu">
+<meta name="description" content="Model serving options compared: real-time online inference, batch inference, and streaming, plus the build-versus-managed decision — matched to latency, throughput, and cost needs.">
+<meta name="keywords" content="model serving, online inference, batch inference, deployment, MLOps, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/model-serving-options/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Model Serving Options — A Field Guide">
-<meta property="og:description" content="Model Serving Options — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta property="og:description" content="Model serving options compared: real-time online inference, batch inference, and streaming, plus the build-versus-managed decision — matched to latency, throughput, and cost needs.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/model-serving-options.svg">
 <meta property="og:image:alt" content="Model Serving Options — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/model-serving-options/">
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Model Serving Options — A Field Guide</span></nav>
-    <span class="tag">Acumatica · Model</span>
+    <span class="tag">Data / ML · MLOps</span>
     <h1>Model Serving Options — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Model Serving Options — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Serving a model is choosing how predictions get made and delivered. The right option depends entirely on whether you need an answer in milliseconds or a million answers overnight.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-24">Jun 24, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Model Serving Options — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Training a model is only useful once it makes predictions in production, and there are several ways to serve it — each suited to a different need. The mistake is defaulting to a real-time API for everything, including workloads that would be far cheaper and simpler as a batch job. Choosing the serving pattern starts with one question: when and how fast do you need the predictions?</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a clear system boundary, verifiable inputs and outputs, failure handling, and maintainable ownership. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="patterns">The serving patterns</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<table><thead><tr><th>Pattern</th><th>Predictions</th><th>Fits</th></tr></thead><tbody><tr><td>Online / real-time</td><td>On demand, low latency, one at a time</td><td>Interactive features — recommendations, fraud checks at request time</td></tr><tr><td>Batch</td><td>Many at once, on a schedule</td><td>Predictions that aren't needed instantly — nightly scoring, reports</td></tr><tr><td>Streaming</td><td>Continuously on an event stream</td><td>Real-time event processing — live anomaly detection</td></tr></tbody></table>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<p>Online serving exposes the model behind an API for immediate, per-request predictions — necessary when a user is waiting. Batch runs the model over a large dataset on a schedule, which is dramatically cheaper and simpler when the predictions are not needed the instant the data arrives. A huge amount of ML in production is batch, and mistakenly building it as a real-time service adds cost and operational burden for latency nobody needed.</p>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="online">Online serving considerations</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>If you do need real-time, online serving brings the concerns of any low-latency service: latency targets, autoscaling to handle load, and keeping the service available. The model runs behind an endpoint that must respond within your latency budget and scale with traffic. This is the most operationally demanding option, which is exactly why you should confirm you truly need per-request latency before choosing it over batch.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="build">Build versus managed</h2>
 
-    <div class="related-articles">
+<p>Whichever pattern, you decide whether to build the serving infrastructure yourself or use a managed serving platform. Managed platforms handle scaling, deployment, and monitoring for you, trading some control and cost for far less operational work — often the right call unless you have specific requirements or scale that justify building. Rolling your own serving stack is real, ongoing infrastructure work; be sure the need justifies it before taking it on.</p>
+
+<div class="callout"><strong>Batch first, real-time only when required</strong><p>The default should be the simplest pattern that meets the need, and that is usually batch. Real-time online serving is more expensive and more operationally demanding, so reserve it for predictions genuinely needed at request time. A great deal of production ML that gets built as a real-time API would have been cheaper, simpler, and just as effective as a scheduled batch job.</p></div>
+
+<p>Model serving options — online for low-latency per-request predictions, batch for scheduled bulk scoring, streaming for continuous event processing — should be matched to whether predictions are needed instantly or can wait, with a build-versus-managed decision layered on top. Default to batch and managed for simplicity and cost, and step up to real-time, self-built serving only when the latency and control requirements genuinely demand it.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/model-registry-patterns/">Model Registry Patterns — A Field Guide</a></li>

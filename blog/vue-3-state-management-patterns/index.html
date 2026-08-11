@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vue 3 State Management Patterns | John Kihiu</title>
-<meta name="description" content="Vue 3 State Management Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta name="keywords" content="Acumatica vue, Acumatica state, Acumatica patterns, John Kihiu">
+<meta name="description" content="State management patterns in Vue 3 beyond reaching for a store: local state, props and events, provide/inject, composables for shared logic, and Pinia for true global state.">
+<meta name="keywords" content="Vue 3 state management, provide inject, composables, Pinia, patterns, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vue-3-state-management-patterns/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vue 3 State Management Patterns">
-<meta property="og:description" content="Vue 3 State Management Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta property="og:description" content="State management patterns in Vue 3 beyond reaching for a store: local state, props and events, provide/inject, composables for shared logic, and Pinia for true global state.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vue-3-state-management-patterns.svg">
 <meta property="og:image:alt" content="Vue 3 State Management Patterns — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vue-3-state-management-patterns/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vue-3-state-management-patterns.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 State Management Patterns","description":"Vue 3 State Management Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/vue-3-state-management-patterns.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-state-management-patterns/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 State Management Patterns","description":"State management patterns in Vue 3 beyond reaching for a store: local state, props and events, provide/inject, composables for shared logic, and Pinia for true global state.","image":"https://kihiujohn.github.io/assets/og/vue-3-state-management-patterns.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-state-management-patterns/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vue 3 State Management Patterns","item":"https://kihiujohn.github.io/blog/vue-3-state-management-patterns/"}]}
@@ -87,36 +87,40 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vue 3 State Management Patterns</span></nav>
-    <span class="tag">Modern Web · Vue</span>
+    <span class="tag">Vue · State</span>
     <h1>Vue 3 State Management Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 State Management Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 gives you a ladder of state options, and reaching straight for a global store skips most of it. Matching the pattern to the scope keeps an app maintainable.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Vue 3 State Management Patterns</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Vue 3 offers several ways to manage state, and the common mistake is jumping straight to a global store (Pinia) for everything. That over-centralises state and couples unrelated parts of the app. There is a ladder of options from most local to most global, and the skill is choosing the least-global one that fits the scope of the state in question.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="ladder">Match the pattern to the scope</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<table><thead><tr><th>Scope of state</th><th>Pattern</th></tr></thead><tbody><tr><td>One component</td><td>Local ref / reactive</td></tr><tr><td>Parent to child</td><td>Props down, events up</td></tr><tr><td>Deeply nested subtree</td><td>provide / inject</td></tr><tr><td>Reusable stateful logic</td><td>A composable</td></tr><tr><td>Truly global / cross-app</td><td>Pinia store</td></tr></tbody></table>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<p>Start at the top and only move down as the state's reach genuinely grows. Most state is local; a lot of the rest is parent-child. Only a small fraction is genuinely global, and that is what Pinia is for.</p>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="props">Props and events for parent-child</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>For state a parent shares with its children, props down and events up is the idiomatic Vue pattern and usually all you need. It keeps data flow explicit and traceable — you can see exactly where state lives and how it changes. Do not reach for a store just to avoid passing a prop through one level; the explicitness is a feature, not a burden.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="provide">provide/inject for deep trees</h2>
 
-    <div class="related-articles">
+<p>When passing props through many intermediate layers becomes tedious (prop drilling), <code>provide</code>/<code>inject</code> lets an ancestor supply state to any descendant without threading it through every level. It suits things like a theme, a form context, or configuration used deep in a subtree. It is more implicit than props, so use it where the depth genuinely warrants it, not as a casual shortcut.</p>
+
+<h2 id="composables">Composables for shared logic</h2>
+
+<p>Often what you want to share is not global <em>state</em> but reusable stateful <em>logic</em> — a composable is the answer. A <code>useFetch</code> or <code>usePagination</code> encapsulates the logic and each caller gets its own instance. For state shared across a few unrelated components without needing a full store, a composable holding module-level reactive state is a lighter option than Pinia.</p>
+
+<div class="callout"><strong>Global state is the last resort, not the default</strong><p>Every piece of state you put in a global store is state any part of the app can change, which is exactly what makes large apps hard to reason about. Keep state as local as its actual usage allows, climb the ladder only as reach demands, and reserve Pinia for state that is genuinely application-wide. Locality is what keeps an app maintainable.</p></div>
+
+<p>Vue 3 state management is a ladder — local state, props and events, provide/inject, composables, and finally Pinia — and maintainability comes from choosing the least-global pattern that fits. Resist defaulting to a store; most state belongs closer to where it is used. Match the tool to the scope and the app stays easy to reason about as it grows.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/vue-3-pinia/">Vue 3 Pinia State Management</a></li>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vue 3 + TypeScript — A Field Guide | John Kihiu</title>
-<meta name="description" content="Vue 3 + TypeScript — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica vue, Acumatica typescript, Acumatica types, John Kihiu">
+<meta name="description" content="Using TypeScript with Vue 3: typed props and emits in script setup, typing refs and reactive state, typing composables and stores, and where the types genuinely pay off.">
+<meta name="keywords" content="Vue 3 TypeScript, script setup types, typed props, defineProps, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vue-3-typescript/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vue 3 + TypeScript — A Field Guide">
-<meta property="og:description" content="Vue 3 + TypeScript — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="Using TypeScript with Vue 3: typed props and emits in script setup, typing refs and reactive state, typing composables and stores, and where the types genuinely pay off.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vue-3-typescript.svg">
 <meta property="og:image:alt" content="Vue 3 + TypeScript — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vue-3-typescript/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vue-3-typescript.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 + TypeScript — A Field Guide","description":"Vue 3 + TypeScript — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/vue-3-typescript.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-typescript/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 + TypeScript — A Field Guide","description":"Using TypeScript with Vue 3: typed props and emits in script setup, typing refs and reactive state, typing composables and stores, and where the types genuinely pay off.","image":"https://kihiujohn.github.io/assets/og/vue-3-typescript.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-typescript/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vue 3 + TypeScript — A Field Guide","item":"https://kihiujohn.github.io/blog/vue-3-typescript/"}]}
@@ -87,36 +87,52 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vue 3 + TypeScript — A Field Guide</span></nav>
-    <span class="tag">Modern Web · Vue</span>
+    <span class="tag">Vue · TypeScript</span>
     <h1>Vue 3 + TypeScript — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 + TypeScript — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 was built with TypeScript in mind, and script setup makes typed components genuinely pleasant. The payoff is biggest exactly where bugs hurt most — props and shared logic.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Vue 3 + TypeScript — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Vue 3 was designed with TypeScript as a first-class concern, and with <code>&lt;script setup&gt;</code> the experience is genuinely good rather than the awkward bolt-on it was in Vue 2. Types are not free — they add some ceremony — so the useful question is where they pay off most, and in Vue that is at component boundaries and in shared logic, exactly where a type mismatch otherwise turns into a runtime surprise.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="props">Typed props and emits</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The highest-value typing is on props and emits — the contract between components. With <code>&lt;script setup&gt;</code>, you declare them with generic type arguments, and you get autocomplete and compile-time checking on every usage:</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">TypeScript · typed props and emits</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>&lt;script setup lang="ts"&gt;
+interface Props {
+  userId: number
+  role?: 'admin' | 'member'
+}
+const props = withDefaults(defineProps&lt;Props&gt;(), { role: 'member' })
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+const emit = defineEmits&lt;{
+  (e: 'update', value: string): void
+  (e: 'delete', id: number): void
+}&gt;()
+&lt;/script&gt;</code></pre>
+</div>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Now passing a string where a number is expected, or emitting an event that does not exist, is a compile error instead of a bug you find in the browser. On a component reused across an app, this contract is where typing earns its keep several times over.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="state">Typing state and refs</h2>
 
-    <div class="related-articles">
+<p>Refs infer their type from the initial value, so <code>ref(0)</code> is a <code>number</code> ref automatically. When the type is broader than the initial value — a ref that starts empty but holds objects — annotate it explicitly with a generic: <code>ref&lt;User[]&gt;([])</code>. This small habit prevents the ref from being locked to an overly narrow inferred type and gives you checking on everything you put in it.</p>
+
+<h2 id="shared">Composables and stores</h2>
+
+<p>Typing pays off again in composables and Pinia stores — the shared logic many components consume. A typed composable's return value flows types into every caller, and a typed store gives autocomplete and safety on state and actions throughout the app. Because these are consumed widely, the types propagate value widely: one good annotation protects every usage site.</p>
+
+<div class="callout"><strong>Type the boundaries first</strong><p>If you adopt TypeScript incrementally, start where the payoff is largest: props, emits, composable and store signatures — the contracts between parts of your app. Internal component logic benefits less and can stay loosely typed at first. Typing the boundaries catches the mismatches that actually cause bugs, for the least ceremony.</p></div>
+
+<p>Vue 3 with TypeScript is a genuinely good pairing thanks to <code>&lt;script setup&gt;</code>: typed props and emits for component contracts, explicit generics on refs that outgrow their initial value, and typed composables and stores that spread safety across the app. Focus the effort on the boundaries — that is where a type error would otherwise become a runtime bug — and let the types earn their keep where it matters most.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/react-19-typescript/">React 19 + TypeScript — A Field Guide</a></li>

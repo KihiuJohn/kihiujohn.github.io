@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Testing with Pest — A Field Guide | John Kihiu</title>
-<meta name="description" content="Why Pest's syntax sits on top of PHPUnit rather than replacing it, how its expressive assertions and dataset features change how Laravel test suites get written, and when to still reach for PHPUnit directly.">
-<meta name="keywords" content="Acumatica laravel, Acumatica testing, Acumatica pest, John Kihiu">
+<meta name="description" content="Testing Laravel with Pest: the expressive syntax over PHPUnit, feature versus unit tests, using Laravel's testing helpers and database refresh, and building a suite you actually maintain.">
+<meta name="keywords" content="Laravel testing, Pest, PHPUnit, feature tests, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-testing-pest/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Testing with Pest — A Field Guide">
-<meta property="og:description" content="Why Pest's syntax sits on top of PHPUnit rather than replacing it, how its expressive assertions and dataset features change how Laravel test suites get written, and when to still reach for PHPUnit directly.">
+<meta property="og:description" content="Testing Laravel with Pest: the expressive syntax over PHPUnit, feature versus unit tests, using Laravel's testing helpers and database refresh, and building a suite you actually maintain.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-testing-pest.svg">
 <meta property="og:image:alt" content="Laravel Testing with Pest — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-testing-pest/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/laravel-testing-pest.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Testing with Pest — A Field Guide","description":"Why Pest's syntax sits on top of PHPUnit rather than replacing it, how its expressive assertions and dataset features change how Laravel test suites get written, and when to still reach for PHPUnit directly.","image":"https://kihiujohn.github.io/assets/og/laravel-testing-pest.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-testing-pest/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Testing with Pest — A Field Guide","description":"Testing Laravel with Pest: the expressive syntax over PHPUnit, feature versus unit tests, using Laravel's testing helpers and database refresh, and building a suite you actually maintain.","image":"https://kihiujohn.github.io/assets/og/laravel-testing-pest.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-testing-pest/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Testing with Pest — A Field Guide","item":"https://kihiujohn.github.io/blog/laravel-testing-pest/"}]}
@@ -87,36 +87,46 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Testing with Pest — A Field Guide</span></nav>
-    <span class="tag">Laravel · Laravel</span>
+    <span class="tag">Laravel · Testing</span>
     <h1>Laravel Testing with Pest — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Why Pest's syntax sits on top of PHPUnit rather than replacing it, how its expressive assertions and dataset features change how Laravel test suites get written, and when to still reach for PHPUnit directly.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Pest gives Laravel testing a clean, expressive syntax on top of PHPUnit. The tooling lowers the friction; the habit that matters is testing behaviour through feature tests.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Laravel Testing with Pest — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Pest is a testing framework for PHP that offers a cleaner, more expressive syntax than PHPUnit while running on top of it, so you keep full PHPUnit compatibility and the entire Laravel testing toolkit. It has become popular in the Laravel world because it makes tests pleasant to write and read, which matters — a suite that is enjoyable to write is a suite that actually gets written. But the tool is only half of it; how you test is what determines whether the suite protects you.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the framework contract, version support, failure handling, and testable application boundary. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="syntax">The expressive syntax</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Pest replaces PHPUnit's class-and-method structure with a functional, readable style — tests are expressed as <code>it()</code> or <code>test()</code> functions with fluent expectations. The result is less boilerplate and tests that read almost like specifications:</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PHP · a Pest feature test</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>it('creates an invoice for an order', function () {
+    $order = Order::factory()-&gt;create();
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+    $response = $this-&gt;postJson("/orders/{$order-&gt;id}/invoice");
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+    $response-&gt;assertStatus(201);
+    expect($order-&gt;fresh()-&gt;invoice)-&gt;not-&gt;toBeNull();
+});</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="kinds">Feature versus unit tests</h2>
 
-    <div class="related-articles">
+<p>Laravel testing splits into two kinds, and the balance matters. Feature tests exercise your app through its HTTP endpoints — hitting a route and asserting on the response and resulting state — testing behaviour the way it is actually used. Unit tests check a single class or method in isolation. For most Laravel apps, feature tests deliver the most protection per test, because they verify whole flows end to end; reserve unit tests for complex, isolated logic that deserves focused coverage.</p>
+
+<h2 id="helpers">Lean on Laravel's testing tools</h2>
+
+<p>Laravel gives you a rich testing toolkit that Pest uses directly: factories to generate test data, database assertions, HTTP testing helpers, fakes for mail, queues, and events, and the <code>RefreshDatabase</code> trait to reset the database between tests so each runs against a clean, known state. These are what make Laravel tests fast to write and reliable — use factories over hand-built data, fake external side effects, and let the database refresh keep tests independent.</p>
+
+<div class="callout"><strong>Test behaviour, and let it guide design</strong><p>Aim tests at behaviour — what the endpoint does and what state results — not at internal implementation, so they survive refactoring instead of breaking on it. Feature tests naturally push you this way. And notice when something is hard to test: that difficulty is usually a design signal, pointing at code that is too coupled or doing too much. A test suite that is painful to write is often telling you about the code, not the tests.</p></div>
+
+<p>Pest makes Laravel testing expressive and low-friction on top of PHPUnit, but the durable value comes from testing behaviour through feature tests, leaning on factories, fakes, and database refresh, and letting a hard-to-test spot flag a design problem. Build the suite around how the app is actually used, keep it pleasant enough to maintain, and it becomes the safety net that lets you change Laravel code with confidence.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-penetration-testing/">Acumatica Penetration Testing — A Complete Guide</a></li>

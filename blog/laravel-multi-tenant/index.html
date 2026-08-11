@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multi-Tenant Laravel Applications | John Kihiu</title>
-<meta name="description" content="Multi-Tenant Laravel Applications is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica laravel, Acumatica multi-tenant, Acumatica saas, John Kihiu">
+<meta name="description" content="Building multi-tenant Laravel applications: single-database versus database-per-tenant, resolving the tenant per request, scoping every query, and the packages that handle the plumbing.">
+<meta name="keywords" content="Laravel multi-tenant, multi-tenancy, tenant scoping, SaaS, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-multi-tenant/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Multi-Tenant Laravel Applications">
-<meta property="og:description" content="Multi-Tenant Laravel Applications is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="Building multi-tenant Laravel applications: single-database versus database-per-tenant, resolving the tenant per request, scoping every query, and the packages that handle the plumbing.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-multi-tenant.svg">
 <meta property="og:image:alt" content="Multi-Tenant Laravel Applications — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-multi-tenant/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/laravel-multi-tenant.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Multi-Tenant Laravel Applications","description":"Multi-Tenant Laravel Applications is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/laravel-multi-tenant.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-multi-tenant/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Multi-Tenant Laravel Applications","description":"Building multi-tenant Laravel applications: single-database versus database-per-tenant, resolving the tenant per request, scoping every query, and the packages that handle the plumbing.","image":"https://kihiujohn.github.io/assets/og/laravel-multi-tenant.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-multi-tenant/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Multi-Tenant Laravel Applications","item":"https://kihiujohn.github.io/blog/laravel-multi-tenant/"}]}
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Multi-Tenant Laravel Applications</span></nav>
-    <span class="tag">Laravel · Laravel</span>
+    <span class="tag">Laravel · Multi-tenant</span>
     <h1>Multi-Tenant Laravel Applications</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Multi-Tenant Laravel Applications is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Multi-tenancy in Laravel comes down to two decisions: how you isolate each tenant's data, and how you guarantee every query stays inside the current tenant's boundary.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Multi-Tenant Laravel Applications</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>A multi-tenant Laravel application serves many customers (tenants) from one codebase while keeping each tenant's data separate. It is the foundation of most SaaS, and it hinges on two decisions: the isolation strategy for tenant data, and the mechanism that ensures every single query is scoped to the right tenant. Get the second one wrong even once and you have a cross-tenant data leak, which is the defining risk of the whole architecture.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the framework contract, version support, failure handling, and testable application boundary. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="strategy">Choose an isolation strategy</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<table><thead><tr><th>Approach</th><th>Isolation</th><th>Trade-off</th></tr></thead><tbody><tr><td>Single database, tenant_id column</td><td>Logical — one schema, filtered by tenant</td><td>Simplest and cheapest; leak risk if a query is unscoped</td></tr><tr><td>Database per tenant</td><td>Strong — physically separate data</td><td>More isolation and easier per-tenant ops; more infrastructure</td></tr><tr><td>Schema per tenant</td><td>Middle ground</td><td>Between the two on both isolation and complexity</td></tr></tbody></table>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<p>Single-database with a <code>tenant_id</code> is the common default — cheapest and simplest — with isolation enforced in application code. Database-per-tenant gives stronger isolation and easier per-tenant backup, migration, and residency, at the cost of managing many databases. Choose based on your isolation requirements, scale, and compliance needs.</p>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="resolve">Resolve the tenant per request</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Every request must establish which tenant it belongs to, early, before any tenant data is touched — typically from the subdomain, the domain, or the authenticated user. This resolution sets the context that everything downstream relies on, so it belongs in middleware at the start of the request. The rest of the request then operates within that established tenant context.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="scope">Scope every query</h2>
 
-    <div class="related-articles">
+<p>With single-database tenancy, the cardinal rule is that no query may ever return another tenant's data. Enforcing this manually on every query is error-prone — one forgotten <code>where('tenant_id', ...)</code> is a leak. Use Laravel's global scopes to apply the tenant filter automatically to every query on tenant-owned models, so scoping is the default rather than something a developer must remember each time. Automatic scoping is what makes single-database tenancy safe.</p>
+
+<div class="callout"><strong>Use a proven package, don't hand-roll tenancy</strong><p>Multi-tenancy has subtle failure modes — unscoped queries, tenant context leaking across queued jobs, cache and session bleed between tenants. Established packages like stancl/tenancy or spatie/laravel-multitenancy have solved these, including the non-obvious ones around jobs and caching. Hand-rolling tenancy means rediscovering those bugs the hard way, in production, with real customer data at stake.</p></div>
+
+<p>Multi-tenant Laravel rests on choosing an isolation strategy — single-database with a tenant column, or database-per-tenant for stronger separation — and rigorously scoping every query to the tenant resolved per request, ideally via automatic global scopes. Lean on a proven tenancy package to handle the subtle cases around jobs and caching, because in multi-tenancy the one bug you cannot afford is the query that returns another customer's data.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/n8n-multi-tenant/">n8n for Multi-Tenant SaaS</a></li>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>View Transitions API — A Field Guide | John Kihiu</title>
-<meta name="description" content="View Transitions API — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica css, Acumatica view-transitions, Acumatica animation, John Kihiu">
+<meta name="description" content="The View Transitions API: animate between DOM states and full page navigations with the browser handling the crossfade and morph, how it works, and how to enhance progressively.">
+<meta name="keywords" content="View Transitions API, page transitions, animation, SPA, MPA, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/view-transitions-api/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="View Transitions API — A Field Guide">
-<meta property="og:description" content="View Transitions API — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="The View Transitions API: animate between DOM states and full page navigations with the browser handling the crossfade and morph, how it works, and how to enhance progressively.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/view-transitions-api.svg">
 <meta property="og:image:alt" content="View Transitions API — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/view-transitions-api/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/view-transitions-api.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"View Transitions API — A Field Guide","description":"View Transitions API — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/view-transitions-api.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/view-transitions-api/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"View Transitions API — A Field Guide","description":"The View Transitions API: animate between DOM states and full page navigations with the browser handling the crossfade and morph, how it works, and how to enhance progressively.","image":"https://kihiujohn.github.io/assets/og/view-transitions-api.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/view-transitions-api/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"View Transitions API — A Field Guide","item":"https://kihiujohn.github.io/blog/view-transitions-api/"}]}
@@ -87,36 +87,43 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">View Transitions API — A Field Guide</span></nav>
-    <span class="tag">Tax / Fiscal · Css</span>
+    <span class="tag">Frontend · CSS</span>
     <h1>View Transitions API — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">View Transitions API — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">The View Transitions API lets the browser animate between two states of a page — even across full navigations — with far less code than the JavaScript gymnastics it replaces.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-16">Jun 16, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>View Transitions API — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Smooth transitions between UI states — a list morphing into a detail view, a crossfade between pages — used to require significant JavaScript: capturing positions, cloning elements, animating manually, cleaning up. The View Transitions API hands that work to the browser. You tell it what change is happening and it animates between the before and after states, replacing a lot of fragile code with a small, declarative API.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="how">How it works</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The core idea: the browser snapshots the current state, you make your DOM change inside a transition, and the browser animates from the old snapshot to the new one — a crossfade by default. You trigger it by wrapping your DOM update in <code>document.startViewTransition()</code>, and the browser handles capturing both states and tweening between them:</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JavaScript · a basic view transition</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>if (document.startViewTransition) {
+  document.startViewTransition(() =&gt; updateTheDOM());
+} else {
+  updateTheDOM();   // progressive enhancement — no transition, still works
+}</code></pre>
+</div>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="morph">Morphing specific elements</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Beyond a whole-page crossfade, you can animate specific elements from their old position and size to their new ones — a thumbnail growing into a hero image, a card expanding into a detail panel. You give the elements a shared <code>view-transition-name</code> in CSS, and the browser matches them across the two states and morphs one into the other. This shared-element transition is the effect that previously took the most JavaScript, and here it is largely CSS.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="nav">Across full navigations</h2>
 
-    <div class="related-articles">
+<p>The API also works across full page navigations, not just in-page state changes — meaning multi-page (non-SPA) sites can have smooth page transitions that were previously the exclusive preserve of single-page apps. This is significant: it narrows the gap that pushed teams toward SPAs purely for transition polish, letting a traditional server-rendered site feel just as fluid.</p>
+
+<div class="callout"><strong>Enhance progressively</strong><p>Always structure view transitions as an enhancement: check for support and fall back to an instant, un-animated change where the API is not available, as in the example above. The transition is polish, not function — the app must work perfectly without it. Feature-detect, wrap the animation, and the effect gracefully degrades to a plain state change on browsers that do not support it yet.</p></div>
+
+<p>The View Transitions API moves the work of animating between UI states — crossfades, element morphs, even full page navigations — into the browser, replacing brittle JavaScript with a small declarative API and some CSS. Use it to add polish that used to be expensive, including page transitions on multi-page sites, and layer it as a progressive enhancement so the experience stays solid everywhere while getting nicer where the API is supported.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/container-queries-2026/">Container Queries 2026 — A Field Guide</a></li>

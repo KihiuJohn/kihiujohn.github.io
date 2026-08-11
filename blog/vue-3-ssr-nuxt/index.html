@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vue 3 SSR with Nuxt — A Field Guide | John Kihiu</title>
-<meta name="description" content="Vue 3 SSR with Nuxt — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica vue, Acumatica ssr, Acumatica nuxt, John Kihiu">
+<meta name="description" content="Server-side rendering for Vue 3 with Nuxt: what SSR buys you, why Nuxt is the pragmatic path over hand-rolling it, rendering modes, and the universal-code gotchas to expect.">
+<meta name="keywords" content="Vue 3 SSR, Nuxt, server-side rendering, universal, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vue-3-ssr-nuxt/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vue 3 SSR with Nuxt — A Field Guide">
-<meta property="og:description" content="Vue 3 SSR with Nuxt — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="Server-side rendering for Vue 3 with Nuxt: what SSR buys you, why Nuxt is the pragmatic path over hand-rolling it, rendering modes, and the universal-code gotchas to expect.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vue-3-ssr-nuxt.svg">
 <meta property="og:image:alt" content="Vue 3 SSR with Nuxt — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vue-3-ssr-nuxt/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vue-3-ssr-nuxt.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 SSR with Nuxt — A Field Guide","description":"Vue 3 SSR with Nuxt — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/vue-3-ssr-nuxt.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-ssr-nuxt/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 SSR with Nuxt — A Field Guide","description":"Server-side rendering for Vue 3 with Nuxt: what SSR buys you, why Nuxt is the pragmatic path over hand-rolling it, rendering modes, and the universal-code gotchas to expect.","image":"https://kihiujohn.github.io/assets/og/vue-3-ssr-nuxt.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-ssr-nuxt/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vue 3 SSR with Nuxt — A Field Guide","item":"https://kihiujohn.github.io/blog/vue-3-ssr-nuxt/"}]}
@@ -87,36 +87,38 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vue 3 SSR with Nuxt — A Field Guide</span></nav>
-    <span class="tag">Modern Web · Vue</span>
+    <span class="tag">Vue · SSR</span>
     <h1>Vue 3 SSR with Nuxt — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 SSR with Nuxt — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">You can hand-roll Vue 3 SSR, but for anything real, Nuxt is the pragmatic answer. The interesting decisions are which rendering mode to use and how to write code that runs on both sides.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Vue 3 SSR with Nuxt — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Server-side rendering makes a Vue app return real HTML on the first request — for SEO, faster first paint, and working link previews — instead of an empty shell the client fills in. Vue 3 supports SSR directly, but wiring it up by hand (server bundle, hydration, routing, data fetching) is a lot of undifferentiated work. For any real project, Nuxt is the pragmatic path, and the decisions worth your attention are its rendering modes and the universal-code gotchas.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="why-nuxt">Why Nuxt over hand-rolling</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Hand-building Vue SSR means solving the same problems Nuxt already solved: a server render pipeline, client hydration, file-based routing, data fetching that works on both server and client, and build configuration for two targets. Nuxt packages all of it into a framework, so you write your app and get SSR, routing, and data fetching for free. Unless you have an unusual constraint, reinventing that stack is effort spent on plumbing rather than product.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="modes">Rendering modes</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<table><thead><tr><th>Mode</th><th>Renders</th><th>Best for</th></tr></thead><tbody><tr><td>SSR (universal)</td><td>On the server per request, hydrates on client</td><td>Dynamic, SEO-sensitive content</td></tr><tr><td>SSG (static)</td><td>At build time to static HTML</td><td>Content that rarely changes — marketing, docs, blogs</td></tr><tr><td>SPA (client-only)</td><td>In the browser, no server render</td><td>App-like, auth-gated dashboards where SEO is irrelevant</td></tr></tbody></table>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Nuxt lets you choose per route, and often the right answer is a mix: statically generate the marketing and blog pages, server-render the dynamic public pages, and leave the authenticated app as a client-side SPA. Matching the mode to each route's needs is where the real optimisation is.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="universal">Universal-code gotchas</h2>
 
-    <div class="related-articles">
+<p>The defining challenge of SSR is that your code runs in two environments — Node on the server, then the browser. Code that assumes browser globals breaks on the server:</p>
+
+<ul><li>No <code>window</code> or <code>document</code> on the server — guard browser-only code to run after mount (client-side only).</li><li>Data fetching must work on both sides — use the framework's data-fetching so it runs on the server for the initial render and the client for navigation.</li><li>Watch for hydration mismatches — server and client must render the same output initially, or Vue warns and re-renders.</li></ul>
+
+<div class="callout"><strong>Hydration mismatches are the classic SSR bug</strong><p>If the server renders one thing and the client expects another — because of a browser-only value, a timestamp, or randomness in the initial render — Vue throws a hydration mismatch and the benefit is lost. Keep the initial render deterministic and identical on both sides, and defer anything browser-specific until after hydration. Most SSR debugging is chasing these mismatches.</p></div>
+
+<p>Vue 3 SSR is best reached through Nuxt, which packages the server pipeline, hydration, routing, and data fetching so you build product instead of plumbing. Choose the rendering mode per route — static for content, SSR for dynamic public pages, SPA for the app — and write universal code carefully, guarding browser globals and keeping the initial render identical on both sides to avoid hydration mismatches. That is where SSR is won or lost.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-inertia-ssr/">Laravel Inertia SSR — A Field Guide</a></li>

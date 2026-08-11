@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PHP 8 Attributes — A Field Guide | John Kihiu</title>
-<meta name="description" content="PHP 8 Attributes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
-<meta name="keywords" content="Acumatica php, Acumatica attributes, John Kihiu">
+<meta name="description" content="PHP 8 attributes explained: native, structured metadata to replace docblock annotations, how they're declared and read via reflection, and where they genuinely improve a codebase.">
+<meta name="keywords" content="PHP 8 attributes, annotations, reflection, metadata, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/php-8-attributes/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PHP 8 Attributes — A Field Guide">
-<meta property="og:description" content="PHP 8 Attributes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.">
+<meta property="og:description" content="PHP 8 attributes explained: native, structured metadata to replace docblock annotations, how they're declared and read via reflection, and where they genuinely improve a codebase.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/php-8-attributes.svg">
 <meta property="og:image:alt" content="PHP 8 Attributes — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/php-8-attributes/">
@@ -22,7 +22,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/php-8-attributes.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP 8 Attributes — A Field Guide","description":"PHP 8 Attributes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.","image":"https://kihiujohn.github.io/assets/og/php-8-attributes.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-8-attributes/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PHP 8 Attributes — A Field Guide","description":"PHP 8 attributes explained: native, structured metadata to replace docblock annotations, how they're declared and read via reflection, and where they genuinely improve a codebase.","image":"https://kihiujohn.github.io/assets/og/php-8-attributes.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/php-8-attributes/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PHP 8 Attributes — A Field Guide","item":"https://kihiujohn.github.io/blog/php-8-attributes/"}]}
@@ -86,36 +86,47 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PHP 8 Attributes — A Field Guide</span></nav>
-    <span class="tag">Laravel · Php</span>
+    <span class="tag">PHP · Language</span>
     <h1>PHP 8 Attributes — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PHP 8 Attributes — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of web.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PHP 8 attributes replace docblock annotations with real, first-class metadata the language understands. The win is structured configuration that lives next to the code it configures.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>PHP 8 Attributes — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>PHP 8 introduced attributes — a native way to attach structured metadata to classes, methods, properties, and parameters. Before them, frameworks encoded metadata in docblock comments (<code>@Route</code>, <code>@ORM\Column</code>) that PHP itself ignored and libraries parsed from strings. Attributes make that metadata a real language feature: structured, validated, and readable through reflection rather than by parsing comments. It is a genuine improvement in a specific set of situations.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the framework contract, version support, failure handling, and testable application boundary. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="what">Real metadata, not comments</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>An attribute is declared with the <code>#[...]</code> syntax and is an actual PHP construct the engine understands, not a comment. Because attributes are real, they are type-checked, IDE-aware, and cannot silently rot into invalid syntax the way a docblock annotation can. The metadata now has the same standing as the code it annotates:</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PHP · declaring and using an attribute</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>#[Attribute]
+class Route {
+    public function __construct(public string $path, public string $method = 'GET') {}
+}
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+class UserController {
+    #[Route('/users', method: 'POST')]
+    public function store() { /* ... */ }
+}</code></pre>
+</div>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="read">Read them via reflection</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Attributes are inert on their own — something has to read them and act. That something uses PHP's reflection API to find the attributes on a class or method and instantiate them, turning the declared metadata into behaviour. A router scans controllers for <code>Route</code> attributes to build its routing table; an ORM reads mapping attributes to understand a schema. The attribute declares the intent; reflection-based code interprets it. Understanding this two-part model — declare, then read — is the key to both using and building with attributes.</p>
 
-    <div class="related-articles">
+<h2 id="where">Where they help</h2>
+
+<p>Attributes shine for declarative configuration that belongs next to the code it configures — routing, ORM mapping, validation rules, dependency-injection hints, event listeners. Placing the configuration inline with the method or property it governs keeps related things together and readable, which is why modern PHP frameworks have embraced them. They are not for everything: dynamic or environment-specific configuration still belongs in config files. Use attributes for static, code-adjacent metadata, not as a config system.</p>
+
+<div class="callout"><strong>Attributes describe; they don't do</strong><p>A common misconception is that adding an attribute makes something happen. It does not — an attribute is passive metadata until code reflects over it and acts. When an attribute seems to have no effect, the question is whether anything is actually reading it. This declare-then-read separation is the whole model, and forgetting it is the usual source of confusion.</p></div>
+
+<p>PHP 8 attributes turn docblock annotations into first-class, structured metadata that the language understands and reflection reads — type-checked, IDE-aware, and living right next to the code it configures. Reach for them for declarative, static configuration like routing, mapping, and validation, remember that they are inert until something reflects over them, and leave dynamic configuration in config files where it belongs.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-cs-attributes-screen-vs-dac/">CS Attributes — Screen vs DAC in Acumatica</a></li>

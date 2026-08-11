@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vue 3 Internationalisation — A Field Guide | John Kihiu</title>
-<meta name="description" content="Vue 3 Internationalisation — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.">
-<meta name="keywords" content="Acumatica vue, Acumatica i18n, Acumatica translation, John Kihiu">
+<meta name="description" content="Internationalising a Vue 3 app with Vue I18n: structuring translation messages, handling interpolation and pluralisation, lazy-loading locales, and formatting dates and numbers per locale.">
+<meta name="keywords" content="Vue 3 i18n, Vue I18n, internationalisation, localisation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vue-3-i18n/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Vue 3 Internationalisation — A Field Guide">
-<meta property="og:description" content="Vue 3 Internationalisation — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.">
+<meta property="og:description" content="Internationalising a Vue 3 app with Vue I18n: structuring translation messages, handling interpolation and pluralisation, lazy-loading locales, and formatting dates and numbers per locale.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vue-3-i18n.svg">
 <meta property="og:image:alt" content="Vue 3 Internationalisation — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vue-3-i18n/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vue-3-i18n.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 Internationalisation — A Field Guide","description":"Vue 3 Internationalisation — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.","image":"https://kihiujohn.github.io/assets/og/vue-3-i18n.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-i18n/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Vue 3 Internationalisation — A Field Guide","description":"Internationalising a Vue 3 app with Vue I18n: structuring translation messages, handling interpolation and pluralisation, lazy-loading locales, and formatting dates and numbers per locale.","image":"https://kihiujohn.github.io/assets/og/vue-3-i18n.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vue-3-i18n/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Vue 3 Internationalisation — A Field Guide","item":"https://kihiujohn.github.io/blog/vue-3-i18n/"}]}
@@ -87,36 +87,44 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Vue 3 Internationalisation — A Field Guide</span></nav>
-    <span class="tag">Modern Web · Vue</span>
+    <span class="tag">Vue · i18n</span>
     <h1>Vue 3 Internationalisation — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Vue 3 Internationalisation — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Internationalisation is far easier to build in from the start than to retrofit. Vue I18n handles the mechanics; the real work is structuring messages and thinking beyond text.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Vue 3 Internationalisation — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Internationalisation (i18n) — supporting multiple languages — is one of those things that is straightforward to design in early and painful to retrofit after your UI is full of hardcoded strings. Vue I18n is the standard library for it in the Vue ecosystem, and it handles the mechanics well. The effort that matters is structuring your translations sensibly and remembering that i18n is about more than swapping words.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is browser support, accessibility, loading behavior, and an upgrade path that does not hide runtime costs. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="messages">Structure the messages</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Translations live in message objects keyed by locale, and you reference them by key in your components rather than hardcoding text. Structure the keys thoughtfully — nested by feature or view — so a large translation set stays navigable and translators can find what they need. A flat file of hundreds of ungrouped keys becomes unmaintainable; a well-organised hierarchy scales.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JavaScript · Vue I18n messages and use</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>const messages = {
+  en: { cart: { empty: 'Your cart is empty', items: '{count} items' } },
+  sw: { cart: { empty: 'Kikapu chako ni tupu', items: 'Bidhaa {count}' } },
+}
+// In a template:  {{ $t('cart.empty') }}
+//                 {{ $t('cart.items', { count }) }}</code></pre>
+</div>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="beyond">Interpolation and pluralisation</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Text is rarely static. Vue I18n handles interpolation (inserting values like a name or count into a message) and pluralisation (different wording for zero, one, and many), which matters because plural rules differ by language — some have more than two plural forms. Let the library handle these rather than concatenating strings yourself, because naive string-building produces grammatically wrong translations in many languages.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="scale">Lazy-load and localise formats</h2>
 
-    <div class="related-articles">
+<ul><li>Lazy-load locales — ship only the active language's messages and load others on demand, so translations do not bloat the initial bundle.</li><li>Localise dates, numbers, and currency — these formats differ by locale as much as text does; use locale-aware formatting, not a fixed format.</li><li>Handle text direction and length — some languages read right-to-left, and translated text can be much longer, so design layouts that flex.</li></ul>
+
+<div class="callout"><strong>i18n is more than translating strings</strong><p>The mistake teams make is treating i18n as find-and-replace on text while leaving dates, numbers, currency, and layout assumptions hardcoded. A truly localised app formats every locale-sensitive value correctly and adapts its layout to different text lengths and directions. Plan for all of it from the start — retrofitting date formatting and RTL support after launch is far harder than building it in.</p></div>
+
+<p>Vue I18n gives a Vue 3 app solid internationalisation: message objects referenced by structured keys, proper interpolation and pluralisation, lazy-loaded locales, and locale-aware formatting of dates and numbers. Build it in from the start rather than retrofitting, and think past text to formats, direction, and layout — because real localisation adapts the whole experience to the locale, not just the words on screen.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-translation/">AI Agent for Real-Time Translation</a></li>

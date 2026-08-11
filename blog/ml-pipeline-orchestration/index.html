@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ML Pipeline Orchestration — A Field Guide | John Kihiu</title>
-<meta name="description" content="ML Pipeline Orchestration — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.">
-<meta name="keywords" content="Acumatica ml, Acumatica pipelines, Acumatica orchestration, John Kihiu">
+<meta name="description" content="Orchestrating ML pipelines: model the workflow as a DAG of steps, make each step idempotent and cached, handle failures and retries, and choose an orchestrator suited to ML dependencies.">
+<meta name="keywords" content="ML pipeline orchestration, DAG, Airflow, reproducibility, MLOps, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/ml-pipeline-orchestration/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="ML Pipeline Orchestration — A Field Guide">
-<meta property="og:description" content="ML Pipeline Orchestration — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.">
+<meta property="og:description" content="Orchestrating ML pipelines: model the workflow as a DAG of steps, make each step idempotent and cached, handle failures and retries, and choose an orchestrator suited to ML dependencies.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/ml-pipeline-orchestration.svg">
 <meta property="og:image:alt" content="ML Pipeline Orchestration — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/ml-pipeline-orchestration/">
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">ML Pipeline Orchestration — A Field Guide</span></nav>
-    <span class="tag">Tax / Fiscal · Ml</span>
+    <span class="tag">Data / ML · MLOps</span>
     <h1>ML Pipeline Orchestration — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">ML Pipeline Orchestration — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">An ML pipeline is a chain of dependent steps — ingest, features, train, evaluate, deploy. Orchestration is what makes that chain reliable, reproducible, and recoverable when a step fails.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>ML Pipeline Orchestration — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>A machine-learning workflow is a sequence of dependent steps: ingest data, build features, train, evaluate, and deploy. Run by hand, it is error-prone and unreproducible; orchestrated, it becomes a reliable, repeatable pipeline. Orchestration is the discipline of defining that workflow so it runs consistently, recovers from failure, and produces the same result every time — the backbone that turns ad-hoc ML scripts into a production process.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a clear system boundary, verifiable inputs and outputs, failure handling, and maintainable ownership. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="dag">Model the workflow as a DAG</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The standard model is a directed acyclic graph (DAG): each step is a node, and the edges are dependencies — training depends on features, which depend on ingested data. Representing the pipeline as a DAG makes the dependencies explicit, lets independent steps run in parallel, and lets the orchestrator re-run only what is needed. It is the natural shape for an ML workflow, and every serious orchestrator is built around it.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="idempotent">Idempotent, cached steps</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Each step should be idempotent — re-running it produces the same result — and cacheable, so a step whose inputs have not changed can be skipped. This is what makes pipelines efficient and recoverable: if training fails, you re-run from training using the cached features rather than re-ingesting and re-processing everything from scratch. Idempotent, cached steps turn a failure late in a long pipeline from "start over" into "resume from here," which on expensive ML steps is a large saving.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="failure">Handle failure deliberately</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Long-running ML pipelines will fail partway — a data source is unavailable, a training job runs out of memory. Orchestration handles this with retries for transient failures, clear failure states, and alerts so a broken pipeline is noticed rather than silently not producing a fresh model. Combined with cached steps, good failure handling means a pipeline recovers from where it broke instead of losing all prior progress. Design for failure, because at ML pipeline lengths it is a certainty, not an edge case.</p>
 
-    <div class="related-articles">
+<div class="callout"><strong>Match the orchestrator to ML needs</strong><p>General orchestrators like Airflow run ML pipelines well, and ML-specific tools (Kubeflow Pipelines, Metaflow, and others) add awareness of data and model versioning, experiment tracking, and ML-shaped steps. Choose based on whether your team wants a general workflow engine or ML-native features — but do choose one; hand-cranking a multi-step ML workflow with cron and scripts reinvents, badly, exactly what these tools provide.</p></div>
+
+<p>ML pipeline orchestration models the workflow as a DAG of idempotent, cached steps, handles inevitable failures with retries and alerts so it recovers from where it broke, and runs on an orchestrator matched to your ML needs. It is what makes the path from data to deployed model reliable and reproducible rather than a fragile chain of manual scripts — the infrastructure that lets you trust the model in production was built the same way every time.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-orchestration/">AI Agent Orchestration Patterns</a></li>

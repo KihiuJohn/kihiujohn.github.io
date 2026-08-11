@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Livewire 3 + Reverb Real-Time Patterns | John Kihiu</title>
-<meta name="description" content="Livewire 3 + Reverb Real-Time Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
-<meta name="keywords" content="Acumatica livewire, Acumatica reverb, Acumatica realtime, John Kihiu">
+<meta name="description" content="Real-time features with Livewire 3 and Laravel Reverb: how Reverb provides a first-party WebSocket server, broadcasting events, and updating Livewire components live from the server.">
+<meta name="keywords" content="Livewire 3, Laravel Reverb, WebSockets, broadcasting, real-time, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/livewire-3-reverb/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Livewire 3 + Reverb Real-Time Patterns">
-<meta property="og:description" content="Livewire 3 + Reverb Real-Time Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.">
+<meta property="og:description" content="Real-time features with Livewire 3 and Laravel Reverb: how Reverb provides a first-party WebSocket server, broadcasting events, and updating Livewire components live from the server.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/livewire-3-reverb.svg">
 <meta property="og:image:alt" content="Livewire 3 + Reverb Real-Time Patterns — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/livewire-3-reverb/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/livewire-3-reverb.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Livewire 3 + Reverb Real-Time Patterns","description":"Livewire 3 + Reverb Real-Time Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.","image":"https://kihiujohn.github.io/assets/og/livewire-3-reverb.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/livewire-3-reverb/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Livewire 3 + Reverb Real-Time Patterns","description":"Real-time features with Livewire 3 and Laravel Reverb: how Reverb provides a first-party WebSocket server, broadcasting events, and updating Livewire components live from the server.","image":"https://kihiujohn.github.io/assets/og/livewire-3-reverb.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/livewire-3-reverb/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Livewire 3 + Reverb Real-Time Patterns","item":"https://kihiujohn.github.io/blog/livewire-3-reverb/"}]}
@@ -87,36 +87,48 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Livewire 3 + Reverb Real-Time Patterns</span></nav>
-    <span class="tag">Laravel · Livewire</span>
+    <span class="tag">Laravel · Real-time</span>
     <h1>Livewire 3 + Reverb Real-Time Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Livewire 3 + Reverb Real-Time Patterns is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Livewire handles interaction round trips, but not server-pushed updates. Laravel Reverb — a first-party WebSocket server — is what adds true real-time to a Livewire app.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-17">Jun 17, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Livewire 3 + Reverb Real-Time Patterns</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Livewire's model is request-driven: interactivity happens when the user does something. It has no way, on its own, to push an update from the server when data changes elsewhere — a new message, another user's edit, a job completing. That needs WebSockets, and Laravel Reverb is Laravel's own first-party WebSocket server that fills the gap, letting a Livewire app receive server-pushed real-time updates.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the framework contract, version support, failure handling, and testable application boundary. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="reverb">What Reverb provides</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Reverb is a WebSocket server built for Laravel, an alternative to third-party services like Pusher or self-hosting a separate solution. It integrates with Laravel's broadcasting system, so you keep the familiar events-and-channels model and simply run Reverb as the server that delivers them. Being first-party, it fits the ecosystem cleanly and removes the dependency on an external real-time service, which matters for cost and data control.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="broadcast">Broadcasting events</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The flow uses Laravel's existing broadcasting: you dispatch an event marked to broadcast, and Reverb delivers it over WebSockets to clients subscribed to the relevant channel. Use private and presence channels with authorisation so users only receive events they are allowed to — the same broadcasting authorisation you would use with any driver:</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PHP · a broadcastable event</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>class MessageSent implements ShouldBroadcast
+{
+    public function __construct(public Message $message) {}
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+    public function broadcastOn(): array
+    {
+        return [new PrivateChannel('conversation.'.$this-&gt;message-&gt;conversation_id)];
+    }
+}
+// event(new MessageSent($message));  -&gt; delivered over Reverb</code></pre>
+</div>
 
-    <div class="related-articles">
+<h2 id="live">Updating Livewire live</h2>
+
+<p>Livewire 3 can listen for broadcast events and react to them, so a component updates itself when a server-pushed event arrives — no user interaction required. That is what completes the picture: Livewire handles user-driven interactivity, and Reverb-delivered broadcasts handle server-driven updates. Together they give a Livewire app genuine real-time behaviour — live chat, notifications, collaborative updates — while you stay in Laravel and PHP.</p>
+
+<div class="callout"><strong>Real-time is infrastructure, not just code</strong><p>A WebSocket server is a long-running, stateful process — different from your stateless web app. Reverb needs to run and be supervised as its own process, scaled for concurrent connections, and fronted correctly for WebSocket traffic. Budget for running and monitoring it as infrastructure, not just wiring up events; the code is the easy half of adding real-time.</p></div>
+
+<p>Laravel Reverb adds the server-push capability Livewire lacks: a first-party WebSocket server that delivers Laravel broadcast events to subscribed clients, which Livewire 3 components can listen for and react to live. Together they give a Livewire app real-time features without leaving the ecosystem — just remember Reverb is a stateful process to run and scale as real infrastructure, which is where the operational work actually lives.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/apache-flink-streaming/">Apache Flink for Streaming — A Field Guide</a></li>
