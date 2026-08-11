@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>n8n for ERP Automation — A Field Guide | John Kihiu</title>
-<meta name="description" content="n8n for ERP Automation — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica n8n, Acumatica erp, Acumatica automation, John Kihiu">
+<meta name="description" content="Using n8n for ERP automation: bridge the ERP's API to the rest of your stack, keep syncs idempotent and reconciled, react to events instead of polling, and respect API limits.">
+<meta name="keywords" content="n8n ERP automation, ERP integration, Acumatica, idempotent sync, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/n8n-erp-automation/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="n8n for ERP Automation — A Field Guide">
-<meta property="og:description" content="n8n for ERP Automation — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="Using n8n for ERP automation: bridge the ERP's API to the rest of your stack, keep syncs idempotent and reconciled, react to events instead of polling, and respect API limits.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-erp-automation.svg">
 <meta property="og:image:alt" content="n8n for ERP Automation — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-erp-automation/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/n8n-erp-automation.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n for ERP Automation — A Field Guide","description":"n8n for ERP Automation — A Field Guide is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-erp-automation.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-erp-automation/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n for ERP Automation — A Field Guide","description":"Using n8n for ERP automation: bridge the ERP's API to the rest of your stack, keep syncs idempotent and reconciled, react to events instead of polling, and respect API limits.","image":"https://kihiujohn.github.io/assets/og/n8n-erp-automation.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-erp-automation/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n for ERP Automation — A Field Guide","item":"https://kihiujohn.github.io/blog/n8n-erp-automation/"}]}
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n for ERP Automation — A Field Guide</span></nav>
-    <span class="tag">Vertical SaaS · N8n</span>
+    <span class="tag">Vertical SaaS · n8n</span>
     <h1>n8n for ERP Automation — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n for ERP Automation — A Field Guide is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">ERP automation is high-stakes glue: the records are financial and the systems are unforgiving. n8n is a capable tool for it, provided you treat correctness as the priority.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>n8n for ERP Automation — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>ERP systems sit at the centre of a business, and automating around them means moving data that is financial, audited, and unforgiving of duplicates. n8n is well suited to this — it can bridge an ERP's API to CRMs, e-commerce, spreadsheets, and messaging — but the engineering bar is higher than for a marketing automation, because a bug here shows up in the ledger.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="bridge">The ERP as one node in a wider flow</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Most ERP automation is bridging: an order from an e-commerce platform becomes a sales order in the ERP; a shipment in the ERP triggers a customer notification; a nightly sync reconciles inventory between systems. n8n's strength is being the neutral middle that speaks to every side over HTTP, so you are not building point-to-point integrations between each pair of systems. The ERP is just one well-guarded node in the flow.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="idempotent">Idempotency is non-negotiable</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The cardinal rule of ERP automation: never create a duplicate. A retry after a timeout that actually succeeded must not create a second invoice or a second payment. Before creating a record, check whether it already exists (by an external reference or an idempotency key), and prefer updates keyed on a business identifier over blind inserts. In a marketing workflow a duplicate is annoying; in an ERP it is a financial discrepancy someone has to reconcile.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="react">React to events, reconcile as backstop</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Prefer the ERP's events over polling where you can — an Acumatica business event or a webhook triggers the workflow the moment something happens, instead of you asking every few minutes. But because events can be missed, pair real-time triggers with a periodic reconciliation sync that compares both systems and fixes any drift. Events for speed, reconciliation for correctness.</p>
 
-    <div class="related-articles">
+<div class="callout"><strong>Respect the ERP's API limits and audit trail</strong><p>ERPs meter their APIs and often limit concurrent sessions, so authenticate once and reuse the session rather than logging in per record. And remember every automated change is an audited financial action — log what your workflows do, with correlation ids, so a discrepancy can be traced back to the run that caused it.</p></div>
+
+<p>n8n makes a strong ERP automation hub, but treat it with the seriousness the data deserves: bridge through a neutral middle, make every write idempotent, drive it from events with a reconciliation backstop, and respect the API limits and audit trail. The automation should make the ERP easier to work with — never a source of duplicates the finance team has to clean up.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/n8n-acumatica-integration/">n8n + Acumatica Integration — A Complete Guide</a></li>

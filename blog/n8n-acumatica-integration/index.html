@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>n8n + Acumatica Integration — A Complete Guide | John Kihiu</title>
-<meta name="description" content="n8n + Acumatica Integration — A Complete Guide is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica n8n, Acumatica acumatica, Acumatica automation, John Kihiu">
+<meta name="description" content="Connecting n8n to Acumatica: authenticate against the contract-based REST API, drive endpoints with the HTTP Request node, handle pagination, and react to Acumatica business events.">
+<meta name="keywords" content="n8n Acumatica, Acumatica REST API, n8n integration, contract API, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/n8n-acumatica-integration/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="n8n + Acumatica Integration — A Complete Guide">
-<meta property="og:description" content="n8n + Acumatica Integration — A Complete Guide is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="Connecting n8n to Acumatica: authenticate against the contract-based REST API, drive endpoints with the HTTP Request node, handle pagination, and react to Acumatica business events.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-acumatica-integration.svg">
 <meta property="og:image:alt" content="n8n + Acumatica Integration — A Complete Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-acumatica-integration/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/n8n-acumatica-integration.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n + Acumatica Integration — A Complete Guide","description":"n8n + Acumatica Integration — A Complete Guide is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-acumatica-integration.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-acumatica-integration/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n + Acumatica Integration — A Complete Guide","description":"Connecting n8n to Acumatica: authenticate against the contract-based REST API, drive endpoints with the HTTP Request node, handle pagination, and react to Acumatica business events.","image":"https://kihiujohn.github.io/assets/og/n8n-acumatica-integration.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-acumatica-integration/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n + Acumatica Integration — A Complete Guide","item":"https://kihiujohn.github.io/blog/n8n-acumatica-integration/"}]}
@@ -87,36 +87,43 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n + Acumatica Integration — A Complete Guide</span></nav>
-    <span class="tag">Workflow · N8n</span>
+    <span class="tag">Automation · n8n</span>
     <h1>n8n + Acumatica Integration — A Complete Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n + Acumatica Integration — A Complete Guide is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n has no native Acumatica node, and it doesn't need one — Acumatica's contract-based REST API plus the HTTP Request node covers the whole integration surface.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>n8n + Acumatica Integration — A Complete Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>There is no dedicated Acumatica node in n8n, which throws people off, but it is not a problem. Acumatica exposes a full contract-based REST API, and n8n's generic HTTP Request node speaks to it perfectly. The integration is really three things: authenticate, call the right endpoint, and handle Acumatica's pagination and events sensibly.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the supported screen, graph, DAC, workflow, reporting, and integration boundaries. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="auth">Authenticate once, reuse the session</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Acumatica's REST API is session-based: you log in against <code>/entity/auth/login</code> with credentials, receive a session cookie, and send that cookie on subsequent requests until you log out. The cleanest pattern in n8n is a login step at the start of the workflow that captures the cookie, then reuse it across the calls that follow. Acumatica limits concurrent logins per licence, so log out when you are done rather than leaking sessions.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">HTTP · Acumatica login (n8n HTTP Request node)</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>POST https://erp.example.com/entity/auth/login
+Content-Type: application/json
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+{ "name": "integration_user", "password": "***", "company": "MyCompany" }
+# Response sets a session cookie — carry it on every following request.</code></pre>
+</div>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="endpoints">Drive endpoints with HTTP Request</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Once authenticated, every operation is an HTTP call against a contract endpoint like <code>/entity/Default/24.200.001/SalesOrder</code>. GET to read (with <code>$filter</code>, <code>$select</code>, and <code>$expand</code> to shape the response), PUT to create or update. Keep the endpoint version pinned in the URL so an Acumatica upgrade does not silently change your payloads. Use <code>$select</code> aggressively — pulling only the fields you need makes the calls faster and the responses easier to map.</p>
 
-    <div class="related-articles">
+<h2 id="paginate">Pagination and events</h2>
+
+<p>Large result sets come back paged. Use <code>$top</code> and <code>$skip</code> to page through, and loop in n8n until a page returns fewer rows than the page size. To react to changes in Acumatica rather than poll, configure an Acumatica <strong>business event</strong> with a webhook target pointing at an n8n Webhook node — that turns "check every five minutes" into "run the moment it happens."</p>
+
+<div class="callout"><strong>Mind the API licence and concurrency</strong><p>Acumatica meters API usage and limits concurrent sessions by licence tier. A chatty n8n workflow that logs in per item or never logs out will exhaust the session pool and start failing. Authenticate once per run, reuse the cookie, page efficiently, and log out at the end — treat sessions as the scarce resource they are.</p></div>
+
+<p>n8n plus the contract REST API is a complete Acumatica integration toolkit: one login, HTTP Request nodes against versioned endpoints with tight <code>$select</code>/<code>$filter</code>, loop-based pagination, and business-event webhooks for real-time triggers. No custom node required — just disciplined use of the API you already have.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-business-events-deep-dive/">Acumatica Business Events — A Deep Dive</a></li>

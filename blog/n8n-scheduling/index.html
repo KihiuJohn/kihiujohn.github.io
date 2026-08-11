@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>n8n Scheduling Patterns | John Kihiu</title>
-<meta name="description" content="n8n Scheduling Patterns is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
-<meta name="keywords" content="Acumatica n8n, Acumatica scheduling, Acumatica cron, John Kihiu">
+<meta name="description" content="Scheduling workflows in n8n: the Schedule Trigger and cron expressions, avoiding overlapping runs, handling timezones and missed executions, and monitoring that scheduled jobs fire.">
+<meta name="keywords" content="n8n scheduling, Schedule Trigger, cron, timezone, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/n8n-scheduling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="n8n Scheduling Patterns">
-<meta property="og:description" content="n8n Scheduling Patterns is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.">
+<meta property="og:description" content="Scheduling workflows in n8n: the Schedule Trigger and cron expressions, avoiding overlapping runs, handling timezones and missed executions, and monitoring that scheduled jobs fire.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-scheduling.svg">
 <meta property="og:image:alt" content="n8n Scheduling Patterns — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-scheduling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/n8n-scheduling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Scheduling Patterns","description":"n8n Scheduling Patterns is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.","image":"https://kihiujohn.github.io/assets/og/n8n-scheduling.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-scheduling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n Scheduling Patterns","description":"Scheduling workflows in n8n: the Schedule Trigger and cron expressions, avoiding overlapping runs, handling timezones and missed executions, and monitoring that scheduled jobs fire.","image":"https://kihiujohn.github.io/assets/og/n8n-scheduling.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-scheduling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n Scheduling Patterns","item":"https://kihiujohn.github.io/blog/n8n-scheduling/"}]}
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n Scheduling Patterns</span></nav>
-    <span class="tag">Workflow · N8n</span>
+    <span class="tag">Automation · n8n</span>
     <h1>n8n Scheduling Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n Scheduling Patterns is the work that turns a collection of business systems into a coherent operation. ERP, CRM, e-commerce, payment, marketing, support — each is a tool.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Scheduled workflows are the automation you forget about — which is exactly why the failure modes are overlap, timezone drift, and the silent job that stops firing.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>n8n Scheduling Patterns</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>A lot of n8n automation runs on a clock: nightly syncs, hourly polls, weekly reports. The Schedule Trigger makes setting these up trivial, and that ease hides the failure modes that only bite scheduled work — overlapping runs, timezone surprises, and jobs that silently stop. Getting scheduling right is mostly about anticipating those.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="trigger">The Schedule Trigger</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Use the Schedule Trigger node to run a workflow on an interval or a cron expression. Cron gives you precise control — specific times, days, and frequencies — while the simple interval option covers "every N minutes/hours." Keep the schedule as infrequent as the requirement genuinely allows; a workflow polling every minute when every fifteen would do is fifteen times the load and API cost for no benefit.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="overlap">Prevent overlapping runs</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The classic scheduled-workflow bug: a run scheduled every five minutes that sometimes takes seven. Now two runs overlap, processing the same data and racing each other. If a run can outlast its interval, guard against overlap — check whether a previous run is still in progress and skip, or use a lock so only one instance runs at a time. Never assume a scheduled run finishes before the next one starts.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="timezone">Timezones and missed runs</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<ul><li>Set the instance and workflow timezone explicitly (<code>GENERIC_TIMEZONE</code>) — a schedule that means 8am somewhere is wrong if n8n thinks in UTC.</li><li>Remember daylight-saving shifts move wall-clock schedules; verify time-critical jobs across the change.</li><li>If n8n is down at a scheduled time, that run is simply missed — it does not queue and fire late. For jobs that must not be skipped, add a reconciliation or catch-up mechanism.</li></ul>
 
-    <div class="related-articles">
+<div class="callout"><strong>Alert when a scheduled run doesn't happen</strong><p>A scheduled workflow that stops triggering produces no error, no failed execution — just silence. For anything important, monitor for the absence of a recent successful run and alert on it. The nightly job that quietly stopped is the most common and most expensive scheduled-automation failure precisely because nothing complains.</p></div>
+
+<p>Reliable n8n scheduling is a right-sized cron on an explicit timezone, an overlap guard for runs that can run long, awareness that downtime means missed runs, and an absence alarm so a silently-stopped schedule gets noticed. The convenience of scheduled automation is real — so is its habit of failing without a sound.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-production-scheduling-finite-vs-infinite/">Acumatica Production Scheduling — Finite vs Infinite</a></li>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SaaS Data Residency — A Field Guide | John Kihiu</title>
-<meta name="description" content="SaaS Data Residency — A Field Guide is the work that turns a product into a business. The code is one thing; the business is the company that ships the code, sells it, supports.">
-<meta name="keywords" content="Acumatica saas, Acumatica data, Acumatica residency, John Kihiu">
+<meta name="description" content="Data residency for SaaS: why customers and laws require data to stay in specific regions, the architectural options from regional deployments to full data isolation, and their trade-offs.">
+<meta name="keywords" content="data residency, data sovereignty, regional deployment, SaaS architecture, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/saas-data-residency/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="SaaS Data Residency — A Field Guide">
-<meta property="og:description" content="SaaS Data Residency — A Field Guide is the work that turns a product into a business. The code is one thing; the business is the company that ships the code, sells it, supports.">
+<meta property="og:description" content="Data residency for SaaS: why customers and laws require data to stay in specific regions, the architectural options from regional deployments to full data isolation, and their trade-offs.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/saas-data-residency.svg">
 <meta property="og:image:alt" content="SaaS Data Residency — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/saas-data-residency/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/saas-data-residency.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"SaaS Data Residency — A Field Guide","description":"SaaS Data Residency — A Field Guide is the work that turns a product into a business. The code is one thing; the business is the company that ships the code, sells it, supports.","image":"https://kihiujohn.github.io/assets/og/saas-data-residency.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/saas-data-residency/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"SaaS Data Residency — A Field Guide","description":"Data residency for SaaS: why customers and laws require data to stay in specific regions, the architectural options from regional deployments to full data isolation, and their trade-offs.","image":"https://kihiujohn.github.io/assets/og/saas-data-residency.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/saas-data-residency/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"SaaS Data Residency — A Field Guide","item":"https://kihiujohn.github.io/blog/saas-data-residency/"}]}
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">SaaS Data Residency — A Field Guide</span></nav>
-    <span class="tag">Data / ML · Saas</span>
+    <span class="tag">SaaS · Compliance</span>
     <h1>SaaS Data Residency — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">SaaS Data Residency — A Field Guide is the work that turns a product into a business. The code is one thing; the business is the company that ships the code, sells it, supports.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Data residency — keeping customer data within a specific geography — moves from ignorable to deal-blocking the moment you sell to regulated industries or foreign governments.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>SaaS Data Residency — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Data residency is the requirement that data be stored and processed within a particular geographic region. For a small SaaS it is easy to ignore; the moment you sell to European enterprises, regulated industries, or governments, it becomes a hard requirement that can block deals outright. Understanding the drivers and the architectural options ahead of time is far cheaper than re-architecting under deal pressure.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a defined metric, a defensible data source, a decision threshold, and the operating action that follows. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="why">Why it's required</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Two forces drive residency requirements. Law: regulations in the EU and many other jurisdictions restrict where certain data may be stored or transferred, and some sectors (government, health, finance) impose strict localisation. And customer policy: large enterprises often mandate that their data stay in a specific region regardless of what the law strictly requires, as a matter of their own risk management. Either can be a non-negotiable gate on a contract.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="options">The architectural spectrum</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<table><thead><tr><th>Approach</th><th>Isolation</th><th>Cost / complexity</th></tr></thead><tbody><tr><td>Single region for all</td><td>None — simplest</td><td>Lowest, but excludes residency-sensitive customers</td></tr><tr><td>Multi-region, route by customer</td><td>Data stored in the customer's region</td><td>Moderate — infra per region, shared codebase</td></tr><tr><td>Dedicated/isolated deployment</td><td>Full isolation per customer or region</td><td>Highest — near per-tenant infrastructure</td></tr></tbody></table>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Most SaaS that need residency land on the middle option: run infrastructure in several regions and route each customer's data to the correct one, sharing one codebase across them. Full isolation is reserved for the most demanding customers because it approaches running a separate deployment for each.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="plan">Design for it early</h2>
 
-    <div class="related-articles">
+<p>The expensive mistake is building single-region on the assumption residency will never matter, then having to re-architect when a large deal demands it. You do not need multi-region from day one, but design so that adding it later is a configuration and infrastructure exercise, not a rewrite — keep data-access paths region-aware and avoid hard-coding a single location. Residency is far cheaper to accommodate in the architecture than to bolt on.</p>
+
+<div class="callout"><strong>Residency is more than storage location</strong><p>Meeting a residency requirement means the data does not leave the region in processing, backups, logs, or third-party services either. A database in-region but backups or an analytics pipeline shipping data elsewhere still violates the requirement. Trace every path the data takes — storage, compute, backup, logging, subprocessors — not just where the primary database lives.</p></div>
+
+<p>Data residency keeps customer data within a required geography, driven by law and enterprise policy, and it can gate real deals. Match the architecture to demand — single region until residency matters, then multi-region routing, with full isolation only for the strictest customers — and design region-awareness in early so you can meet the requirement everywhere the data flows, not just where it is stored.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-data-loss-prevention/">Acumatica Data Loss Prevention — A Complete Guide</a></li>

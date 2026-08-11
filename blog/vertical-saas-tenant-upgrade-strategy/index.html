@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tenant Upgrade Strategy for Vertical SaaS | John Kihiu</title>
-<meta name="description" content="Tenant Upgrade Strategy for Vertical SaaS: a practical Acumatica fit review focused on tenant isolation, subscription events, usage evidence, support operations, and upgrade discipline. It separates documented product capability from configuration, integration, and customisation work.">
-<meta name="keywords" content="Acumatica saas, Acumatica upgrades, Acumatica multi-tenant, John Kihiu">
+<meta name="description" content="Upgrading tenants safely in multi-tenant SaaS: roll schema and feature changes out gradually, keep migrations backward-compatible, and give tenants control where upgrades are disruptive.">
+<meta name="keywords" content="tenant upgrade, multi-tenant migration, rollout, schema migration, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/vertical-saas-tenant-upgrade-strategy/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Tenant Upgrade Strategy for Vertical SaaS">
-<meta property="og:description" content="Tenant Upgrade Strategy for Vertical SaaS: a practical Acumatica fit review focused on tenant isolation, subscription events, usage evidence, support operations, and upgrade discipline. It separates documented product capability from configuration, integration, and customisation work.">
+<meta property="og:description" content="Upgrading tenants safely in multi-tenant SaaS: roll schema and feature changes out gradually, keep migrations backward-compatible, and give tenants control where upgrades are disruptive.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/vertical-saas-tenant-upgrade-strategy.svg">
 <meta property="og:image:alt" content="Tenant Upgrade Strategy for Vertical SaaS — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/vertical-saas-tenant-upgrade-strategy/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/vertical-saas-tenant-upgrade-strategy.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Tenant Upgrade Strategy for Vertical SaaS","description":"Tenant Upgrade Strategy for Vertical SaaS: a practical Acumatica fit review focused on tenant isolation, subscription events, usage evidence, support operations, and upgrade discipline. It separates documented product capability from configuration, integration, and customisation work.","image":"https://kihiujohn.github.io/assets/og/vertical-saas-tenant-upgrade-strategy.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vertical-saas-tenant-upgrade-strategy/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Tenant Upgrade Strategy for Vertical SaaS","description":"Upgrading tenants safely in multi-tenant SaaS: roll schema and feature changes out gradually, keep migrations backward-compatible, and give tenants control where upgrades are disruptive.","image":"https://kihiujohn.github.io/assets/og/vertical-saas-tenant-upgrade-strategy.svg","datePublished":"2026-06-18","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/vertical-saas-tenant-upgrade-strategy/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Tenant Upgrade Strategy for Vertical SaaS","item":"https://kihiujohn.github.io/blog/vertical-saas-tenant-upgrade-strategy/"}]}
@@ -87,37 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Tenant Upgrade Strategy for Vertical SaaS</span></nav>
-    <span class="tag">Vertical SaaS · Saas</span>
+    <span class="tag">Vertical SaaS · Multi-tenant</span>
     <h1>Tenant Upgrade Strategy for Vertical SaaS</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Tenant Upgrade Strategy for Vertical SaaS: a practical Acumatica fit review focused on tenant isolation, subscription events, usage evidence, support operations, and upgrade discipline. It separates documented product capability from configuration, integration, and customisation work.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">In multi-tenant SaaS, an upgrade hits everyone at once unless you design otherwise. A tenant upgrade strategy is how you ship change without breaking a customer mid-workday.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-18">Jun 18, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Tenant Upgrade Strategy for Vertical SaaS</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Multi-tenant SaaS usually runs one codebase and shared (or parallel) schemas for all tenants, which means an upgrade potentially affects every customer simultaneously. That is efficient and risky: a bad change breaks everyone at once. A tenant upgrade strategy is how you evolve the product — schema, features, defaults — without turning a routine deploy into a fleet-wide outage.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the supported screen, graph, DAC, workflow, reporting, and integration boundaries. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="schema">Backward-compatible migrations</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Schema changes are the highest-risk upgrades because the database is shared. The safe pattern is expand-and-contract: make additive, backward-compatible changes first (add the new column, keep the old), deploy code that works with both shapes, migrate the data, and only remove the old shape once nothing uses it. This decouples the schema change from the code change so neither has to be instantaneous or perfectly synchronised — which, across many tenants and running requests, it never is.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="gradual">Roll out gradually</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Do not flip a significant change on for every tenant at once. Roll it out in stages — internal tenants first, then a small cohort, then widening — watching for problems at each step. Feature flags let you enable new functionality per tenant or per cohort, so a bug is caught on a few tenants instead of all of them. Gradual rollout turns a potential fleet-wide incident into a contained one you catch early, which is the whole point.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="control">Give tenants control when it's disruptive</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Some upgrades change workflows or UI in ways that disrupt a customer mid-operation. For those, consider giving tenants some control over timing — an opt-in period, a scheduled window, advance notice — so a major change does not surprise them in the middle of their workday. In vertical SaaS, where the product is often mission-critical to a business's daily operations, forcing a disruptive change at a bad moment erodes exactly the trust the product depends on.</p>
 
+<div class="callout"><strong>Never let one tenant's migration block the others</strong><p>When migrating data across many tenants, do it per-tenant in a way that isolates failures — one tenant's migration hitting a problem must not stall or break the others. Batch and checkpoint the migration so it is resumable, and so a single bad tenant is quarantined for investigation rather than halting the whole rollout. Fleet-wide migrations fail one tenant at a time; design so that stays true.</p></div>
 
-<div class="related-articles">
+<p>A tenant upgrade strategy ships change safely across a shared multi-tenant system: backward-compatible expand-and-contract migrations, gradual flag-driven rollout from internal tenants outward, tenant control over genuinely disruptive changes, and isolated per-tenant migrations that contain failures. Together they let you evolve the product continuously without the ever-present multi-tenant risk of breaking every customer with a single deploy.</p>
+
+    <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/laravel-multi-tenant/">Multi-Tenant Laravel Applications</a></li>

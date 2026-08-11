@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>n8n for ERP Migration Workflows | John Kihiu</title>
-<meta name="description" content="n8n for ERP Migration Workflows is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica n8n, Acumatica erp, Acumatica migration, John Kihiu">
+<meta name="description" content="Running ERP data migrations through n8n: model migration as an idempotent, resumable, reconciled batch pipeline — extract, transform, load in waves, with validation at every step.">
+<meta name="keywords" content="n8n ERP migration, data migration, batch pipeline, reconciliation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/n8n-erp-migration/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="n8n for ERP Migration Workflows">
-<meta property="og:description" content="n8n for ERP Migration Workflows is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="Running ERP data migrations through n8n: model migration as an idempotent, resumable, reconciled batch pipeline — extract, transform, load in waves, with validation at every step.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/n8n-erp-migration.svg">
 <meta property="og:image:alt" content="n8n for ERP Migration Workflows — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/n8n-erp-migration/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/n8n-erp-migration.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n for ERP Migration Workflows","description":"n8n for ERP Migration Workflows is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/n8n-erp-migration.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-erp-migration/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"n8n for ERP Migration Workflows","description":"Running ERP data migrations through n8n: model migration as an idempotent, resumable, reconciled batch pipeline — extract, transform, load in waves, with validation at every step.","image":"https://kihiujohn.github.io/assets/og/n8n-erp-migration.svg","datePublished":"2026-06-28","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/n8n-erp-migration/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"n8n for ERP Migration Workflows","item":"https://kihiujohn.github.io/blog/n8n-erp-migration/"}]}
@@ -87,36 +87,45 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">n8n for ERP Migration Workflows</span></nav>
-    <span class="tag">Workflow · N8n</span>
+    <span class="tag">Automation · n8n</span>
     <h1>n8n for ERP Migration Workflows</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">n8n for ERP Migration Workflows is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">An ERP migration is a one-off with permanent consequences. n8n can orchestrate it, but only if you build it as an idempotent, resumable, reconciled pipeline — not a single big run.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-28">Jun 28, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>n8n for ERP Migration Workflows</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Migrating data into or between ERPs is a high-stakes, mostly one-time job where mistakes are expensive and hard to unwind. n8n is a capable orchestrator for it, but a migration is not a normal workflow — it is a batch pipeline that must survive interruption, avoid duplicates, and prove it moved everything correctly. Design it for those properties from the start.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="waves">Extract, transform, load — in waves</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Structure the migration as clear stages: extract from the source, transform to the target's shape, load into the ERP. Run it in waves rather than one monolithic pass — batch the records so you can validate a wave, catch problems early, and never have a single failure that requires restarting the entire migration. Small, verified batches beat one big irreversible run every time.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="idempotent">Idempotent and resumable</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>A migration will be interrupted — by an error, a rate limit, or a discovered data problem — and you must be able to re-run it without duplicating what already loaded. Track which records have been migrated (a status per source record) so a re-run skips completed ones and picks up where it stopped. Key loads on a stable source identifier so re-processing a record updates rather than duplicates. Assume you will run the migration many times before it is done.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Text · a resumable migration pipeline</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>extract batch (status = pending)
+   -&gt; transform to target shape
+   -&gt; validate  (required fields, references resolve)
+   -&gt; load into ERP (upsert on source id)
+   -&gt; mark migrated + record target id
+   -&gt; reconcile counts per wave
+# a re-run only re-touches records still marked pending or failed</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="validate">Validate and reconcile</h2>
 
-    <div class="related-articles">
+<p>Validate before loading — check required fields are present and references resolve — so bad records are caught and quarantined instead of rejected mid-load or, worse, loaded wrong. After each wave and at the end, reconcile: compare source and target counts and spot-check values, so you can state with evidence that everything migrated correctly. "It ran without errors" is not the same as "every record arrived intact."</p>
+
+<div class="callout"><strong>Rehearse against a copy first</strong><p>Never let production be the first time your migration runs end to end. Rehearse against a sandbox or a copy of the target, measure how long it takes, surface the data problems you did not anticipate, and refine. A migration you have run once against real-shaped data is a controlled operation; one you are running for the first time on go-live is a gamble.</p></div>
+
+<p>Run an ERP migration through n8n as an idempotent, resumable, wave-based pipeline with validation before every load and reconciliation after every wave — and rehearse it against a copy before go-live. The goal is a migration you can start, stop, resume, and re-run safely, and finish able to prove that every record made it. Anything less on financial data is a risk you do not want to be explaining afterwards.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/n8n-erp-automation/">n8n for ERP Automation — A Field Guide</a></li>

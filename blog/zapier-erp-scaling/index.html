@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Scaling Zapier for ERP Workloads | John Kihiu</title>
-<meta name="description" content="Scaling Zapier for ERP Workloads is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica zapier, Acumatica scaling, Acumatica erp, John Kihiu">
+<meta name="description" content="Scaling Zapier for ERP workloads: work within task limits and API rate limits, batch and filter to cut volume, add idempotency and reconciliation, and know when to graduate off Zapier.">
+<meta name="keywords" content="Zapier ERP scaling, task limits, rate limits, batching, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/zapier-erp-scaling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Scaling Zapier for ERP Workloads">
-<meta property="og:description" content="Scaling Zapier for ERP Workloads is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="Scaling Zapier for ERP workloads: work within task limits and API rate limits, batch and filter to cut volume, add idempotency and reconciliation, and know when to graduate off Zapier.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/zapier-erp-scaling.svg">
 <meta property="og:image:alt" content="Scaling Zapier for ERP Workloads — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/zapier-erp-scaling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/zapier-erp-scaling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Scaling Zapier for ERP Workloads","description":"Scaling Zapier for ERP Workloads is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/zapier-erp-scaling.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/zapier-erp-scaling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Scaling Zapier for ERP Workloads","description":"Scaling Zapier for ERP workloads: work within task limits and API rate limits, batch and filter to cut volume, add idempotency and reconciliation, and know when to graduate off Zapier.","image":"https://kihiujohn.github.io/assets/og/zapier-erp-scaling.svg","datePublished":"2026-06-27","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/zapier-erp-scaling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Scaling Zapier for ERP Workloads","item":"https://kihiujohn.github.io/blog/zapier-erp-scaling/"}]}
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Scaling Zapier for ERP Workloads</span></nav>
-    <span class="tag">Workflow · Zapier</span>
+    <span class="tag">Automation · Zapier</span>
     <h1>Scaling Zapier for ERP Workloads</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Scaling Zapier for ERP Workloads is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Zapier is superb for getting ERP automation running quickly. Scaling it means respecting two ceilings — Zapier's tasks and the ERP's API limits — and knowing when to move on.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-27">Jun 27, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Scaling Zapier for ERP Workloads</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Zapier gets ERP automation live fast, and for low-to-moderate volume it is hard to beat. But ERP workloads can grow — more orders, more syncs, more events — and Zapier scaling runs into two distinct ceilings: Zapier's own task budget, and the ERP's API rate and session limits. Scaling well means managing both, and being honest about when you have outgrown the platform.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="ceilings">Two limits, not one</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Task consumption is the Zapier-side ceiling: high-volume ERP events multiply tasks quickly, and cost climbs with volume. The ERP-side ceiling is its API — Acumatica and its peers meter requests and cap concurrent sessions, so a burst of Zaps all hitting the ERP at once can exhaust the session pool and start failing. You have to stay under both at the same time, and the ERP limit is usually the harder one.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="reduce">Cut volume before adding capacity</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<ul><li>Filter early — drop irrelevant events right after the trigger so they cost neither a task nor an ERP call.</li><li>Batch where you can — collect records (Zapier Tables helps) and process them together rather than one API call per event.</li><li>Reuse sessions — avoid logging into the ERP on every single call; a proxy that holds a session reduces both latency and session pressure.</li><li>Space out bursts — a sudden flood of events all calling the ERP at once is what trips its rate limits.</li></ul>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="safety">Scale the safeguards too</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>As volume rises, the cost of a mistake rises with it. Idempotency stops higher event rates from turning transient failures and replays into duplicate financial records, and reconciliation becomes essential — at scale, a small percentage of missed or doubled syncs is a lot of discrepancies. The safeguards that were optional at low volume are mandatory at high volume.</p>
 
-    <div class="related-articles">
+<div class="callout"><strong>Know the graduation point</strong><p>There is a volume where Zapier's per-task cost and its stateless awkwardness stop being worth it, and a self-hosted tool like n8n or a small custom service becomes cheaper and more capable. Recognising that point is part of scaling — keep Zapier for the workflows where its speed-to-build wins, and move the high-volume ERP syncs to infrastructure built for them.</p></div>
+
+<p>Scaling Zapier for ERP is respecting both ceilings — tasks and the ERP's API — cutting volume through early filtering and batching, reusing sessions, and hardening idempotency and reconciliation as throughput grows. And it is knowing the graduation point: Zapier to start and for the long tail, purpose-built infrastructure for the high-volume flows it was never priced or designed to carry.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/zapier-erp-zaps/">Common Zapier Zaps for ERP — A Field Guide</a></li>
