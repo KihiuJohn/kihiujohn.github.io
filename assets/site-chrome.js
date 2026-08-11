@@ -42,7 +42,7 @@
    body[data-page="post"] .post-head .meta { max-width: var(--post-measure); border-top-color: var(--chrome-border); }
    body[data-page="post"] main.article { padding-top: clamp(3.5rem, 8vw, 7rem); font-size: 1.02rem; color: #2A2622; }
    body[data-page="post"] main.article > .container { max-width: var(--chrome-max); }
-   body[data-page="post"] main.article > .container > p { text-align: justify; hyphens: auto; }
+   body[data-page="post"] main.article > .container > p { text-align: justify; hyphens: auto; margin-bottom: 0.6rem; }
    body[data-page="post"] main.article > .container > p,
    body[data-page="post"] main.article > .container > h2,
    body[data-page="post"] main.article > .container > h3,
@@ -83,8 +83,12 @@
    body[data-page="post"] .code-block .hljs-emphasis { font-style: italic; }
    body[data-page="post"] .code-block .hljs-strong { font-weight: 600; }
    body[data-page="post"] .related-articles { margin-top: clamp(3rem, 7vw, 5rem); }
-   body[data-page="post"] .related-articles a { transition: transform .4s var(--chrome-ease, cubic-bezier(.32,.72,0,1)), background .3s var(--chrome-ease, cubic-bezier(.32,.72,0,1)); }
+   body[data-page="post"] .related-articles ul { grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0.6rem; }
+   body[data-page="post"] .related-articles a { display: block; height: 2.85rem; line-height: 2.85rem; padding: 0 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: transform .4s var(--chrome-ease, cubic-bezier(.32,.72,0,1)), background .3s var(--chrome-ease, cubic-bezier(.32,.72,0,1)); }
    body[data-page="post"] .related-articles a:hover { transform: translateY(-2px); }
+
+   /* ── BLOG LISTING — align content to the nav width (logo edge ↔ CTA edge) ── */
+   body[data-page="blog"] .container { max-width: var(--chrome-max); padding-left: var(--chrome-gutter); padding-right: var(--chrome-gutter); }
    @media (prefers-reduced-motion: no-preference) {
      body[data-page="post"] .post-head .container > * { opacity: 0; transform: translateY(1.25rem); animation: chromePostIn .8s cubic-bezier(.22,1,.36,1) forwards; }
      body[data-page="post"] .post-head .container > *:nth-child(2) { animation-delay: .08s; }
@@ -245,6 +249,7 @@
   ${link('about', 'About', '#about')}
   ${link('work', 'Work', '#work')}
   <a href="/services/" data-link="services" class="${PAGE==='services'?'active':''}">Services</a>
+  <a href="/quote/" data-link="quote" class="${PAGE==='quote'?'active':''}">Quote</a>
   <a href="/integrations/" data-link="integrations" class="${PAGE==='integrations'?'active':''}">Integrations</a>
   <a href="/blog/" data-link="blog" class="${PAGE==='blog'||PAGE==='post'?'active':''}">Blog</a>
   <a href="/CV/" data-link="cv" class="${PAGE==='cv'?'active':''}">CV</a>
