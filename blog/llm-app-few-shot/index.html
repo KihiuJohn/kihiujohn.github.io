@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Few-Shot Prompting — A Field Guide | John Kihiu</title>
-<meta name="description" content="Few-Shot Prompting — A Field Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica few-shot, John Kihiu">
+<meta name="description" content="Few-shot prompting done well: when examples beat zero-shot, how to choose and order them, keeping format consistent, and retrieving examples dynamically instead of hardcoding them.">
+<meta name="keywords" content="few-shot prompting, in-context learning, prompt examples, LLM prompting, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-few-shot/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Few-Shot Prompting — A Field Guide">
-<meta property="og:description" content="Few-Shot Prompting — A Field Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
+<meta property="og:description" content="Few-shot prompting done well: when examples beat zero-shot, how to choose and order them, keeping format consistent, and retrieving examples dynamically instead of hardcoding them.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-few-shot.svg">
 <meta property="og:image:alt" content="Few-Shot Prompting — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-few-shot/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-few-shot.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Few-Shot Prompting — A Field Guide","description":"Few-Shot Prompting — A Field Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.","image":"https://kihiujohn.github.io/assets/og/llm-app-few-shot.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-few-shot/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Few-Shot Prompting — A Field Guide","description":"Few-shot prompting done well: when examples beat zero-shot, how to choose and order them, keeping format consistent, and retrieving examples dynamically instead of hardcoding them.","image":"https://kihiujohn.github.io/assets/og/llm-app-few-shot.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-few-shot/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Few-Shot Prompting — A Field Guide","item":"https://kihiujohn.github.io/blog/llm-app-few-shot/"}]}
@@ -87,36 +87,40 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Few-Shot Prompting — A Field Guide</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Few-Shot Prompting — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Few-Shot Prompting — A Field Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Few-shot prompting is teaching by example inside the prompt. It is powerful when the task is hard to describe but easy to demonstrate — and wasteful when it isn't.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Few-Shot Prompting — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Few-shot prompting means showing the model a handful of input–output examples before the real input, so it infers the pattern you want. It is one of the most reliable ways to lift quality on a fiddly task — and one of the easiest to overuse, because every example is tokens you pay for on every call.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="when">When few-shot earns its tokens</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Reach for examples when the task is hard to <em>describe</em> but easy to <em>demonstrate</em>: a specific output format, a labelling scheme with subtle boundaries, a tone that is easier to show than to specify. If a clear instruction and a schema already get you there, stay zero-shot — modern models follow instructions well, and needless examples just add cost and latency.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="choose">Choosing the examples</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Example quality dominates example quantity. Three well-chosen examples usually beat ten sloppy ones.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<ul><li>Cover the boundaries — include the tricky and ambiguous cases, not just the obvious ones, because those are where the model needs the demonstration most.</li><li>Be diverse — near-duplicate examples waste tokens teaching the same thing twice.</li><li>Be correct — a single wrong example is worse than none; the model will faithfully imitate the mistake.</li><li>Match the real distribution — examples should look like the inputs you actually get.</li></ul>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="format">Consistency and ordering</h2>
 
-    <div class="related-articles">
+<p>Every example must use the exact format you expect back — same field names, same structure, same style. Inconsistency in the examples produces inconsistency in the output. Ordering has a smaller but real effect; a common, safe default is to put the most representative example last, closest to the real input.</p>
+
+<h2 id="dynamic">Retrieve examples dynamically</h2>
+
+<p>The advanced move is to stop hardcoding examples and select them per request. Keep a bank of labelled examples, embed the incoming input, and retrieve the few most similar ones to include in the prompt. This dynamic few-shot approach adapts the demonstration to each input and often beats any fixed set — it is retrieval-augmented prompting applied to examples rather than documents.</p>
+
+<div class="callout"><strong>Count the cost of every example</strong><p>Few-shot examples are prepended to every single call, so five long examples can dwarf the actual user input in tokens. Provider prompt caching helps when the example block is stable, but the discipline still holds: use the fewest examples that reach your quality bar, and measure whether each one is earning its place.</p></div>
+
+<p>Treat few-shot as a dial, not a default. Start zero-shot, add examples only where they measurably help on your eval set, keep them correct and consistent, and graduate to dynamic retrieval when a fixed set can no longer cover the range of inputs you see.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

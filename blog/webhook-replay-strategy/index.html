@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Webhook Replay Strategy — A Field Guide | John Kihiu</title>
-<meta name="description" content="Webhook Replay Strategy — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
-<meta name="keywords" content="Acumatica webhook, Acumatica replay, Acumatica recovery, John Kihiu">
+<meta name="description" content="A webhook replay strategy for recovery: persist raw events, replay from a dead-letter queue or an event log, keep replays idempotent, and scope replays by time or resource.">
+<meta name="keywords" content="webhook replay, event replay, dead letter recovery, webhook recovery, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/webhook-replay-strategy/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Webhook Replay Strategy — A Field Guide">
-<meta property="og:description" content="Webhook Replay Strategy — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.">
+<meta property="og:description" content="A webhook replay strategy for recovery: persist raw events, replay from a dead-letter queue or an event log, keep replays idempotent, and scope replays by time or resource.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/webhook-replay-strategy.svg">
 <meta property="og:image:alt" content="Webhook Replay Strategy — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/webhook-replay-strategy/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/webhook-replay-strategy.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook Replay Strategy — A Field Guide","description":"Webhook Replay Strategy — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.","image":"https://kihiujohn.github.io/assets/og/webhook-replay-strategy.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-replay-strategy/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook Replay Strategy — A Field Guide","description":"A webhook replay strategy for recovery: persist raw events, replay from a dead-letter queue or an event log, keep replays idempotent, and scope replays by time or resource.","image":"https://kihiujohn.github.io/assets/og/webhook-replay-strategy.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-replay-strategy/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Webhook Replay Strategy — A Field Guide","item":"https://kihiujohn.github.io/blog/webhook-replay-strategy/"}]}
@@ -87,36 +87,46 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Webhook Replay Strategy — A Field Guide</span></nav>
-    <span class="tag">Workflow · Webhook</span>
+    <span class="tag">Integration · Webhooks</span>
     <h1>Webhook Replay Strategy — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhook Replay Strategy — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Sooner or later a bug or an outage means you processed events wrong, or not at all. Replay is how you recover — but only if you kept the raw events and stayed idempotent.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-24">Jun 24, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Webhook Replay Strategy — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Things go wrong: a deploy ships a handler bug, a downstream dependency is down for an hour, a consumer silently drops events. When that happens you need to re-process the affected events — replay them. The catch is that replay is only possible if you designed for it beforehand, by keeping the raw events and making processing safe to repeat.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a stable contract, explicit error semantics, idempotency, observability, and a deprecation path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="persist">Persist the raw event first</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The foundation of replay is a durable record of every event exactly as it arrived — full payload, headers, received timestamp — written <em>before</em> you process it. If you only store the results of processing, a processing bug means the correct input is gone and there is nothing to replay. Treat the inbound event log as the source of truth and processing as a derivation from it.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · an inbound event log</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE webhook_events (
+  event_id     TEXT PRIMARY KEY,
+  source       TEXT NOT NULL,
+  payload      JSONB NOT NULL,
+  received_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status       TEXT NOT NULL DEFAULT 'received',  -- received | processed | failed
+  processed_at TIMESTAMPTZ
+);</code></pre>
+</div>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="sources">Replay from the DLQ or the log</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>There are two replay sources for two situations. The dead-letter queue holds events that failed processing — replay those once you have fixed the bug or the dependency recovers. The full event log lets you replay a broader slice — every event for a resource, or everything in a time window — which is what you need when a handler was silently wrong and the events never even reached the DLQ.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="scope">Scope and control the replay</h2>
 
-    <div class="related-articles">
+<ul><li>By time — replay everything received between the deploy that broke and the fix.</li><li>By resource — replay all events for the specific customers or orders that were affected.</li><li>By status — replay only events still marked failed, leaving the good ones untouched.</li></ul>
+
+<div class="callout"><strong>Replay leans entirely on idempotency</strong><p>A replay re-delivers events you may have already partly processed, so without idempotent handling you will double-charge and duplicate on the way to fixing the original problem. Idempotency is what makes replay a safe recovery tool instead of a second incident. Never replay into a handler you are not certain is idempotent.</p></div>
+
+<p>A replay capability is cheap insurance you build before you need it: store raw events durably, track their processing status, keep handlers idempotent, and give yourself a scoped, controllable way to re-run them. When the inevitable bad deploy or outage arrives, recovery is a targeted replay instead of a data-repair archaeology project.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-business-events-webhooks/">Acumatica Business Events with Webhooks</a></li>

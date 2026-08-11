@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>A/B Testing LLM Apps | John Kihiu</title>
-<meta name="description" content="A/B Testing LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders, invoices,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica ab-testing, John Kihiu">
+<meta name="description" content="A/B testing LLM apps: split traffic between prompt or model variants, pick one primary success metric with cost and latency as guardrails, and log the variant to reach real significance.">
+<meta name="keywords" content="LLM A/B testing, prompt experiments, model comparison, online evaluation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-a-b-testing/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="A/B Testing LLM Apps">
-<meta property="og:description" content="A/B Testing LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders, invoices,.">
+<meta property="og:description" content="A/B testing LLM apps: split traffic between prompt or model variants, pick one primary success metric with cost and latency as guardrails, and log the variant to reach real significance.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-a-b-testing.svg">
 <meta property="og:image:alt" content="A/B Testing LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-a-b-testing/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-a-b-testing.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"A/B Testing LLM Apps","description":"A/B Testing LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders, invoices,.","image":"https://kihiujohn.github.io/assets/og/llm-app-a-b-testing.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-a-b-testing/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"A/B Testing LLM Apps","description":"A/B testing LLM apps: split traffic between prompt or model variants, pick one primary success metric with cost and latency as guardrails, and log the variant to reach real significance.","image":"https://kihiujohn.github.io/assets/og/llm-app-a-b-testing.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-a-b-testing/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"A/B Testing LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-a-b-testing/"}]}
@@ -87,36 +87,47 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">A/B Testing LLM Apps</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>A/B Testing LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">A/B Testing LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders, invoices,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Offline evals tell you which variant wins on your dataset. A/B testing tells you which one wins with real users — and those are not always the same answer.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>A/B Testing LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Your eval set is a proxy for reality, and proxies drift. A prompt that scores higher offline can perform worse live because real users phrase things your dataset never anticipated. A/B testing closes that gap by measuring variants against each other on live traffic with a real outcome metric.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="split">Split traffic cleanly</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Assign each user (or session) deterministically to a variant — hash the user id so the same person always gets the same version — and log which variant served every request. Deterministic assignment matters: if a user flips between variants mid-session, you cannot attribute their behaviour to either one. The variant tag on each logged request is what makes the whole analysis possible later.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Python · deterministic variant assignment</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import hashlib
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+def variant(user_id, experiment, split=0.5):
+    h = hashlib.sha256(f"{experiment}:{user_id}".encode()).hexdigest()
+    bucket = int(h[:8], 16) / 0xFFFFFFFF
+    return "B" if bucket &lt; split else "A"
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+v = variant(user_id, "classify_prompt_v4")
+spec = PROMPTS["classify@4" if v == "B" else "classify@3"]</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="metric">One primary metric, guarded</h2>
 
-    <div class="related-articles">
+<p>Choose a single primary metric that reflects real value — task success, a thumbs-up rate, downstream conversion, reduced escalation — and commit to it before the test. Then track guardrail metrics you must not regress: cost per request and latency. A variant that lifts quality 2% while doubling cost is usually not a win, and only side-by-side guardrails reveal that.</p>
+
+<h2 id="significance">Run until it means something</h2>
+
+<p>LLM output is noisy, so small samples lie. Decide the sample size or duration up front and resist calling the result early because it looks good on day one. If the difference is not statistically meaningful, the honest conclusion is "no detectable difference" — which is still useful, because it means you can pick the cheaper or faster variant with confidence.</p>
+
+<div class="callout"><strong>A/B test the expensive changes</strong><p>You do not need an online experiment for every prompt tweak — the eval suite catches most regressions cheaply. Reserve A/B tests for changes where offline and online might diverge: a new model, a materially different prompt strategy, or anything touching a metric that only real users produce.</p></div>
+
+<p>The workflow that scales is offline evals as the fast gate for every change, and A/B tests as the slower, higher-fidelity check for the changes that matter. Together they let you improve an LLM feature continuously without guessing whether each change actually helped.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

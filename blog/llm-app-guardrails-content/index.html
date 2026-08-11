@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Content Guardrails for LLM Apps | John Kihiu</title>
-<meta name="description" content="Content Guardrails for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica guardrails, John Kihiu">
+<meta name="description" content="Content guardrails for LLM apps: layered input and output moderation, blocking prompt injection and jailbreaks, redacting sensitive data, and handling refusals as a product state.">
+<meta name="keywords" content="LLM guardrails, content moderation, prompt injection, jailbreak defence, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-guardrails-content/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Content Guardrails for LLM Apps">
-<meta property="og:description" content="Content Guardrails for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
+<meta property="og:description" content="Content guardrails for LLM apps: layered input and output moderation, blocking prompt injection and jailbreaks, redacting sensitive data, and handling refusals as a product state.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-guardrails-content.svg">
 <meta property="og:image:alt" content="Content Guardrails for LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-guardrails-content/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-guardrails-content.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Content Guardrails for LLM Apps","description":"Content Guardrails for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.","image":"https://kihiujohn.github.io/assets/og/llm-app-guardrails-content.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-guardrails-content/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Content Guardrails for LLM Apps","description":"Content guardrails for LLM apps: layered input and output moderation, blocking prompt injection and jailbreaks, redacting sensitive data, and handling refusals as a product state.","image":"https://kihiujohn.github.io/assets/og/llm-app-guardrails-content.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-guardrails-content/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Content Guardrails for LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-guardrails-content/"}]}
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Content Guardrails for LLM Apps</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Content Guardrails for LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Content Guardrails for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Guardrails are the layers that sit around the model so a hostile or unlucky input cannot produce harmful, off-brand, or unsafe output. One layer is never enough.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Content Guardrails for LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>The model's own training is one line of defence, and users will find the gaps in it — deliberately with jailbreak attempts, or accidentally with inputs that steer it somewhere you did not intend. Guardrails are the layers you add around the model so that a bad input is caught before it reaches the model, or a bad output is caught before it reaches the user. Defence in depth is the whole idea.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="input">Input guardrails</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Check the request before you spend a token on it. Screen for disallowed content, obvious prompt-injection and jailbreak patterns ("ignore your instructions", embedded instructions in retrieved documents), and inputs that are simply out of scope for your product. Catching these early saves cost and stops a hostile prompt from ever reaching the model.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="output">Output guardrails</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Never assume the generation is safe just because the input was. Screen the output too:</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<ul><li>Moderation — run generated text through a moderation check for disallowed categories before display.</li><li>PII leakage — scan for and redact any sensitive data the model may have surfaced or echoed.</li><li>Format and scope — validate the output is on-topic and in the expected shape; a support bot should not be writing poetry.</li><li>Grounding — for factual features, check claims against your retrieved sources rather than trusting free generation.</li></ul>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="injection">Prompt injection is the hard one</h2>
 
-    <div class="related-articles">
+<p>Prompt injection — malicious instructions hidden in user input or, worse, in retrieved/third-party content — is an unsolved problem you mitigate rather than eliminate. Keep the system prompt and untrusted content clearly separated, never let a tool-using agent take irreversible actions without a confirmation step, and treat any text the model did not originate as untrusted. Assume the model can be talked into ignoring instructions, and make sure that on its own it cannot do real damage.</p>
+
+<div class="callout"><strong>A refusal is a product state, not an error</strong><p>When a guardrail blocks a request or the model declines, that is expected behaviour, not an exception to swallow. Return a clear, honest message, log it for review, and make sure legitimate users caught by a false positive have a path forward. Silent failures and cryptic errors turn a working guardrail into a support ticket.</p></div>
+
+<p>Layer the defences — input screening, a constrained system prompt, output moderation, and PII redaction — because any single layer will miss something. And decide your policy deliberately: what is disallowed, what is redacted, and what a blocked user sees. Guardrails are a product decision expressed in engineering, not a library you switch on.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

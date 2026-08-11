@@ -32,32 +32,55 @@
    body { font-family: 'Geist', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
    .code-block .copy-btn, .code-block .code-lang { font-family: 'Geist', system-ui, sans-serif; }
 
-   /* ── POST PAGES — same warm, emerald editorial system as the homepage ── */
-   body[data-page="post"] { background: var(--chrome-bg); }
-   body[data-page="post"] .post-head { position: relative; overflow: hidden; padding-top: clamp(3.5rem, 8vw, 7rem); background: linear-gradient(180deg, #fff 0%, #FAFAF9 100%); border-bottom: 1px solid var(--chrome-border); }
-   body[data-page="post"] .post-head::before { content: ''; position: absolute; top: -18rem; right: -8rem; width: 34rem; height: 34rem; pointer-events: none; background: radial-gradient(circle, rgba(16,185,129,.13), rgba(16,185,129,0) 68%); }
-   body[data-page="post"] .post-head .container, body[data-page="post"] .article .container { position: relative; z-index: 1; max-width: 68rem; }
+   /* ── POST PAGES — warm paper, muted-emerald editorial system ── */
+   body[data-page="post"] { --post-accent: #3F7F63; --post-accent-soft: #D3E2D9; --post-tint: #EDF2EF; --post-measure: 42rem; background: #F5F3EF; color: #1C1917; }
+   body[data-page="post"] .post-head { position: relative; overflow: hidden; padding-top: clamp(3.5rem, 8vw, 7rem); background: linear-gradient(180deg, #FAF9F6 0%, #F5F3EF 100%); border-bottom: 1px solid var(--chrome-border); }
+   body[data-page="post"] .post-head::before { content: ''; position: absolute; top: -18rem; right: -8rem; width: 34rem; height: 34rem; pointer-events: none; background: radial-gradient(circle, rgba(63,127,99,.07), rgba(63,127,99,0) 68%); }
+   body[data-page="post"] .post-head .container, body[data-page="post"] .article .container { position: relative; z-index: 1; max-width: 60rem; }
    body[data-page="post"] .post-head h1 { max-width: 18ch; font-size: clamp(2.4rem, 6vw, 4.8rem); line-height: 1.02; letter-spacing: -.045em; }
-   body[data-page="post"] .post-head .tag { background: var(--chrome-accent-tint); color: var(--chrome-accent-dk); border: 1px solid #A7F3D0; border-radius: 100px; }
-   body[data-page="post"] .post-head .meta { max-width: 44rem; border-top-color: var(--chrome-border); }
-   body[data-page="post"] main.article { padding-top: clamp(3.5rem, 8vw, 7rem); font-size: 1.02rem; }
-   body[data-page="post"] main.article > .container { max-width: 68rem; }
+   body[data-page="post"] .post-head .tag { background: var(--post-tint); color: var(--post-accent); border: 1px solid var(--post-accent-soft); border-radius: 100px; }
+   body[data-page="post"] .post-head .meta { max-width: var(--post-measure); border-top-color: var(--chrome-border); }
+   body[data-page="post"] main.article { padding-top: clamp(3.5rem, 8vw, 7rem); font-size: 1.02rem; color: #2A2622; }
+   body[data-page="post"] main.article > .container { max-width: 60rem; }
    body[data-page="post"] main.article > .container > p,
    body[data-page="post"] main.article > .container > h2,
    body[data-page="post"] main.article > .container > h3,
    body[data-page="post"] main.article > .container > ul,
    body[data-page="post"] main.article > .container > ol,
    body[data-page="post"] main.article > .container > table,
+   body[data-page="post"] main.article > .container > blockquote,
    body[data-page="post"] main.article > .container > .callout,
-   body[data-page="post"] main.article > .container > .source-note { max-width: 68ch; }
-   body[data-page="post"] main.article h2 { margin-top: clamp(3rem, 7vw, 5.5rem); padding-bottom: .75rem; border-bottom: 0; font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.035em; }
-   body[data-page="post"] main.article h2::before { content: ''; display: block; width: 2.4rem; height: .18rem; margin-bottom: .8rem; background: var(--chrome-accent-dk); border-radius: 100px; }
-   body[data-page="post"] main.article a { color: var(--chrome-accent-dk); border-bottom-color: #A7F3D0; }
-   body[data-page="post"] .source-note { margin-top: clamp(3rem, 7vw, 5rem); padding: 1.25rem 1.4rem; background: var(--chrome-accent-tint); border: 1px solid #A7F3D0; border-radius: var(--chrome-radius-md); color: var(--chrome-text-2); }
-   body[data-page="post"] .source-note strong { display: block; margin-bottom: .35rem; color: #047857; }
+   body[data-page="post"] main.article > .container > .code-block,
+   body[data-page="post"] main.article > .container > .source-note { max-width: var(--post-measure); margin-left: 0; margin-right: 0; }
+   body[data-page="post"] main.article h2 { margin-top: clamp(3rem, 7vw, 5.5rem); padding-bottom: .75rem; border-bottom: 1px solid var(--chrome-border); font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.035em; }
+   body[data-page="post"] main.article h2::before { content: none; }
+   body[data-page="post"] main.article a { color: var(--post-accent); border-bottom-color: var(--post-accent-soft); }
+   body[data-page="post"] main.article li::marker { color: var(--post-accent); }
+   body[data-page="post"] main.article blockquote { border-left-color: var(--post-accent); background: var(--post-tint); }
+   body[data-page="post"] main.article :not(pre) > code { color: #9A5B00; background: #F1EFE9; border-color: #E4E0D8; }
+   body[data-page="post"] .source-note { margin-top: clamp(3rem, 7vw, 5rem); padding: 1.25rem 1.4rem; background: var(--post-tint); border: 1px solid var(--post-accent-soft); border-radius: var(--chrome-radius-md); color: var(--chrome-text-2); }
+   body[data-page="post"] .source-note strong { display: block; margin-bottom: .35rem; color: var(--post-accent); }
    body[data-page="post"] .source-note p { margin-bottom: .65rem; }
    body[data-page="post"] .source-note ul { margin: 0; padding-left: 1.1rem; }
    body[data-page="post"] .source-note li { margin: .25rem 0; }
+
+   /* ── CODE BLOCKS — light, editor-style (highlight.js, GitHub-light palette from SAMPLE) ── */
+   body[data-page="post"] .code-block { background: #FBFAF8; border: 1px solid #E7E3DC; box-shadow: 0 1px 2px rgba(28,25,23,.05); }
+   body[data-page="post"] .code-block .code-header { background: #F3F1EC; border-bottom: 1px solid #E7E3DC; }
+   body[data-page="post"] .code-block .code-lang { color: #8A857C; }
+   body[data-page="post"] .code-block .copy-btn { background: #fff; color: #57534E; border: 1px solid #E0DDD6; }
+   body[data-page="post"] .code-block .copy-btn:hover { background: #F3F1EC; color: #1C1917; }
+   body[data-page="post"] .code-block .copy-btn.copied { background: var(--post-accent); border-color: var(--post-accent); color: #fff; }
+   body[data-page="post"] .code-block pre code { color: #24292E; background: transparent; }
+   body[data-page="post"] .code-block .hljs-comment, body[data-page="post"] .code-block .hljs-quote { color: #9CA3AF; font-style: italic; }
+   body[data-page="post"] .code-block .hljs-keyword, body[data-page="post"] .code-block .hljs-selector-tag, body[data-page="post"] .code-block .hljs-literal, body[data-page="post"] .code-block .hljs-type, body[data-page="post"] .code-block .hljs-built_in, body[data-page="post"] .code-block .hljs-name { color: #7C3AED; }
+   body[data-page="post"] .code-block .hljs-string, body[data-page="post"] .code-block .hljs-attr, body[data-page="post"] .code-block .hljs-regexp, body[data-page="post"] .code-block .hljs-addition { color: #16A34A; }
+   body[data-page="post"] .code-block .hljs-number, body[data-page="post"] .code-block .hljs-symbol, body[data-page="post"] .code-block .hljs-bullet, body[data-page="post"] .code-block .hljs-variable, body[data-page="post"] .code-block .hljs-template-variable, body[data-page="post"] .code-block .hljs-attribute { color: #2563EB; }
+   body[data-page="post"] .code-block .hljs-title, body[data-page="post"] .code-block .hljs-section, body[data-page="post"] .code-block .hljs-title.function_ { color: #B45309; }
+   body[data-page="post"] .code-block .hljs-meta, body[data-page="post"] .code-block .hljs-doctag { color: #9CA3AF; }
+   body[data-page="post"] .code-block .hljs-deletion { color: #DC2626; }
+   body[data-page="post"] .code-block .hljs-emphasis { font-style: italic; }
+   body[data-page="post"] .code-block .hljs-strong { font-weight: 600; }
    body[data-page="post"] .related-articles { margin-top: clamp(3rem, 7vw, 5rem); }
    body[data-page="post"] .related-articles a { transition: transform .4s var(--chrome-ease, cubic-bezier(.32,.72,0,1)), background .3s var(--chrome-ease, cubic-bezier(.32,.72,0,1)); }
    body[data-page="post"] .related-articles a:hover { transform: translateY(-2px); }
@@ -342,6 +365,40 @@
 
     wireNav();
     wireWA();
+    if (PAGE === 'post') setupCodeHighlight();
+  }
+
+  // ── CODE HIGHLIGHTING (posts only) — light editor palette via highlight.js ──
+  function setupCodeHighlight() {
+    const blocks = document.querySelectorAll('.code-block pre code');
+    if (!blocks.length) return;
+    // Map the label shown in each block's header (e.g. "C# · GRAPH EXTENSION") to an hljs id.
+    // Only languages in the hljs "common" bundle are mapped; anything else stays plain (still light-themed).
+    const LANG = {
+      'c#':'csharp','csharp':'csharp','typescript':'typescript','ts':'typescript',
+      'javascript':'javascript','js':'javascript','python':'python','py':'python','json':'json',
+      'yaml':'yaml','yml':'yaml','html':'xml','xml':'xml','css':'css','scss':'scss','bash':'bash',
+      'shell':'bash','sh':'bash','sql':'sql','graphql':'graphql','php':'php'
+    };
+    const run = () => {
+      if (!window.hljs) return;
+      blocks.forEach(code => {
+        if (code.dataset.hl) return;
+        code.dataset.hl = '1';
+        const header = code.closest('.code-block') && code.closest('.code-block').querySelector('.code-lang');
+        const token = ((header && header.textContent) || '').split('·')[0].trim().toLowerCase();
+        const id = LANG[token];
+        if (!id) return;
+        code.classList.add('language-' + id);
+        try { window.hljs.highlightElement(code); } catch (e) {}
+      });
+    };
+    if (window.hljs) { run(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js';
+    s.crossOrigin = 'anonymous';
+    s.onload = run;
+    document.head.appendChild(s);
   }
 
   // ── NAV wiring ─────────────────────────────────────────

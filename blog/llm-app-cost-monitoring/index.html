@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cost Monitoring for LLM Apps | John Kihiu</title>
-<meta name="description" content="Cost Monitoring for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica cost, John Kihiu">
+<meta name="description" content="How to keep LLM spend visible and bounded: log token usage per request, attribute cost to users and features, price it correctly, and alert before the bill surprises you.">
+<meta name="keywords" content="LLM cost monitoring, token usage tracking, LLM spend, AI cost control, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-cost-monitoring/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Cost Monitoring for LLM Apps">
-<meta property="og:description" content="Cost Monitoring for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
+<meta property="og:description" content="How to keep LLM spend visible and bounded: log token usage per request, attribute cost to users and features, price it correctly, and alert before the bill surprises you.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-cost-monitoring.svg">
 <meta property="og:image:alt" content="Cost Monitoring for LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-cost-monitoring/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-cost-monitoring.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Cost Monitoring for LLM Apps","description":"Cost Monitoring for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.","image":"https://kihiujohn.github.io/assets/og/llm-app-cost-monitoring.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-cost-monitoring/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Cost Monitoring for LLM Apps","description":"How to keep LLM spend visible and bounded: log token usage per request, attribute cost to users and features, price it correctly, and alert before the bill surprises you.","image":"https://kihiujohn.github.io/assets/og/llm-app-cost-monitoring.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-cost-monitoring/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Cost Monitoring for LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-cost-monitoring/"}]}
@@ -87,36 +87,54 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Cost Monitoring for LLM Apps</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Cost Monitoring for LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Cost Monitoring for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">LLM cost is usage times token price, and both move per request. If you are not logging tokens on every call, you are flying the bill blind.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Cost Monitoring for LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>LLM bills surprise teams because cost is invisible at the point it is created. A single feature change — a longer system prompt, an extra retrieval chunk, a retry loop — can double token usage without anyone noticing until the monthly invoice. The fix is boring and effective: capture usage on every call, attribute it, and price it in your own system so you can see spend the same day it happens.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="capture">Log tokens on every call</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Every provider returns input and output token counts in the response. Record them alongside the metadata you will want to slice by later: user or tenant, feature, model, prompt version, and whether the call was a cache hit or a retry. Store it in your own database or metrics system — do not rely on the provider dashboard, which cannot see your application dimensions.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Python · usage logging wrapper</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def tracked_complete(messages, *, model, user_id, feature):
+    resp = client.messages.create(model=model, messages=messages)
+    u = resp.usage
+    log_usage(
+        user_id=user_id, feature=feature, model=model,
+        input_tokens=u.input_tokens,
+        output_tokens=u.output_tokens,
+        cost_usd=price(model, u.input_tokens, u.output_tokens),
+    )
+    return resp
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+def price(model, tin, tout):
+    rate = PRICES[model]                 # USD per 1M tokens, from the provider pricing page
+    return (tin * rate["in"] + tout * rate["out"]) / 1_000_000</code></pre>
+</div>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="attribute">Attribute to features and users</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>A total spend number tells you there is a problem but not where. The useful questions are per-feature (which capability is expensive) and per-tenant (which customer is unprofitable). Because you logged those dimensions, both are a group-by. This is also what lets you price a product tier honestly: if your heaviest users cost more in tokens than they pay, you found that out in a dashboard instead of a board meeting.</p>
 
-    <div class="related-articles">
+<h2 id="control">Budgets and alerts</h2>
+
+<p>Monitoring without a limit is just a nicer way to watch money leave. Add guardrails:</p>
+
+<ul><li>A per-tenant or per-user daily/monthly token budget, enforced in the request path — reject or degrade when exceeded rather than logging it after the fact.</li><li>An alert on daily spend crossing a threshold, so a runaway retry loop or a prompt-injection abuse pattern pages you the same day.</li><li>An anomaly check on cost-per-request: a sudden rise usually means a prompt grew or retrieval is returning more context than intended.</li></ul>
+
+<div class="callout"><strong>Retries and context are the usual culprits</strong><p>When spend jumps, look at two things first: a retry policy that re-sends the full prompt on every attempt, and a retrieval step whose chunk count or size crept up. Both inflate input tokens quietly and neither shows up as an obvious code change.</p></div>
+
+<p>The goal is not to minimise spend — it is to make spend a number you can see, attribute, and cap. Once every call is logged with its cost and its owner, cost stops being a monthly surprise and becomes just another metric you tune.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-cost-control/">Cost Control for LLM Apps</a></li>

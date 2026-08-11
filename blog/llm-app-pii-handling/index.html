@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PII Handling in LLM Apps | John Kihiu</title>
-<meta name="description" content="PII Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica pii, John Kihiu">
+<meta name="description" content="Handling PII in LLM apps: detect and redact before you send, use placeholder tokenisation, get the provider data terms right, and set retention and regional boundaries.">
+<meta name="keywords" content="LLM PII handling, data redaction, PII detection, LLM privacy, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-pii-handling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="PII Handling in LLM Apps">
-<meta property="og:description" content="PII Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
+<meta property="og:description" content="Handling PII in LLM apps: detect and redact before you send, use placeholder tokenisation, get the provider data terms right, and set retention and regional boundaries.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-pii-handling.svg">
 <meta property="og:image:alt" content="PII Handling in LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-pii-handling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-pii-handling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"PII Handling in LLM Apps","description":"PII Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.","image":"https://kihiujohn.github.io/assets/og/llm-app-pii-handling.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-pii-handling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"PII Handling in LLM Apps","description":"Handling PII in LLM apps: detect and redact before you send, use placeholder tokenisation, get the provider data terms right, and set retention and regional boundaries.","image":"https://kihiujohn.github.io/assets/og/llm-app-pii-handling.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-pii-handling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"PII Handling in LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-pii-handling/"}]}
@@ -87,36 +87,58 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">PII Handling in LLM Apps</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>PII Handling in LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">PII Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Every prompt you send leaves your systems for a third party. Handling PII means deciding — deliberately — what personal data is allowed to make that trip, and stripping the rest.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>PII Handling in LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>An LLM call ships your input to an external provider. The moment that input contains names, emails, account numbers, or health and financial details, you have a data-protection problem that a normal internal API does not. Handling it is about controlling what personal data crosses that boundary and under what terms — not hoping it never does.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="redact">Detect and redact before sending</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The strongest control is not sending the PII at all. Detect it in the input — pattern matching for structured identifiers like card and account numbers, named-entity recognition for names, emails, and addresses — and replace it with placeholders before the prompt leaves your system. The model reasons over the placeholders; you re-insert the real values in the response afterwards.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Python · placeholder tokenisation round-trip</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import re
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+def redact(text):
+    tokens = {}
+    def sub(kind, pattern, t):
+        def rep(m):
+            key = f"[{kind}_{len(tokens)}]"
+            tokens[key] = m.group(0)
+            return key
+        return re.sub(pattern, rep, t)
+    text = sub("EMAIL", r"[\w.+-]+@[\w-]+\.[\w.-]+", text)
+    text = sub("CARD",  r"\b\d{13,16}\b", text)
+    return text, tokens
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+def restore(text, tokens):
+    for key, val in tokens.items():
+        text = text.replace(key, val)
+    return text</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Redaction is imperfect — NER misses things and regex over-matches — so treat it as one layer, not a guarantee, and combine it with the terms and retention controls below.</p>
 
-    <div class="related-articles">
+<h2 id="terms">Get the provider terms right</h2>
+
+<ul><li>Use the enterprise/API tier that contractually excludes your data from training, and confirm it in writing — consumer tiers often do not.</li><li>Sign a data processing agreement (DPA) with the provider if you handle personal data under GDPR or similar law.</li><li>Know the provider's retention window for API inputs and whether a zero-retention option is available for sensitive workloads.</li></ul>
+
+<h2 id="boundary">Retention and region</h2>
+
+<p>Apply the same discipline to your own systems. Do not log raw prompts and completions containing PII in plaintext; redact before logging, encrypt at rest, and set a retention window with automatic deletion. If you operate under data-residency rules, use provider endpoints in the required region and confirm data does not leave it.</p>
+
+<div class="callout"><strong>Minimise, don't just protect</strong><p>The safest personal data is the data you never sent. Before adding a field to a prompt, ask whether the model actually needs it to do the task. Most PII in prompts is there by habit, not necessity — and removing it is stronger than any downstream control.</p></div>
+
+<p>PII handling in LLM apps is a boundary-control exercise: redact what you can before it leaves, contract correctly for what must go, and retain as little as possible on both sides. Decide the policy explicitly, because "we sent everything and hoped" is not a defence you want to make to a regulator.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

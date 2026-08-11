@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multimodal LLM Apps — Text, Image, Audio | John Kihiu</title>
-<meta name="description" content="Multimodal LLM Apps — Text, Image, Audio is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company —.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica multimodal, John Kihiu">
+<meta name="description" content="Building multimodal LLM apps across text, image, and audio: how vision inputs and image tokens work, when to prefer OCR, and how to structure an audio-to-answer pipeline.">
+<meta name="keywords" content="multimodal LLM, vision models, image tokens, audio transcription, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-multimodal/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Multimodal LLM Apps — Text, Image, Audio">
-<meta property="og:description" content="Multimodal LLM Apps — Text, Image, Audio is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company —.">
+<meta property="og:description" content="Building multimodal LLM apps across text, image, and audio: how vision inputs and image tokens work, when to prefer OCR, and how to structure an audio-to-answer pipeline.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-multimodal.svg">
 <meta property="og:image:alt" content="Multimodal LLM Apps — Text, Image, Audio — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-multimodal/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-multimodal.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Multimodal LLM Apps — Text, Image, Audio","description":"Multimodal LLM Apps — Text, Image, Audio is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company —.","image":"https://kihiujohn.github.io/assets/og/llm-app-multimodal.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-multimodal/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Multimodal LLM Apps — Text, Image, Audio","description":"Building multimodal LLM apps across text, image, and audio: how vision inputs and image tokens work, when to prefer OCR, and how to structure an audio-to-answer pipeline.","image":"https://kihiujohn.github.io/assets/og/llm-app-multimodal.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-multimodal/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Multimodal LLM Apps — Text, Image, Audio","item":"https://kihiujohn.github.io/blog/llm-app-multimodal/"}]}
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Multimodal LLM Apps — Text, Image, Audio</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Multimodal LLM Apps — Text, Image, Audio</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Multimodal LLM Apps — Text, Image, Audio is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company —.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Multimodal models let you pass images and audio alongside text. The capability is real; the engineering is in cost, preprocessing, and knowing when a cheaper specialist tool wins.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-20">Jun 20, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Multimodal LLM Apps — Text, Image, Audio</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Modern frontier models accept more than text — you can hand them images, and through a transcription step, audio. This unlocks document understanding, visual Q&A, and voice interfaces from a single API. The pitfalls are practical: images are expensive in tokens, quality depends heavily on preprocessing, and sometimes a narrow specialist tool beats the general model.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="vision">How image inputs work</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>You pass an image inline with your text prompt and ask questions about it. Internally the image is converted into tokens, and the count scales with resolution — a large, high-resolution image can cost as much as a long text prompt. So resize and compress to the smallest resolution that preserves the detail you need. Sending a 4000-pixel photo when 1000 pixels would answer the question is a silent cost leak.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="ocr">Vision model vs OCR</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>For pulling clean text out of a clear document, a dedicated OCR engine is often faster, cheaper, and more accurate than a vision model — reach for the LLM when you need <em>understanding</em>, not just transcription.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<table><thead><tr><th>Task</th><th>Better tool</th></tr></thead><tbody><tr><td>Extract text from a clean scan</td><td>Dedicated OCR</td></tr><tr><td>Answer questions about a chart or photo</td><td>Vision model</td></tr><tr><td>Understand a messy form's layout and meaning</td><td>Vision model</td></tr><tr><td>High-volume, structured text extraction</td><td>OCR, LLM only for edge cases</td></tr></tbody></table>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="audio">Audio pipelines</h2>
 
-    <div class="related-articles">
+<p>Audio is usually a two-step pipeline: transcribe speech to text with a speech-to-text model, then feed the transcript to the LLM for understanding, summarisation, or answering. Keep the steps separate so you can swap or tune each — transcription quality is often the limiting factor, and a bad transcript makes even a great model useless. For voice output, add a text-to-speech step on the response.</p>
+
+<div class="callout"><strong>Preprocessing decides quality and cost</strong><p>Most multimodal problems are input problems. Resize and compress images to the minimum useful resolution, de-noise and segment audio before transcription, and crop to the region of interest. The model can only reason about what you send it clearly — and you pay for every pixel and second you send.</p></div>
+
+<p>Multimodal features are genuinely capable now, but treat each modality as its own engineering problem: budget image tokens like text tokens, prefer specialist tools where they win, and build audio as a transcribe-then-reason pipeline you can tune stage by stage.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

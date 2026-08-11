@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Error Handling in LLM Apps | John Kihiu</title>
-<meta name="description" content="Error Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica errors, John Kihiu">
+<meta name="description" content="A practical error taxonomy for LLM apps and how to handle each: timeouts, 429s, 5xx, content filters, context-length overflows, and malformed structured output.">
+<meta name="keywords" content="LLM error handling, structured output validation, retries, LLM reliability, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-error-handling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Error Handling in LLM Apps">
-<meta property="og:description" content="Error Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
+<meta property="og:description" content="A practical error taxonomy for LLM apps and how to handle each: timeouts, 429s, 5xx, content filters, context-length overflows, and malformed structured output.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-error-handling.svg">
 <meta property="og:image:alt" content="Error Handling in LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-error-handling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-error-handling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Error Handling in LLM Apps","description":"Error Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.","image":"https://kihiujohn.github.io/assets/og/llm-app-error-handling.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-error-handling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Error Handling in LLM Apps","description":"A practical error taxonomy for LLM apps and how to handle each: timeouts, 429s, 5xx, content filters, context-length overflows, and malformed structured output.","image":"https://kihiujohn.github.io/assets/og/llm-app-error-handling.svg","datePublished":"2026-06-22","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-error-handling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Error Handling in LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-error-handling/"}]}
@@ -87,36 +87,54 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Error Handling in LLM Apps</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Error Handling in LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Error Handling in LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">LLM calls fail in more ways than a normal API — including succeeding with the wrong shape. Handling them means a taxonomy, not a single try/except.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-22">Jun 22, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Error Handling in LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>A plain HTTP client treats an LLM call like any other request, which is why LLM features feel flaky in production. The model can time out, throttle you, return a 5xx, refuse on content grounds, overflow the context window, or — the one people forget — return a perfectly successful <code>200</code> whose body is not the JSON you asked for. Each of these wants a different response.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="taxonomy">The failure taxonomy</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<table><thead><tr><th>Failure</th><th>Retry?</th><th>Handling</th></tr></thead><tbody><tr><td>Timeout / connection</td><td>Yes</td><td>Retry with backoff; set an aggressive client timeout so you fail fast rather than hang.</td></tr><tr><td>429 rate limit</td><td>Yes</td><td>Honour <code>retry-after</code>, backoff with jitter.</td></tr><tr><td>5xx server error</td><td>Yes</td><td>Backoff; after N tries, fall back to another model or provider.</td></tr><tr><td>Context length exceeded</td><td>No</td><td>Trim or summarise input; retrying unchanged fails identically.</td></tr><tr><td>Content filter / refusal</td><td>No</td><td>Handle as a product state, not an error; show a safe message.</td></tr><tr><td>Malformed structured output</td><td>Once</td><td>Validate, then re-ask with the parse error; do not blind-retry.</td></tr></tbody></table>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<p>The retry column is the important distinction. Retrying a transient network error is correct; retrying a context-length overflow just burns tokens to fail the same way. Classify before you retry.</p>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="structured">Validate structured output</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>If you asked for JSON, assume you will sometimes get prose, a trailing comment, or JSON wrapped in a code fence. Validate against a schema and, on failure, re-prompt <em>once</em> with the validation error included — models are good at fixing a shape when told exactly what was wrong. If the second attempt also fails, fall back rather than loop.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Python · validate-then-repair</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>from pydantic import BaseModel, ValidationError
 
-    <div class="related-articles">
+class Result(BaseModel):
+    category: str
+    confidence: float
+
+def parse_result(raw, repair=True):
+    try:
+        return Result.model_validate_json(extract_json(raw))
+    except (ValidationError, ValueError) as e:
+        if not repair:
+            raise
+        fixed = call_model(REPAIR_PROMPT.format(error=e, raw=raw))
+        return Result.model_validate_json(extract_json(fixed))</code></pre>
+</div>
+
+<h2 id="degrade">Fail into a known state</h2>
+
+<p>Every unrecoverable path needs a defined destination. A circuit breaker around a provider stops you hammering a dead endpoint. A fallback model or a cached/templated response keeps the feature usable when the primary is down. And a refusal from the content filter is not a bug to swallow — it is a product state that deserves a clear, honest message to the user.</p>
+
+<div class="callout"><strong>Log the request that failed, not just the exception</strong><p>When an LLM call misbehaves, the exception type is rarely enough to reproduce it. Log the model, prompt version, token counts, and a hash of the input. The failures that matter are usually input-shaped, and you cannot fix what you cannot replay.</p></div>
+
+<p>Robust LLM error handling is mostly classification: decide what kind of failure you are looking at, retry only what is transient, validate what claims to be structured, and give everything else a defined place to land.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

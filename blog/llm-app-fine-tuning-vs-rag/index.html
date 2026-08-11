@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fine-Tuning vs RAG — A Decision Guide | John Kihiu</title>
-<meta name="description" content="Fine-Tuning vs RAG — A Decision Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica fine-tuning, Acumatica rag, John Kihiu">
+<meta name="description" content="Fine-tuning vs RAG, decided practically: RAG for changing knowledge, fine-tuning for fixed format and style, when to combine them, and why you should almost always start with RAG.">
+<meta name="keywords" content="fine-tuning vs RAG, retrieval augmented generation, LLM customisation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-fine-tuning-vs-rag/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Fine-Tuning vs RAG — A Decision Guide">
-<meta property="og:description" content="Fine-Tuning vs RAG — A Decision Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
+<meta property="og:description" content="Fine-tuning vs RAG, decided practically: RAG for changing knowledge, fine-tuning for fixed format and style, when to combine them, and why you should almost always start with RAG.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-fine-tuning-vs-rag.svg">
 <meta property="og:image:alt" content="Fine-Tuning vs RAG — A Decision Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-fine-tuning-vs-rag/">
@@ -24,7 +24,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-fine-tuning-vs-rag.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Fine-Tuning vs RAG — A Decision Guide","description":"Fine-Tuning vs RAG — A Decision Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.","image":"https://kihiujohn.github.io/assets/og/llm-app-fine-tuning-vs-rag.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-fine-tuning-vs-rag/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Fine-Tuning vs RAG — A Decision Guide","description":"Fine-tuning vs RAG, decided practically: RAG for changing knowledge, fine-tuning for fixed format and style, when to combine them, and why you should almost always start with RAG.","image":"https://kihiujohn.github.io/assets/og/llm-app-fine-tuning-vs-rag.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-fine-tuning-vs-rag/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Fine-Tuning vs RAG — A Decision Guide","item":"https://kihiujohn.github.io/blog/llm-app-fine-tuning-vs-rag/"}]}
@@ -88,36 +88,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Fine-Tuning vs RAG — A Decision Guide</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Fine-Tuning vs RAG — A Decision Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Fine-Tuning vs RAG — A Decision Guide is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Fine-tuning and RAG solve different problems that get confused because both are ways to make a model 'know your stuff.' One teaches behaviour; the other supplies knowledge.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Fine-Tuning vs RAG — A Decision Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>"Should we fine-tune or use RAG?" is asked as if they were competitors, but they address different needs. Retrieval-augmented generation (RAG) supplies the model with <em>knowledge</em> at request time by fetching relevant documents into the prompt. Fine-tuning changes the model's <em>behaviour</em> — its format, style, and task-specific instincts — by training on examples. Confusing the two leads people to fine-tune when they needed retrieval, and get a model that is confidently out of date.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="rag">RAG for knowledge</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Use RAG when the answer depends on information that is specific, large, or changing: your documentation, product catalogue, policies, customer records. You update knowledge by updating the source documents — no retraining — so it is always current, and you get citations to the retrieved sources, which fine-tuning cannot give you. The cost is prompt complexity and retrieval quality: bad retrieval means bad answers.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="finetune">Fine-tuning for behaviour</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Use fine-tuning when you need consistent form rather than fresh facts: a rigid output format, a specific brand voice, a classification scheme with subtle boundaries, or a smaller/cheaper model taught to match a bigger one's behaviour on a narrow task. Fine-tuning can also shorten prompts — behaviour baked into the weights no longer needs lengthy in-context instructions — which lowers per-call cost and latency.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<table><thead><tr><th>Need</th><th>Reach for</th></tr></thead><tbody><tr><td>Answers from changing or private knowledge</td><td>RAG</td></tr><tr><td>Citations to sources</td><td>RAG</td></tr><tr><td>Consistent format or brand voice</td><td>Fine-tuning</td></tr><tr><td>Cheaper/faster model on a narrow task</td><td>Fine-tuning</td></tr><tr><td>Fresh facts in a fixed house style</td><td>Both</td></tr></tbody></table>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="both">Combining them</h2>
 
-    <div class="related-articles">
+<p>They compose well: fine-tune a model for your format and tone, then use RAG to feed it current facts at request time. A fine-tuned model that reliably produces your JSON shape, grounded on freshly retrieved documents, gives you consistency and accuracy at once.</p>
+
+<div class="callout"><strong>Start with RAG and prompting</strong><p>Fine-tuning is a real project — data collection, training, evaluation, and a retrain treadmill every time behaviour needs to change. Most problems that look like they need fine-tuning are solved by good prompting plus RAG, at a fraction of the effort. Prove you have hit the ceiling of prompting and retrieval before you reach for training.</p></div>
+
+<p>Decide by what is missing: if the model lacks knowledge, add RAG; if it lacks the right behaviour, consider fine-tuning; if it lacks both, do both — but start from RAG and prompting, because they are cheaper, faster to iterate, and solve the majority of cases outright.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-fine-tuning/">Fine-Tuning LLMs for ERP Use Cases</a></li>

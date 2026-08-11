@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LLM Fine-Tuning Patterns | John Kihiu</title>
-<meta name="description" content="LLM Fine-Tuning Patterns is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
-<meta name="keywords" content="Acumatica llm, Acumatica fine-tuning, Acumatica ml, John Kihiu">
+<meta name="description" content="Practical LLM fine-tuning patterns: when it is actually worth it, preparing and versioning training data, LoRA/PEFT, avoiding catastrophic forgetting, and evaluating the result.">
+<meta name="keywords" content="LLM fine-tuning, LoRA, PEFT, training data, model customisation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-fine-tuning-patterns/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="LLM Fine-Tuning Patterns">
-<meta property="og:description" content="LLM Fine-Tuning Patterns is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.">
+<meta property="og:description" content="Practical LLM fine-tuning patterns: when it is actually worth it, preparing and versioning training data, LoRA/PEFT, avoiding catastrophic forgetting, and evaluating the result.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-fine-tuning-patterns.svg">
 <meta property="og:image:alt" content="LLM Fine-Tuning Patterns — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-fine-tuning-patterns/">
@@ -87,36 +87,40 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">LLM Fine-Tuning Patterns</span></nav>
-    <span class="tag">AI Agents · Llm</span>
+    <span class="tag">AI · LLM</span>
     <h1>LLM Fine-Tuning Patterns</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">LLM Fine-Tuning Patterns is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in every.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Fine-tuning is a data project wearing a model project's clothes. The weights are the easy part; the training data is where the result is won or lost.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>LLM Fine-Tuning Patterns</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Fine-tuning adapts a base model to your task by continuing its training on your examples. Done for the right reason it delivers consistent behaviour, shorter prompts, and a cheaper model that punches above its size on a narrow task. Done reflexively, it is an expensive way to bake yesterday's data into frozen weights. The patterns below are what separate the two.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="when">Confirm it is the right tool first</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Fine-tune for <em>behaviour</em> — a fixed output format, a consistent voice, a specialised classification — not for knowledge that changes, which belongs in RAG. And only after prompting and retrieval have hit their ceiling, because fine-tuning is a slower, costlier iteration loop. If the requirement will keep changing, you are signing up to retrain every time.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="data">Data is the whole game</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The result is a direct function of the training data. Invest there:</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<ul><li>Quality over quantity — a few hundred clean, correct, consistent examples beat thousands of noisy ones; the model imitates whatever you show it, including the mistakes.</li><li>Match production — training inputs should look like real traffic, or the model learns a distribution it will never see.</li><li>Version the dataset — treat it like code; you cannot reproduce or debug a model without knowing exactly what it trained on.</li><li>Hold out a test split — keep evaluation examples the model never sees during training.</li></ul>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="lora">LoRA / PEFT</h2>
 
-    <div class="related-articles">
+<p>You rarely need to retrain all the weights. Parameter-efficient methods like LoRA train a small set of adapter weights on top of a frozen base model — far cheaper and faster, with results competitive with full fine-tuning for most adaptation tasks. Adapters are also small and swappable, so you can keep several task-specific adapters over one base model instead of maintaining many full copies.</p>
+
+<h2 id="forgetting">Avoid catastrophic forgetting</h2>
+
+<p>Over-train narrowly and the model gets worse at everything else — it forgets general capability while learning your task. Guard against it: use modest learning rates and few epochs, keep some general examples in the mix, and always evaluate on broad capability as well as your target task so you notice the regression before you ship it.</p>
+
+<div class="callout"><strong>Evaluate against the base model, honestly</strong><p>The only question that matters is whether the fine-tuned model beats the base model plus good prompting on your eval set. Measure both on the same held-out data. Fine-tuning that wins on the training distribution but loses on real inputs — or costs more than it saves — is a project you should not ship.</p></div>
+
+<p>Approach fine-tuning as a data-engineering discipline: prove prompting and RAG are exhausted, curate and version a small high-quality dataset, prefer LoRA for cost and flexibility, watch for forgetting, and gate the whole thing on an honest comparison to the base model. The model training is a button; the data and the evaluation are the work.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-fine-tuning/">Fine-Tuning LLMs for ERP Use Cases</a></li>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Data Retention for LLM Apps | John Kihiu</title>
-<meta name="description" content="Data Retention for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica data, John Kihiu">
+<meta name="description" content="Data retention for LLM apps: decide what to log, set retention windows, use provider zero-retention options, honour user deletion requests, and encrypt prompts and outputs at rest.">
+<meta name="keywords" content="LLM data retention, prompt logging, zero retention, data deletion, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-data-retention/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Data Retention for LLM Apps">
-<meta property="og:description" content="Data Retention for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
+<meta property="og:description" content="Data retention for LLM apps: decide what to log, set retention windows, use provider zero-retention options, honour user deletion requests, and encrypt prompts and outputs at rest.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-data-retention.svg">
 <meta property="og:image:alt" content="Data Retention for LLM Apps — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-data-retention/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-data-retention.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Data Retention for LLM Apps","description":"Data Retention for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.","image":"https://kihiujohn.github.io/assets/og/llm-app-data-retention.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-data-retention/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Data Retention for LLM Apps","description":"Data retention for LLM apps: decide what to log, set retention windows, use provider zero-retention options, honour user deletion requests, and encrypt prompts and outputs at rest.","image":"https://kihiujohn.github.io/assets/og/llm-app-data-retention.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-data-retention/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Data Retention for LLM Apps","item":"https://kihiujohn.github.io/blog/llm-app-data-retention/"}]}
@@ -87,36 +87,36 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Data Retention for LLM Apps</span></nav>
-    <span class="tag">Data / ML · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Data Retention for LLM Apps</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Data Retention for LLM Apps is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">LLM apps generate a stream of prompts and outputs that is tempting to keep forever for debugging. Retention is deciding what is worth the liability of keeping.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Data Retention for LLM Apps</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Every LLM interaction produces data you could store: the prompt, the completion, the retrieved context, the user who asked. Keeping all of it makes debugging and evals easy — and creates a growing pile of potentially sensitive records that is a breach liability and a compliance obligation. Retention policy is where you balance those two honestly, per data type.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="what">Decide what to log, at what fidelity</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Not everything deserves the same treatment. Separate the operational metadata you genuinely need from the sensitive content you should minimise:</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<table><thead><tr><th>Data</th><th>Keep</th><th>Note</th></tr></thead><tbody><tr><td>Token counts, latency, model, prompt version</td><td>Long</td><td>Cheap, non-sensitive, drives cost and quality analysis.</td></tr><tr><td>Prompts / completions with PII</td><td>Short or redacted</td><td>Highest liability; redact before storing, short window.</td></tr><tr><td>Prompts / completions, no PII</td><td>Medium</td><td>Useful for evals and debugging; still set a window.</td></tr><tr><td>Retrieved documents</td><td>Reference, don't copy</td><td>Log the document id, not the full text.</td></tr></tbody></table>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="window">Set and enforce retention windows</h2>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Every category needs an expiry, and the expiry needs to be automatic. A policy that says "delete after 30 days" but relies on someone remembering is not a policy. Use TTLs on the store, or a scheduled job that purges past the window, so old data deletes itself. Keep the cheap metadata longer and the sensitive content as briefly as your debugging genuinely requires.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="provider">Provider-side retention</h2>
 
-    <div class="related-articles">
+<p>Remember the provider keeps its own copy of your API inputs for a period. Know that window, and for sensitive workloads use the provider's zero-retention or enterprise option so nothing is stored beyond the request. Your retention policy is only as tight as the looser of your side and theirs.</p>
+
+<div class="callout"><strong>You must be able to delete a specific user</strong><p>Privacy law gives users the right to have their data erased, and "we can't find it" is not a compliant answer. Tag stored interactions with a user id so a deletion request is a targeted purge, not an impossible search. Design for deletion before you are legally required to perform one.</p></div>
+
+<p>Retention is a deliberate default, not an accident of infinite disk. Log the cheap metadata generously, minimise and time-box the sensitive content, align with the provider's retention, and make per-user deletion a routine operation. The data you have thoughtfully chosen not to keep is data that can never be breached or subpoenaed.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rolling Back LLM App Versions | John Kihiu</title>
-<meta name="description" content="Rolling Back LLM App Versions is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica rollback, John Kihiu">
+<meta name="description" content="Rolling back LLM app versions safely: treat prompt, model, and config as one release behind a flag, canary new versions, and keep a last-known-good you can revert to instantly.">
+<meta name="keywords" content="LLM rollback, prompt rollback, canary release, LLM deployment, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-rollback/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Rolling Back LLM App Versions">
-<meta property="og:description" content="Rolling Back LLM App Versions is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.">
+<meta property="og:description" content="Rolling back LLM app versions safely: treat prompt, model, and config as one release behind a flag, canary new versions, and keep a last-known-good you can revert to instantly.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-rollback.svg">
 <meta property="og:image:alt" content="Rolling Back LLM App Versions — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-rollback/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-rollback.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Rolling Back LLM App Versions","description":"Rolling Back LLM App Versions is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.","image":"https://kihiujohn.github.io/assets/og/llm-app-rollback.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-rollback/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Rolling Back LLM App Versions","description":"Rolling back LLM app versions safely: treat prompt, model, and config as one release behind a flag, canary new versions, and keep a last-known-good you can revert to instantly.","image":"https://kihiujohn.github.io/assets/og/llm-app-rollback.svg","datePublished":"2026-06-21","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-rollback/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Rolling Back LLM App Versions","item":"https://kihiujohn.github.io/blog/llm-app-rollback/"}]}
@@ -87,36 +87,47 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Rolling Back LLM App Versions</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Rolling Back LLM App Versions</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Rolling Back LLM App Versions is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers, orders,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">When an LLM change regresses quality, you need to revert in seconds, not redeploy in an hour. That requires decoupling the release of a prompt from the deploy of your code.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-21">Jun 21, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Rolling Back LLM App Versions</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>LLM quality regressions are sneaky: the app is up, requests succeed, but answers got worse in a way no exception catches. By the time a user complains, the bad version has been serving for hours. Rollback is your recovery, and it only works if you designed for it before the incident.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="release">A release is prompt + model + config</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>The unit you roll back is not your application — it is the behaviour config: prompt version, model id, and parameters. If that config is baked into a code deploy, then reverting it means a full redeploy, which is slow exactly when you are under pressure. Instead, store the active version as data — a flag or a config record — so switching it is a value change, not a build.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="flag">Decouple release from deploy</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Ship new prompt versions dark: the code that can run <code>classify@4</code> is deployed, but a feature flag still points production at <code>classify@3</code>. Flipping the flag releases the new version; flipping it back rolls it back. Deploy and release become independent, which is what lets you revert in seconds without touching the codebase.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Python · flag-driven active version</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>def active_prompt(feature):
+    # resolved from a config store / flag service, not hardcoded
+    return flags.get(f"prompt.{feature}", default="classify@3")
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+def run(feature, input):
+    spec = PROMPTS[active_prompt(feature)]
+    return call(spec, input)
 
-    <div class="related-articles">
+# rollback = set flags["prompt.classify"] = "classify@3"  (instant, no deploy)</code></pre>
+</div>
+
+<h2 id="canary">Canary before full release</h2>
+
+<p>Do not flip 100% of traffic to a new version at once. Route a small slice — 5–10% — to the candidate, watch your quality and cost signals, and widen only if they hold. A canary turns a bad release into a small, contained blast radius and gives your monitoring time to catch the regression before it is everyone's problem.</p>
+
+<div class="callout"><strong>Keep a last-known-good pinned</strong><p>Always know which version was the last one that passed evals and behaved in production. That is your rollback target. 'Roll back' should mean 'point the flag at last-known-good,' a specific known state — not 'undo the last change and hope.'</p></div>
+
+<p>The combination — behaviour as data, releases behind flags, canary rollout, and a pinned last-known-good — makes an LLM regression a five-second flag flip instead of an emergency deploy. You will still ship the occasional bad prompt; the difference is how fast you can take it back.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

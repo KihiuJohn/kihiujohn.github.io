@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Webhook vs Polling — A Field Guide | John Kihiu</title>
-<meta name="description" content="Webhook vs Polling — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta name="keywords" content="Acumatica webhook, Acumatica polling, Acumatica comparison, John Kihiu">
+<meta name="description" content="Webhooks vs polling for integrations: the real trade-offs in latency, load, and reliability, when each wins, and why resilient systems often use webhooks backed by reconciliation polling.">
+<meta name="keywords" content="webhooks vs polling, event driven, integration patterns, reconciliation, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/webhook-vs-polling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Webhook vs Polling — A Field Guide">
-<meta property="og:description" content="Webhook vs Polling — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
+<meta property="og:description" content="Webhooks vs polling for integrations: the real trade-offs in latency, load, and reliability, when each wins, and why resilient systems often use webhooks backed by reconciliation polling.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/webhook-vs-polling.svg">
 <meta property="og:image:alt" content="Webhook vs Polling — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/webhook-vs-polling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/webhook-vs-polling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook vs Polling — A Field Guide","description":"Webhook vs Polling — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.","image":"https://kihiujohn.github.io/assets/og/webhook-vs-polling.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-vs-polling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook vs Polling — A Field Guide","description":"Webhooks vs polling for integrations: the real trade-offs in latency, load, and reliability, when each wins, and why resilient systems often use webhooks backed by reconciliation polling.","image":"https://kihiujohn.github.io/assets/og/webhook-vs-polling.svg","datePublished":"2026-06-24","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-vs-polling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Webhook vs Polling — A Field Guide","item":"https://kihiujohn.github.io/blog/webhook-vs-polling/"}]}
@@ -87,36 +87,34 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Webhook vs Polling — A Field Guide</span></nav>
-    <span class="tag">Workflow · Webhook</span>
+    <span class="tag">Integration · Webhooks</span>
     <h1>Webhook vs Polling — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhook vs Polling — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhooks push, polling pulls. The choice is usually framed as either/or, but the most reliable integrations use webhooks for speed and polling as a safety net.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-24">Jun 24, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Webhook vs Polling — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>When you need to know that something changed in another system, you either ask repeatedly (polling) or get told (webhooks). Each has a genuine place, and the common mistake is treating it as a permanent religious choice rather than picking per the constraints — or, better, combining them.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a stable contract, explicit error semantics, idempotency, observability, and a deprecation path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="compare">The trade-offs</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<table><thead><tr><th></th><th>Webhooks</th><th>Polling</th></tr></thead><tbody><tr><td>Latency</td><td>Near-real-time</td><td>Bounded by poll interval</td></tr><tr><td>Load</td><td>Work only when events happen</td><td>Constant, mostly empty checks</td></tr><tr><td>Reliability</td><td>Delivery can be missed</td><td>You control retries; nothing is 'missed'</td></tr><tr><td>Setup</td><td>Public endpoint, signing, dedupe</td><td>A loop and a cursor</td></tr><tr><td>Control</td><td>Provider decides what and when</td><td>You decide when and what to fetch</td></tr></tbody></table>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="webhooks">When webhooks win</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Webhooks are the right default when latency matters and events are relatively infrequent — a payment succeeded, a build finished, a document was signed. You do work only when something actually happens, instead of asking "anything new?" thousands of times to catch a handful of changes. For real-time reactions at scale, polling simply cannot compete on efficiency.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="polling">When polling wins</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<p>Polling wins when you cannot expose a public endpoint, when the provider offers no webhooks, when you want full control over timing and back-pressure, or when changes are so frequent that a poll returns useful batches every time. It is also far simpler — a cursor and a loop, with no signature verification, no dedupe, no public attack surface — which for a low-stakes internal sync is a real advantage.</p>
 
-    <div class="related-articles">
+<div class="callout"><strong>The resilient pattern is both</strong><p>Webhooks give you speed but can drop an event; polling is slow but never misses. Serious integrations use webhooks for low-latency reaction and a periodic reconciliation poll as the backstop that catches anything the webhook missed. You get real-time behaviour and a guarantee of eventual consistency — the strengths of each covering the other's weakness.</p></div>
+
+<p>Choose polling for simplicity, control, or when webhooks are not on offer; choose webhooks for low-latency, efficient reaction to sparse events. And when correctness genuinely matters, stop choosing: run webhooks for speed and a reconciliation poll for completeness, so a missed delivery becomes a slightly delayed update instead of lost data.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/webhook-vs-asyncapi/">Webhook vs AsyncAPI — A Comparison</a></li>

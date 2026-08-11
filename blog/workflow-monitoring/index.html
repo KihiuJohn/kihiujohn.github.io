@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Workflow Monitoring — A Field Guide | John Kihiu</title>
-<meta name="description" content="Workflow Monitoring — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica workflow, Acumatica monitoring, John Kihiu">
+<meta name="description" content="Monitoring automation workflows: track success rate, duration, and throughput, alert on failures and on runs that should have happened but didn't, and watch step-level health.">
+<meta name="keywords" content="workflow monitoring, automation observability, run metrics, SLA, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/workflow-monitoring/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Workflow Monitoring — A Field Guide">
-<meta property="og:description" content="Workflow Monitoring — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="Monitoring automation workflows: track success rate, duration, and throughput, alert on failures and on runs that should have happened but didn't, and watch step-level health.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/workflow-monitoring.svg">
 <meta property="og:image:alt" content="Workflow Monitoring — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/workflow-monitoring/">
@@ -22,7 +22,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/workflow-monitoring.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Workflow Monitoring — A Field Guide","description":"Workflow Monitoring — A Field Guide is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/workflow-monitoring.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/workflow-monitoring/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Workflow Monitoring — A Field Guide","description":"Monitoring automation workflows: track success rate, duration, and throughput, alert on failures and on runs that should have happened but didn't, and watch step-level health.","image":"https://kihiujohn.github.io/assets/og/workflow-monitoring.svg","datePublished":"2026-06-17","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/workflow-monitoring/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Workflow Monitoring — A Field Guide","item":"https://kihiujohn.github.io/blog/workflow-monitoring/"}]}
@@ -86,36 +86,42 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Workflow Monitoring — A Field Guide</span></nav>
-    <span class="tag">Workflow · Workflow</span>
+    <span class="tag">Automation · Workflows</span>
     <h1>Workflow Monitoring — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Workflow Monitoring — A Field Guide is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Automation is trusted to run unattended, which is exactly why it needs monitoring — the failure you do not watch for is the one that runs silently wrong for a week.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-17">Jun 17, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Workflow Monitoring — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>The value of automation is that no one has to watch it. The risk of automation is that no one is watching it. A workflow can fail, stall, or silently produce wrong results, and because it runs in the background, nothing surfaces until the downstream damage is visible. Monitoring is how you keep the convenience without the blind spot.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="metrics">The core metrics</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<ul><li>Success rate — completed runs versus failed, per workflow, watched for drops.</li><li>Duration — how long runs take, at p95, so a workflow that is slowing down shows up before it times out.</li><li>Throughput — runs and records processed per interval, so a fall-off flags a stuck upstream.</li><li>Step-level health — which step fails most, because the aggregate hides the one bad link in the chain.</li></ul>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="absence">Alert on what didn't run</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>The subtlest failure is the run that never happened — a scheduled workflow whose trigger broke, an event-driven one whose events stopped arriving. No run means no error, so failure-based alerting stays silent. For anything scheduled or expected on a cadence, alert on <em>absence</em>: if the nightly sync has not run by its expected time, that silence is the alarm.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Text · the alerts that matter</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>1. success rate &lt; threshold        -&gt; runs are failing
+2. expected run missing by T+grace -&gt; trigger or schedule broke  (silent!)
+3. p95 duration rising              -&gt; degrading, will soon time out
+4. throughput drops vs baseline     -&gt; upstream stalled</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="visible">Make runs inspectable</h2>
 
-    <div class="related-articles">
+<p>Beyond metrics, you want to open a single run and see its story: which steps ran, what each received and returned, where it failed. This run-level visibility is what turns a monitoring alert into a fix — the metric tells you something is wrong, the run detail tells you what. Log a run id through every step so the whole path is reconstructable.</p>
+
+<div class="callout"><strong>Distinguish 'failed' from 'succeeded doing the wrong thing'</strong><p>The hardest failure to monitor is the run that completes green while producing wrong output — a mapping bug that files everything under the wrong category. Metrics show it as healthy. Guard the critical workflows with output validation or a reconciliation check against the source of truth, because 'it ran' is not the same as 'it was correct.'</p></div>
+
+<p>Monitor automation as if it will fail silently, because it will: success and duration metrics, an absence alarm on expected runs, run-level inspectability, and output validation on the workflows that matter. That is the difference between finding a problem in a dashboard and finding it in an angry customer email.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/workflow-sla-tracking/">Workflow SLA Tracking</a></li>

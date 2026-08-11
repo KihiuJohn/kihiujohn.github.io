@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Scaling LLM Apps to Production Load | John Kihiu</title>
-<meta name="description" content="Scaling LLM Apps to Production Load is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
-<meta name="keywords" content="Acumatica ai, Acumatica llm, Acumatica scaling, John Kihiu">
+<meta name="description" content="Scaling LLM apps to production load: the real ceiling is provider tokens-per-minute, not your CPU. Queue and batch work, cache aggressively, and spread load across keys and regions.">
+<meta name="keywords" content="LLM scaling, TPM limits, concurrency, LLM throughput, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/llm-app-scaling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Scaling LLM Apps to Production Load">
-<meta property="og:description" content="Scaling LLM Apps to Production Load is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.">
+<meta property="og:description" content="Scaling LLM apps to production load: the real ceiling is provider tokens-per-minute, not your CPU. Queue and batch work, cache aggressively, and spread load across keys and regions.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/llm-app-scaling.svg">
 <meta property="og:image:alt" content="Scaling LLM Apps to Production Load — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/llm-app-scaling/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/llm-app-scaling.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Scaling LLM Apps to Production Load","description":"Scaling LLM Apps to Production Load is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.","image":"https://kihiujohn.github.io/assets/og/llm-app-scaling.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-scaling/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Scaling LLM Apps to Production Load","description":"Scaling LLM apps to production load: the real ceiling is provider tokens-per-minute, not your CPU. Queue and batch work, cache aggressively, and spread load across keys and regions.","image":"https://kihiujohn.github.io/assets/og/llm-app-scaling.svg","datePublished":"2026-06-23","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/llm-app-scaling/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Scaling LLM Apps to Production Load","item":"https://kihiujohn.github.io/blog/llm-app-scaling/"}]}
@@ -87,36 +87,38 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Scaling LLM Apps to Production Load</span></nav>
-    <span class="tag">AI Agents · Ai</span>
+    <span class="tag">AI · LLM</span>
     <h1>Scaling LLM Apps to Production Load</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Scaling LLM Apps to Production Load is the work that defines the next phase of enterprise software. ERP systems hold the most valuable business data in the company — customers,.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Scaling an LLM app is not about your servers — they are barely working. The bottleneck is the provider's tokens-per-minute budget, and everything you do routes around it.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-23">Jun 23, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Scaling LLM Apps to Production Load</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>The instinct when an LLM feature slows under load is to add application servers. It rarely helps, because your servers are idle — they spend almost all their time waiting on the model API. The true constraint is the provider's rate limit, chiefly tokens per minute. Scaling an LLM app is the art of doing more useful work within a fixed token budget.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is evaluation, data provenance, access control, cost, and human review. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="ceiling">Know your real ceiling</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Your throughput ceiling is roughly the provider's TPM divided by the average tokens per request. Halve the tokens per request and you double your capacity without touching infrastructure. That reframes scaling: trimming a bloated system prompt or capping retrieved context is a throughput improvement, not just a cost one.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="queue">Queue and prioritise</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>Not all work is equally urgent. Put background jobs — enrichment, batch summarisation, offline classification — behind a queue with a bounded worker pool, and keep foreground user requests on a fast path. When load spikes, the queue absorbs it and drains a little slower; the user-facing latency stays flat. Without this, one batch job can consume the whole token budget and stall live traffic.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<h2 id="reduce">Reduce tokens before adding capacity</h2>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<ul><li>Cache aggressively — every cache hit is throughput you got for free, and provider prompt caching stretches TPM further on long prompts.</li><li>Batch where the provider supports it, and consolidate several small classifications into one call when latency allows.</li><li>Right-size the model — a smaller, cheaper model for routine calls leaves the flagship's budget for the calls that need it.</li><li>Trim context — shorter prompts and fewer retrieved chunks are a direct throughput multiplier.</li></ul>
 
-    <div class="related-articles">
+<h2 id="spread">Spread the load</h2>
+
+<p>When you have genuinely outgrown a single account's limits, distribute across multiple keys, projects, or regions, and request higher tier limits ahead of the demand. A gateway makes this transparent — it round-robins or shards across keys while the rest of the app calls one internal endpoint.</p>
+
+<div class="callout"><strong>Add backpressure, not just capacity</strong><p>Every system has a maximum sustainable rate. When you hit it, the humane failure is a queue with a bounded wait or an honest 'try again shortly' — not accepting unlimited work and letting latency climb until everything times out. Backpressure keeps a busy system responsive instead of collapsing.</p></div>
+
+<p>Scale in this order: cut tokens per request, cache, queue and prioritise, right-size models, and only then spread across more capacity. Almost every LLM scaling win comes from using the token budget more efficiently, not from bigger machines.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/ai-agent-context-window/">Context Window Management in LLM Apps</a></li>

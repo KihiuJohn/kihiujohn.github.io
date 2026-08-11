@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Webhook vs AsyncAPI — A Comparison | John Kihiu</title>
-<meta name="description" content="Webhook vs AsyncAPI — A Comparison is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta name="keywords" content="Acumatica webhook, Acumatica asyncapi, Acumatica comparison, John Kihiu">
+<meta name="description" content="Webhooks vs AsyncAPI: one is a delivery mechanism, the other a specification for documenting event-driven APIs. How they relate and why you often want both.">
+<meta name="keywords" content="webhooks, AsyncAPI, event driven API, API specification, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/webhook-vs-asyncapi/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Webhook vs AsyncAPI — A Comparison">
-<meta property="og:description" content="Webhook vs AsyncAPI — A Comparison is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
+<meta property="og:description" content="Webhooks vs AsyncAPI: one is a delivery mechanism, the other a specification for documenting event-driven APIs. How they relate and why you often want both.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/webhook-vs-asyncapi.svg">
 <meta property="og:image:alt" content="Webhook vs AsyncAPI — A Comparison — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/webhook-vs-asyncapi/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/webhook-vs-asyncapi.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook vs AsyncAPI — A Comparison","description":"Webhook vs AsyncAPI — A Comparison is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.","image":"https://kihiujohn.github.io/assets/og/webhook-vs-asyncapi.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-vs-asyncapi/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook vs AsyncAPI — A Comparison","description":"Webhooks vs AsyncAPI: one is a delivery mechanism, the other a specification for documenting event-driven APIs. How they relate and why you often want both.","image":"https://kihiujohn.github.io/assets/og/webhook-vs-asyncapi.svg","datePublished":"2026-06-20","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-vs-asyncapi/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Webhook vs AsyncAPI — A Comparison","item":"https://kihiujohn.github.io/blog/webhook-vs-asyncapi/"}]}
@@ -87,36 +87,53 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Webhook vs AsyncAPI — A Comparison</span></nav>
-    <span class="tag">Workflow · Webhook</span>
+    <span class="tag">Integration · Webhooks</span>
     <h1>Webhook vs AsyncAPI — A Comparison</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhook vs AsyncAPI — A Comparison is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">'Webhooks vs AsyncAPI' is a category error worth clearing up: webhooks are how events get delivered, AsyncAPI is how you describe them. They are not competitors.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-20">Jun 20, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Webhook vs AsyncAPI — A Comparison</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>This comparison gets requested a lot, and the honest answer reframes the question. Webhooks are a <em>delivery mechanism</em> — HTTP callbacks that push events to a consumer. AsyncAPI is a <em>specification format</em> — a machine-readable way to document event-driven APIs, the async counterpart to OpenAPI. You do not pick one instead of the other; you can describe your webhooks <em>with</em> AsyncAPI.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a stable contract, explicit error semantics, idempotency, observability, and a deprecation path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="webhooks">What webhooks are</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>A webhook is the concrete plumbing: when something happens, the provider makes an HTTP POST to a URL the consumer registered. It is a transport and an interaction pattern, not a document. Nothing about a webhook tells a new integrator what events exist, what their payloads look like, or how they are signed — that knowledge lives in prose documentation, if it exists at all.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="asyncapi">What AsyncAPI is</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>AsyncAPI is a YAML/JSON specification that formally describes an event-driven API: the channels, the messages, their payload schemas, and the bindings for the underlying protocol — which can be webhooks over HTTP, or Kafka, MQTT, WebSockets, and others. From that spec you can generate documentation, validate payloads, and scaffold consumer code, exactly as OpenAPI does for request/response REST APIs.</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · AsyncAPI describing a webhook event</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>asyncapi: 3.0.0
+info:
+  title: Orders API
+  version: 1.0.0
+channels:
+  orderPaid:
+    address: /webhooks/order-paid
+    messages:
+      OrderPaid:
+        payload:
+          type: object
+          properties:
+            id:     { type: string }
+            amount: { type: integer }
+            currency: { type: string }</code></pre>
+</div>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="both">Use them together</h2>
 
-    <div class="related-articles">
+<p>The productive combination: deliver events via webhooks, and document those webhooks with an AsyncAPI spec. Integrators get a precise, versioned contract — event names, payload schemas, signing details — instead of reverse-engineering payloads from example JSON. As a provider, that specification is the difference between an integration that takes an afternoon and one that takes a week of guesswork.</p>
+
+<div class="callout"><strong>Specify your webhooks, whatever the format</strong><p>AsyncAPI is one good option, but the underlying lesson is broader: undocumented webhooks are a support burden and an integration tax. A machine-readable spec — AsyncAPI or otherwise — with versioned payload schemas is what turns 'here are some example payloads' into a real, verifiable contract.</p></div>
+
+<p>So there is no versus. Webhooks deliver the events; AsyncAPI describes them. If you run a webhook API, adopting a specification like AsyncAPI does not replace your webhooks — it gives them the documentation and tooling that make them pleasant to integrate against.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/openapi-vs-asyncapi/">OpenAPI vs AsyncAPI — A Comparison</a></li>

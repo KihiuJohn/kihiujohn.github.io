@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Webhook Idempotency — A Field Guide | John Kihiu</title>
-<meta name="description" content="Webhook Idempotency — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
-<meta name="keywords" content="Acumatica webhook, Acumatica idempotency, Acumatica api, John Kihiu">
+<meta name="description" content="Why webhook consumers must be idempotent, and how to build it: dedupe on a stable event id, persist processed ids, and make the side effect safe to run twice.">
+<meta name="keywords" content="webhook idempotency, idempotent consumer, event id dedupe, webhook reliability, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/webhook-idempotency/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Webhook Idempotency — A Field Guide">
-<meta property="og:description" content="Webhook Idempotency — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.">
+<meta property="og:description" content="Why webhook consumers must be idempotent, and how to build it: dedupe on a stable event id, persist processed ids, and make the side effect safe to run twice.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/webhook-idempotency.svg">
 <meta property="og:image:alt" content="Webhook Idempotency — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/webhook-idempotency/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/webhook-idempotency.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook Idempotency — A Field Guide","description":"Webhook Idempotency — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.","image":"https://kihiujohn.github.io/assets/og/webhook-idempotency.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-idempotency/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Webhook Idempotency — A Field Guide","description":"Why webhook consumers must be idempotent, and how to build it: dedupe on a stable event id, persist processed ids, and make the side effect safe to run twice.","image":"https://kihiujohn.github.io/assets/og/webhook-idempotency.svg","datePublished":"2026-06-25","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/webhook-idempotency/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Webhook Idempotency — A Field Guide","item":"https://kihiujohn.github.io/blog/webhook-idempotency/"}]}
@@ -87,36 +87,45 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Webhook Idempotency — A Field Guide</span></nav>
-    <span class="tag">Workflow · Webhook</span>
+    <span class="tag">Integration · Webhooks</span>
     <h1>Webhook Idempotency — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhook Idempotency — A Field Guide is the work that makes the systems talk. The API is the contract between the producer and the consumer; the contract is what determines whether.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Webhook delivery is at-least-once, which means the same event will eventually arrive twice. An idempotent consumer is the only thing standing between that and a double charge.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-25">Jun 25, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Webhook Idempotency — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Every serious webhook provider delivers at-least-once: if they do not get a timely <code>2xx</code> back, they retry, and networks being what they are, some of those retries arrive after you already processed the original. If handling an event twice charges a card twice or ships an order twice, that is not a rare edge case — it is a certainty on a long enough timeline. Idempotency is how you make duplicate delivery harmless.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is a stable contract, explicit error semantics, idempotency, observability, and a deprecation path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="id">Dedupe on a stable event id</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>Good providers put a unique, stable identifier on every event — the same id on every retry of that event. That id is your dedupe key. Before doing any work, record the id in a store with a uniqueness constraint; if it is already there, you have seen this event and can acknowledge without reprocessing.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">SQL · dedupe with a unique constraint</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>CREATE TABLE processed_events (
+  event_id   TEXT PRIMARY KEY,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+-- In the handler, inside a transaction:
+INSERT INTO processed_events (event_id) VALUES ($1)
+ON CONFLICT (event_id) DO NOTHING;
+-- If no row was inserted, this is a duplicate -&gt; ack and stop.</code></pre>
+</div>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<p>Do the insert and the side effect in the same transaction where possible, so you never end up with the event marked processed but the work rolled back, or the work committed but the event not recorded. If the side effect is in an external system, record the event id atomically with whatever local state proves the work happened.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="safe">Make the effect naturally safe to repeat</h2>
 
-    <div class="related-articles">
+<p>Dedupe tables are the general answer, but the strongest designs make the operation itself idempotent so a repeat is a no-op. Prefer upserts keyed on the business entity over blind inserts. Use the provider's own idempotency key when you call <em>downstream</em> APIs, so your retries do not create duplicates one layer further out. "Set status to shipped" is safe to run twice; "increment inventory by one" is not.</p>
+
+<div class="callout"><strong>No stable id? Derive one.</strong><p>Some providers do not send a reliable event id. Derive a deterministic key from immutable fields of the payload — a hash of the resource id plus the event type plus a timestamp — so the same logical event hashes the same way on every retry. A dedupe key you compute is far better than none.</p></div>
+
+<p>Idempotency is not an optimisation you add after the first double-charge incident; it is the baseline contract of consuming webhooks. Record the event id, guard the write, make the effect repeatable, and at-least-once delivery quietly becomes exactly-once processing.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/rest-api-idempotency/">REST API Idempotency — A Field Guide</a></li>

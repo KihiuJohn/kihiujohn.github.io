@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laravel Inertia SSR — A Field Guide | John Kihiu</title>
-<meta name="description" content="Laravel Inertia SSR — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
-<meta name="keywords" content="Acumatica laravel, Acumatica inertia, Acumatica ssr, John Kihiu">
+<meta name="description" content="A practical guide to server-side rendering for Laravel + Inertia (Vue): the ssr.js entry, the Vite build, the Node SSR server on port 13714, head tags, and the production gotchas that actually bite.">
+<meta name="keywords" content="Laravel Inertia SSR, Inertia server-side rendering, Laravel Vue SSR, inertia start-ssr, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/laravel-inertia-ssr/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Laravel Inertia SSR — A Field Guide">
-<meta property="og:description" content="Laravel Inertia SSR — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.">
+<meta property="og:description" content="A practical guide to server-side rendering for Laravel + Inertia (Vue): the ssr.js entry, the Vite build, the Node SSR server on port 13714, head tags, and the production gotchas that actually bite.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/laravel-inertia-ssr.svg">
 <meta property="og:image:alt" content="Laravel Inertia SSR — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/laravel-inertia-ssr/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/laravel-inertia-ssr.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Inertia SSR — A Field Guide","description":"Laravel Inertia SSR — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.","image":"https://kihiujohn.github.io/assets/og/laravel-inertia-ssr.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-inertia-ssr/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"Laravel Inertia SSR — A Field Guide","description":"A practical guide to server-side rendering for Laravel + Inertia (Vue): the ssr.js entry, the Vite build, the Node SSR server on port 13714, head tags, and the production gotchas that actually bite.","image":"https://kihiujohn.github.io/assets/og/laravel-inertia-ssr.svg","datePublished":"2026-06-29","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/laravel-inertia-ssr/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"Laravel Inertia SSR — A Field Guide","item":"https://kihiujohn.github.io/blog/laravel-inertia-ssr/"}]}
@@ -87,34 +87,111 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">Laravel Inertia SSR — A Field Guide</span></nav>
-    <span class="tag">Laravel · Laravel</span>
+    <span class="tag">Laravel · Inertia</span>
     <h1>Laravel Inertia SSR — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Laravel Inertia SSR — A Field Guide is the kind of work that pays for itself the first time you ship. The patterns have stabilised; the libraries have matured; the next decade of.</p>
-    <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>12 min read</span></div>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Inertia renders on the client by default, which is fine until a crawler or a link preview needs to read the page. Here's how to add server-side rendering to a Laravel + Vue Inertia app — the entry file, the build, the Node server, and the parts that bite in production.</p>
+    <div class="meta"><span>John Kihiu</span><time datetime="2026-06-29">Jun 29, 2026</time><span>9 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>Laravel Inertia SSR — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p><strong>Server-side rendering (SSR)</strong> is the piece of an Inertia app people reach for too late — usually the week a marketing page needs to rank, or a client pastes a link into WhatsApp and the preview comes back blank. Inertia's default is client-side rendering: the first response is a near-empty HTML shell plus a JSON <code>data-page</code> blob, and Vue paints the screen once the bundle loads. That is perfect for an authenticated dashboard and quietly useless for anything a crawler or a link unfurler needs to read. SSR closes that specific gap and nothing else.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is the framework contract, version support, failure handling, and testable application boundary. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="what-ssr-does">What SSR actually changes</h2>
+<p>With SSR enabled, Laravel hands the initial page props to a small long-running Node process, which renders your Vue components to a real HTML string and returns it inside the first response. The browser shows meaningful content immediately, then the client bundle <em>hydrates</em> that markup and takes over navigation. Nothing about your controllers, routes, or <code>Inertia::render()</code> calls changes — you are adding a second render target, not rewriting the app.</p>
+<p>Be honest about whether you need it. If every route sits behind authentication, SSR buys you a slightly faster first paint and little else, at the cost of a Node process to babysit. If you have public marketing pages, articles, product listings, or anything that must produce link previews and be indexed, SSR is the difference between working and not.</p>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<h2 id="entry">The SSR entry point</h2>
+<p>SSR needs its own entry file that mirrors <code>app.js</code> but renders on the server. It wraps <code>createInertiaApp</code> in <code>createServer</code>, which is the process Laravel talks to:</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JavaScript · resources/js/ssr.js</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import { createInertiaApp } from '@inertiajs/vue3'
+import createServer from '@inertiajs/vue3/server'
+import { renderToString } from 'vue/server-renderer'
+import { createSSRApp, h } from 'vue'
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+createServer((page) =>
+  createInertiaApp({
+    page,
+    render: renderToString,
+    resolve: (name) => {
+      const pages = import.meta.glob('./Pages/**/*.vue')
+      return pages[`./Pages/${name}.vue`]()
+    },
+    setup({ App, props, plugin }) {
+      return createSSRApp({ render: () => h(App, props) }).use(plugin)
+    },
+  }),
+)</code></pre>
+</div>
+<p>The one rule that catches everyone: this file runs in Node, not a browser. There is no <code>window</code>, no <code>document</code>, no <code>localStorage</code>. Any component or third-party library that touches those at import or setup time will crash the render — guard browser-only code inside <code>onMounted</code>, which only runs after hydration on the client.</p>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<h2 id="build">Wiring Vite and the build</h2>
+<p>Register the SSR entry with the Inertia Vite plugin and let it own the port and clustering:</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JavaScript · vite.config.js</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>import inertia from '@inertiajs/vite'
+import laravel from 'laravel-vite-plugin'
+import vue from '@vitejs/plugin-vue'
+import { defineConfig } from 'vite'
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+export default defineConfig({
+  plugins: [
+    laravel({ input: ['resources/js/app.js'], refresh: true }),
+    vue(),
+    inertia({
+      ssr: { entry: 'resources/js/ssr.js', port: 13714, cluster: true },
+    }),
+  ],
+})</code></pre>
+</div>
+<p>Then compile both bundles — the client bundle for the browser and the SSR bundle for Node — in one command:</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">JSON · package.json</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>{
+  "scripts": {
+    "build": "vite build &amp;&amp; vite build --ssr"
+  }
+}</code></pre>
+</div>
+<p><code>vite build --ssr</code> emits <code>bootstrap/ssr/ssr.js</code>, which is exactly what the Node server executes.</p>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<h2 id="run">Running the server</h2>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">Bash · build &amp; run</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code># Compile client + SSR bundles
+npm run build
+
+# Start, stop, and health-check the Node SSR server
+php artisan inertia:start-ssr
+php artisan inertia:stop-ssr
+php artisan inertia:check-ssr</code></pre>
+</div>
+<p>The SSR server listens on <strong>port 13714</strong> by default, and Laravel proxies each first render to it. Confirm it in config and keep a kill switch for when you need to rule SSR out during an incident:</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">PHP · config/inertia.php</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>'ssr' =&gt; [
+    'enabled' =&gt; true,
+    'runtime' =&gt; env('INERTIA_SSR_RUNTIME', 'node'),
+    // Fall back to client-side rendering instead of a 500 when a render fails
+    'throw_on_error' =&gt; (bool) env('INERTIA_SSR_THROW_ON_ERROR', false),
+],</code></pre>
+</div>
+
+<div class="callout"><strong>Head tags need one extra directive</strong><p>Server-rendered pages only carry the title and meta you set through Inertia's <code>&lt;Head&gt;</code> component, and only if your root Blade layout includes <code>@inertiaHead</code> inside its <code>&lt;head&gt;</code>. Miss it and your SSR HTML ships with no title or description — the exact SEO problem SSR was meant to solve.</p></div>
+
+<h2 id="production">Production, and the parts that bite</h2>
+<p>The Node process is long-running, so treat it like a queue worker, not a one-shot command. Supervise it, restart it on every deploy, and check it after boot:</p>
+<ul>
+<li>Launch <code>php artisan inertia:start-ssr</code> from Supervisor or a systemd unit — never by hand in a shell that dies with your SSH session.</li>
+<li>On deploy, in order: build assets, <code>inertia:stop-ssr</code>, then start again. A process left running against a stale bundle renders yesterday's markup.</li>
+<li>Watch memory. Because the process never restarts between requests, a leaking browser-only import or an unbounded module-level cache accumulates render after render.</li>
+<li>Fail open: with <code>throw_on_error</code> off, a render failure silently falls back to client-side rendering instead of erroring — good for uptime, but monitor the fallback rate or you will never notice SSR is down.</li>
+</ul>
+
+<h2 id="recommendation">The short version</h2>
+<p>Turn SSR on for the pages the public and crawlers see; leave it off if the app is entirely behind a login and you only care about paint speed. Add the <code>ssr.js</code> entry, build both bundles, run the Node server under a supervisor on port 13714, and put <code>@inertiaHead</code> in your layout. It is a half-day of setup that pays for itself the first time a shared link shows a real title and description instead of an empty shell.</p>
 
     <div class="related-articles">
       <h3>Related reading</h3>

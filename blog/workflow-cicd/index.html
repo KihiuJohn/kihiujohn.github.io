@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CI/CD for Workflows — A Field Guide | John Kihiu</title>
-<meta name="description" content="CI/CD for Workflows — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
-<meta name="keywords" content="Acumatica workflow, Acumatica cicd, John Kihiu">
+<meta name="description" content="CI/CD for automation workflows: keep definitions in version control, validate and test in a pipeline, promote through environments, and make deploys reversible.">
+<meta name="keywords" content="workflow CI/CD, automation pipeline, deployment, workflow as code, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/workflow-cicd/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="CI/CD for Workflows — A Field Guide">
-<meta property="og:description" content="CI/CD for Workflows — A Field Guide is the work that turns a collection of business systems into a coherent operation.">
+<meta property="og:description" content="CI/CD for automation workflows: keep definitions in version control, validate and test in a pipeline, promote through environments, and make deploys reversible.">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/workflow-cicd.svg">
 <meta property="og:image:alt" content="CI/CD for Workflows — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/workflow-cicd/">
@@ -22,7 +22,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/workflow-cicd.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"CI/CD for Workflows — A Field Guide","description":"CI/CD for Workflows — A Field Guide is the work that turns a collection of business systems into a coherent operation.","image":"https://kihiujohn.github.io/assets/og/workflow-cicd.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/workflow-cicd/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"CI/CD for Workflows — A Field Guide","description":"CI/CD for automation workflows: keep definitions in version control, validate and test in a pipeline, promote through environments, and make deploys reversible.","image":"https://kihiujohn.github.io/assets/og/workflow-cicd.svg","datePublished":"2026-06-16","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/workflow-cicd/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"CI/CD for Workflows — A Field Guide","item":"https://kihiujohn.github.io/blog/workflow-cicd/"}]}
@@ -86,36 +86,52 @@
 <header class="post-head">
   <div class="container">
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">CI/CD for Workflows — A Field Guide</span></nav>
-    <span class="tag">DevOps · Workflow</span>
+    <span class="tag">DevOps · Workflows</span>
     <h1>CI/CD for Workflows — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">CI/CD for Workflows — A Field Guide is the work that turns a collection of business systems into a coherent operation.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Automation deserves the same delivery discipline as application code. CI/CD for workflows means no more editing live in production and hoping the change holds.</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-16">Jun 16, 2026</time><span>12 min read</span></div>
   </div>
 </header>
 <main class="article">
   <div class="container">
 
-<p><strong>CI/CD for Workflows — A Field Guide</strong> is best approached as a decision about evidence and ownership, not as a collection of fashionable implementation patterns. The useful first step is to name the business event, the record that proves it happened, the person who can approve or correct it, and the system that remains accountable when something fails.</p>
+<p>Workflows that run real business processes are production software, yet they are often changed the least safely of anything in the stack — edited directly in a live UI, with no test, no review, and no rollback. Applying CI/CD to workflows closes that gap: changes are versioned, validated, tested, and promoted through environments the same way your services are.</p>
 
-<h2 id="scope">Define the boundary before choosing the tool</h2>
-<p>For this topic, the important boundary is idempotency, retries, ordering, dead-letter handling, auditability, and a human recovery path. Write that boundary down with a normal path, an exception path, and a recovery owner. A short decision record is more valuable than a long feature list because it makes assumptions visible to the developer, operator, and reviewer who will inherit the system.</p>
+<h2 id="source">Definitions in version control</h2>
 
-<h2 id="implementation">Build the smallest verifiable slice</h2>
-<p>Start with one representative transaction and carry it from input to persisted result, notification, report, and rollback or correction. Keep the first slice observable: record correlation identifiers, validation failures, retry state, and the final owner. Do not claim that a framework or platform provides a control merely because it can be extended to provide one.</p>
-<ul><li>Use documented extension points before private hooks or direct data edits.</li><li>Make authorization and tenant or account context explicit at every boundary.</li><li>Keep external calls idempotent and retain enough evidence to reconcile them later.</li><li>Test an invalid input, a duplicate message, a timeout, and a partial completion.</li></ul>
+<p>CI/CD starts with the workflow definition as code in a repository — the foundation everything else builds on. Export the workflow to JSON or YAML, commit it, and make the repo the source of truth. Without this, there is nothing for a pipeline to act on; with it, every subsequent stage becomes possible.</p>
 
-<div class="callout"><strong>What to verify before production</strong><p>Check the current official documentation and release notes, run the workflow with production-shaped data, and record which behavior is standard, configured, integrated, or custom. That distinction is what keeps a useful implementation from becoming an unsupported promise.</p></div>
+<h2 id="pipeline">Validate, test, promote</h2>
 
-<h2 id="failure-modes">Design for the failure users actually see</h2>
-<p>The happy path is rarely the expensive part. The expensive part is an ambiguous failure: a request that may have succeeded, a record that was created twice, a report that uses stale data, or an approval that cannot be explained. Give each failure a visible state, a safe retry or correction path, and an alert that reaches a named owner. If the only recovery method is editing a database by hand, the design is not finished.</p>
+<p>On each change, the pipeline runs the same gates you would want for any deploy:</p>
 
-<h2 id="review">Review the result with evidence</h2>
-<ol><li>Compare the result with an authoritative source or reconciliation report.</li><li>Capture the permission set used by each role, including denied actions.</li><li>Measure latency, volume, cost, and correction rate with realistic data.</li><li>Document the upgrade, migration, and rollback procedure before launch.</li></ol>
+<ol><li>Validate — lint the definition; catch structural errors, missing credentials references, and broken step links before anything runs.</li><li>Test — run step-level and mocked tests, and an end-to-end pass against a sandbox environment.</li><li>Promote — deploy the exact reviewed definition to staging, verify, then to production; the same artifact moves through each stage.</li></ol>
 
-<h2 id="recommendation">Practical recommendation</h2>
-<p>Use the official source material as the contract, a small end-to-end slice as the proof, and operational evidence as the release gate. Add custom behavior only when the business rule is clear, the ownership is explicit, and the failure path is supportable. That approach is less dramatic than a “definitive” template, but it is much easier to maintain when the product, platform, or business process changes.</p>
+<div class="code-block">
+  <div class="code-header"><span class="code-lang">YAML · a workflow CI pipeline</span><button class="copy-btn" type="button">Copy</button></div>
+<pre><code>on: pull_request
+jobs:
+  validate:
+    steps:
+      - run: workflow lint workflows/*.json          # structural checks
+      - run: pytest tests/workflows                  # step + mocked tests
+      - run: workflow test --env sandbox order-sync   # end-to-end
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - run: workflow import --env staging    workflows/order-sync.json
+      - run: workflow import --env production workflows/order-sync.json</code></pre>
+</div>
 
-    <div class="related-articles">
+<h2 id="reversible">Make deploys reversible</h2>
+
+<p>The pipeline must be able to go backwards. Because the previous definition is a prior commit, a rollback is redeploying that commit — automated, fast, and certain. Design the promotion step so re-importing an older version is a first-class operation, not a manual scramble. A deploy you cannot reverse is a deploy you will be afraid to make.</p>
+
+<div class="callout"><strong>Separate credentials from definitions</strong><p>Workflow definitions reference credentials; they must never contain them. Keep secrets in the platform's credential store or a secret manager, referenced by name, so the same definition promotes cleanly across environments and a committed file never leaks a key. Environment-specific config lives outside the versioned definition.</p></div>
+
+<p>CI/CD for workflows is version-controlled definitions, a pipeline that validates and tests before it promotes, the same artifact moving through environments, and reversible deploys. It replaces "edit in production and watch" with a delivery process that makes changing critical automation routine instead of risky.</p>
+
+        <div class="related-articles">
       <h3>Related reading</h3>
       <ul>
       <li><a href="/blog/acumatica-ap-vendor-bill-automation/">Acumatica AP — Vendor Bill Automation</a></li>
