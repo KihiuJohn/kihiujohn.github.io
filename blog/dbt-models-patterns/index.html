@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>dbt Models Patterns — A Field Guide | John Kihiu</title>
-<meta name="description" content="dbt Models Patterns — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta name="description" content="Every dbt project eventually converges on the same three-layer structure, not because dbt enforces it, but because every project that skips it ends up hard…">
 <meta name="keywords" content="Acumatica dbt, Acumatica models, Acumatica patterns, John Kihiu">
 <meta name="author" content="John Kihiu">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://kihiujohn.github.io/blog/dbt-models-patterns/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="dbt Models Patterns — A Field Guide">
-<meta property="og:description" content="dbt Models Patterns — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.">
+<meta property="og:description" content="Every dbt project eventually converges on the same three-layer structure, not because dbt enforces it, but because every project that skips it ends up hard…">
 <meta property="og:image" content="https://kihiujohn.github.io/assets/og/dbt-models-patterns.svg">
 <meta property="og:image:alt" content="dbt Models Patterns — A Field Guide — John Kihiu">
 <meta property="og:url" content="https://kihiujohn.github.io/blog/dbt-models-patterns/">
@@ -23,7 +23,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://kihiujohn.github.io/assets/og/dbt-models-patterns.svg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"TechArticle","headline":"dbt Models Patterns — A Field Guide","description":"dbt Models Patterns — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;quot; is the same in.","image":"https://kihiujohn.github.io/assets/og/dbt-models-patterns.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/dbt-models-patterns/"}}
+{"@context":"https://schema.org","@type":"TechArticle","headline":"dbt Models Patterns — A Field Guide","description":"Every dbt project eventually converges on the same three-layer structure, not because dbt enforces it, but because every project that skips it ends up hard\u2026","image":"https://kihiujohn.github.io/assets/og/dbt-models-patterns.svg","datePublished":"2026-06-30","author":{"@type":"Person","name":"John Kihiu","url":"https://kihiujohn.github.io/"},"publisher":{"@type":"Person","name":"John Kihiu"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://kihiujohn.github.io/blog/dbt-models-patterns/"}}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://kihiujohn.github.io/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://kihiujohn.github.io/blog/"},{"@type":"ListItem","position":3,"name":"dbt Models Patterns — A Field Guide","item":"https://kihiujohn.github.io/blog/dbt-models-patterns/"}]}
@@ -89,7 +89,7 @@
     <nav class="breadcrumb"><a href="/">Home</a><span class="sep">/</span><a href="/blog/">Blog</a><span class="sep">/</span><span style="color:var(--text);font-weight:500">dbt Models Patterns — A Field Guide</span></nav>
     <span class="tag">Data / ML · Dbt</span>
     <h1>dbt Models Patterns — A Field Guide</h1>
-    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">dbt Models Patterns — A Field Guide is the work that turns raw data into decisions. The pipeline from &amp;amp;amp;amp;amp;amp;amp;quot;we have data&amp;amp;amp;amp;amp;amp;amp;quot; to &amp;amp;amp;amp;amp;amp;amp;quot;we have a model that runs in production&amp;amp;amp;amp;amp;amp;amp;quot; is the same in.</p>
+    <p style="font-size:clamp(1rem,1.4vw,1.1rem);color:var(--muted);max-width:60ch;line-height:1.7;margin-top:0.5rem">Every dbt project eventually converges on the same three-layer structure, not because dbt enforces it, but because every project that skips it ends up hard…</p>
     <div class="meta"><span>John Kihiu</span><time datetime="2026-06-30">Jun 30, 2026</time><span>12 min read</span></div>
   </div>
 </header>
@@ -139,6 +139,12 @@ left join {{ ref('stg_customers') }} c
   <tr><td>intermediate</td><td>view / ephemeral</td><td>Only other dbt models</td></tr>
   <tr><td>marts</td><td>table / incremental</td><td>BI tools, analysts, exposures</td></tr>
 </table>
+<h2 id="field-notes">Field notes: model layers for receivables</h2>
+<p>A receivables warehouse usually settles into four useful layers: staging for one-to-one cleaning, intermediate for joins and business logic, marts for facts and dimensions, and a thin reporting layer for the handful of shapes a BI tool expects. The reporting layer is optional; the first three are not. Skipping intermediate models is how a staging model ends up with twelve joins and no owner.</p>
+<p>Name facts by grain and dimensions by entity: <code>fct_invoice_line</code>, <code>fct_gl_entry</code>, <code>dim_customer</code>, <code>dim_item</code>. Keep the invoice header total and the line-level total as separate facts until a test proves they reconcile. Use <code>ref()</code> for every dependency and let dbt build the DAG; a hard-coded schema name is a future outage.</p>
+<p>Model contracts and access modifiers are worth adopting once more than one team queries the warehouse. Declare column names and types on the marts, and mark intermediate models <code>access: private</code> so a dashboard cannot quietly depend on a model that was never meant to be public. The constraint is not bureaucracy; it is the difference between a refactor and a breaking change.</p>
+<p>Finally, keep the model count honest. A mart with forty columns that nobody queries is maintenance debt. Review usage quarterly and delete or deprecate what has no consumer. dbt makes it easy to add models; discipline is what keeps the project navigable.</p>
+
 <h2 id="wrapping-up">Wrapping up</h2>
 <p>The staging/intermediate/marts split is not bureaucracy — it is what keeps a rename in a raw source from becoming a company-wide incident. Enforce the boundary that only marts get queried outside dbt, and the rest of the layering falls out naturally as the project grows.</p>
 <div class="related-articles">

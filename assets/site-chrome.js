@@ -235,6 +235,7 @@
         <li><a href="/services/" data-link="services" class="${PAGE==='services'?'active':''}">Services</a></li>
         <li><a href="/quote/" data-link="quote" class="${PAGE==='quote'?'active':''}">Quote</a></li>
         <li><a href="/integrations/" data-link="integrations" class="${PAGE==='integrations'?'active':''}">Integrations</a></li>
+        <li><a href="/demos/" data-link="demos" class="${PAGE==='demos'?'active':''}">Demos</a></li>
         <li><a href="/blog/" data-link="blog" class="${PAGE==='blog'||PAGE==='post'?'active':''}">Blog</a></li>
         <li><a href="/CV/" data-link="cv" class="${PAGE==='cv'?'active':''}">CV</a></li>
         <li>${link('contact', 'Contact', '#contact')}</li>
@@ -251,6 +252,7 @@
   <a href="/services/" data-link="services" class="${PAGE==='services'?'active':''}">Services</a>
   <a href="/quote/" data-link="quote" class="${PAGE==='quote'?'active':''}">Quote</a>
   <a href="/integrations/" data-link="integrations" class="${PAGE==='integrations'?'active':''}">Integrations</a>
+  <a href="/demos/" data-link="demos" class="${PAGE==='demos'?'active':''}">Demos</a>
   <a href="/blog/" data-link="blog" class="${PAGE==='blog'||PAGE==='post'?'active':''}">Blog</a>
   <a href="/CV/" data-link="cv" class="${PAGE==='cv'?'active':''}">CV</a>
   ${link('contact', 'Contact', '#contact')}
@@ -273,11 +275,11 @@
       </div>
       <div class="ft-col">
         <h4>Sitemap</h4>
-        <a href="/">Home</a><a href="/#about">About</a><a href="/#work">Work</a><a href="/services/">Services</a><a href="/quote/">Get a quote</a><a href="/integrations/">Integrations</a><a href="/blog/">Blog</a><a href="/CV/">CV</a><a href="/#contact">Contact</a>
+        <a href="/">Home</a><a href="/#about">About</a><a href="/#work">Work</a><a href="/services/">Services</a><a href="/quote/">Get a quote</a><a href="/integrations/">Integrations</a><a href="/demos/">Demos</a><a href="/blog/">Blog</a><a href="/CV/">CV</a><a href="/#contact">Contact</a>
       </div>
       <div class="ft-col">
         <h4>What I build</h4>
-        <a href="/#work">Acumatica ERP customisations</a><a href="/#work">Laravel web platforms</a><a href="/integrations/">Tax fiscalisation</a><a href="/#work">REST API integrations</a><a href="/#work">Custom dashboards &amp; reports</a><a href="/#work">Process automation</a>
+        <a href="/#work">Acumatica ERP customisations</a><a href="/#work">Laravel web platforms</a><a href="/demos/">Fiscalisation demos</a><a href="/integrations/">Tax fiscalisation</a><a href="/#work">REST API integrations</a><a href="/#work">Custom dashboards &amp; reports</a><a href="/#work">Process automation</a>
       </div>
       <div class="ft-col">
         <h4>Connect</h4>
