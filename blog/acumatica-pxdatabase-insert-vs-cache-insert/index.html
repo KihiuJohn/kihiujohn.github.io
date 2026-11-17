@@ -95,7 +95,6 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>Every so often I get asked to speed up a bulk data load - tens of thousands of rows, and the client's existing customization is doing it through the normal graph, one <code>cache.Insert()</code> and <code>Base.Save()</code> per record. It works, and it is also the slowest possible way to get those rows into the database, because every one of those inserts pays for the entire event pipeline: FieldDefaulting, FieldVerifying, FieldUpdated, RowInserting, RowInserted, RowPersisting, and every attribute's validation logic, per field, per row. <code>PXDatabase.Insert</code> is the escape hatch, and understanding exactly what it skips is the whole reason to reach for it deliberately instead of by accident.</p>
 
 <h2 id="what-cache-insert-buys-you">Cache.Insert: the whole framework, and its cost</h2>
 <p><code>cache.Insert(row)</code> puts a row into the cache with status Inserted and fires the complete event pipeline immediately - defaults get applied, attributes validate, your event handlers run. This is correct, and necessary, for anything a real user does through a screen, because the business rules encoded in those events are exactly what keeps the data consistent. The cost is real: dozens of small operations per field, per row, all in-process but not free, and none of it touches SQL until <code>Base.Save()</code> actually commits the transaction.</p>

@@ -53,6 +53,7 @@
    body[data-page="post"] main.article > .container > .callout,
    body[data-page="post"] main.article > .container > .code-block,
    body[data-page="post"] main.article > .container > .source-note { max-width: var(--post-measure); margin-left: 0; margin-right: 0; }
+   body[data-page="post"] main.article > .container > h2:first-child { margin-top: 1.5rem; }
    body[data-page="post"] main.article h2 { margin-top: clamp(3rem, 7vw, 5.5rem); padding-bottom: .75rem; border-bottom: 1px solid var(--chrome-border); font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.035em; }
    body[data-page="post"] main.article h2::before { content: none; }
    body[data-page="post"] main.article a { color: var(--post-accent); border-bottom-color: var(--post-accent-soft); }

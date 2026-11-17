@@ -95,7 +95,6 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>A client's inventory customization had a rule: deleting a transaction line should also release a reserved quantity elsewhere, and roll back an internal counter it had incremented on insert. The first implementation put that logic in <code>RowDeleted</code>. It mostly worked, until a user deleted a line, the system correctly decremented the counter, and then the user hit Cancel before saving - leaving the counter permanently wrong relative to a delete that, from the database's point of view, never actually happened. That's the whole story of RowDeleting vs RowDeleted in one bug: one of them fires on a delete that might still be undone, and the other doesn't run until it's committed, and picking wrong means your side effects and your data disagree.</p>
 
 <h2 id="the-actual-firing-semantics">RowDeleting: before removal, cancellable. RowDeleted: after removal, not cancellable, still not committed</h2>
 <p>Both events fire when a row is removed from the cache - via a user clicking a grid's delete button, or code calling <code>cache.Delete(row)</code> - but at genuinely different moments relative to that removal:</p>

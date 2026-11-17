@@ -95,7 +95,6 @@
 </header>
 <main class="article">
   <div class="container">
-    <p>I still see this question in code review more than almost any other: should this line read from <code>Base.Caches[typeof(ARInvoice)]</code> or run a fresh <code>PXSelect</code>? They look interchangeable in a lot of tutorials, and in a narrow sense they even return the same rows sometimes. But they answer different questions, and picking the wrong one is how I've seen customizations silently show stale data, or worse, hammer the database inside a loop that should have been a single cache lookup.</p>
 
 <h2 id="what-each-actually-is">PXCache is memory, PXSelect is a query</h2>
 <p><code>PXCache</code> is the in-memory, per-graph-instance object holding rows the graph has already loaded or touched this session - every row it knows about, tagged Inserted/Updated/Deleted/Unchanged, available without touching SQL Server at all. <code>PXSelect</code> (and its BQL cousins) is a query definition that, when you call <code>.Select(...)</code>, executes against the database - but with an important caveat: BQL selects are cache-aware too. A <code>PXSelect</code> against a DAC the graph already has cached rows for will return cache-tracked instances for any row already present, and only round-trip to SQL for rows it doesn't yet hold. So the two aren't strictly "memory vs database" - PXSelect is "database, filtered through the cache," while direct cache access is "memory, no query at all."</p>
